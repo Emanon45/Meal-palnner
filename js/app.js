@@ -34,7 +34,7 @@
       'Super C': { weightedScore: 1.0, proteinScore: 1.0, carbProduceScore: 1.0, matchedDeals: 0 }
     },
     userProfile: {
-      description: 'High-Protein Batch Prep • Zero Added Oil',
+      description: 'High-Protein Batch Prep',
       neighborhood: 'Canada',
       postalCode: 'H1W',
       zeroAddedOil: true
@@ -243,6 +243,11 @@
       selectedDay: 1,
       lunchSwap: 'ground_chicken',
       dinnerSwap: 'pork_loin_lean',
+      splitWeekVariety: false,
+      lunchSwapAlt: 'tuna_patties',
+      dinnerSwapAlt: 'chicken_breast',
+      hideInCart: false,
+      compactAisleMode: true,
       eatenByDay: {},
       feedback: {
         breakfast: { rating: null, note: '' },
@@ -254,7 +259,8 @@
       inCart: {},
       frozenMealsOnHand: 0,
       postalCode: 'H1W',
-      profileDescription: 'High-Protein Batch Prep • Zero Added Oil',
+      profileDescription: 'High-Protein Batch Prep',
+      customMealJsonRaw: '',
       timers: {},
       lastSyncedAt: null
     };
@@ -282,6 +288,8 @@
     var validDinner = ['pork_loin_lean', 'pork_shoulder', 'chicken_breast'];
     var lunchSwap = validLunch.indexOf(raw.lunchSwap) !== -1 ? raw.lunchSwap : def.lunchSwap;
     var dinnerSwap = validDinner.indexOf(raw.dinnerSwap) !== -1 ? raw.dinnerSwap : def.dinnerSwap;
+    var lunchSwapAlt = validLunch.indexOf(raw.lunchSwapAlt) !== -1 ? raw.lunchSwapAlt : def.lunchSwapAlt;
+    var dinnerSwapAlt = validDinner.indexOf(raw.dinnerSwapAlt) !== -1 ? raw.dinnerSwapAlt : def.dinnerSwapAlt;
 
     var eatenByDay = {};
     if (raw.eatenByDay && typeof raw.eatenByDay === 'object' && !Array.isArray(raw.eatenByDay)) {
@@ -373,6 +381,11 @@
       selectedDay: selectedDay,
       lunchSwap: lunchSwap,
       dinnerSwap: dinnerSwap,
+      splitWeekVariety: Boolean(raw.splitWeekVariety),
+      lunchSwapAlt: lunchSwapAlt,
+      dinnerSwapAlt: dinnerSwapAlt,
+      hideInCart: Boolean(raw.hideInCart),
+      compactAisleMode: raw.compactAisleMode === undefined ? true : Boolean(raw.compactAisleMode),
       eatenByDay: eatenByDay,
       feedback: feedback,
       haveAtHome: haveAtHome,
@@ -380,8 +393,9 @@
       frozenMealsOnHand: clampInt(raw.frozenMealsOnHand, 0, horizonDays, 0),
       postalCode: normalizePostalCode(raw.postalCode),
       profileDescription: (typeof raw.profileDescription === 'string' && raw.profileDescription.trim())
-        ? raw.profileDescription.trim().slice(0, 140)
+        ? raw.profileDescription.trim().replace(/\s*•\s*Zero Added Oil/i, '').slice(0, 140)
         : def.profileDescription,
+      customMealJsonRaw: typeof raw.customMealJsonRaw === 'string' ? raw.customMealJsonRaw : '',
       timers: timers,
       lastSyncedAt: typeof raw.lastSyncedAt === 'string' ? raw.lastSyncedAt : null
     };
@@ -410,9 +424,126 @@
   var currentDailyPlan = null;
   var currentScaledPlan = null;
   var syncMessageText = '';
+  var customJsonStatusText = '';
   var lastTimerStatusText = '';
   var settingsBuilt = false;
   var timerIntervalId = null;
+
+  function applyCustomMealJsonOverlay(targetData, rawJsonStr) {
+    if (!rawJsonStr || typeof rawJsonStr !== 'string' || !rawJsonStr.trim()) return false;
+    try {
+      var cleaned = rawJsonStr.trim()
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+      var parsed = JSON.parse(cleaned);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+
+      var srcTemplates = (parsed.mealTemplates && typeof parsed.mealTemplates === 'object') ? parsed.mealTemplates : parsed;
+      if (!targetData.mealTemplates || typeof targetData.mealTemplates !== 'object') {
+        targetData.mealTemplates = JSON.parse(JSON.stringify(FALLBACK_META.mealTemplates));
+      }
+
+      if (typeof srcTemplates.weeklyTheme === 'string' && srcTemplates.weeklyTheme.trim()) {
+        targetData.mealTemplates.weeklyTheme = srcTemplates.weeklyTheme.trim();
+      }
+      if (typeof srcTemplates.produceRotationNote === 'string' && srcTemplates.produceRotationNote.trim()) {
+        targetData.mealTemplates.produceRotationNote = srcTemplates.produceRotationNote.trim();
+      }
+      if (typeof srcTemplates.fruitRotationNote === 'string' && srcTemplates.fruitRotationNote.trim()) {
+        targetData.mealTemplates.fruitRotationNote = srcTemplates.fruitRotationNote.trim();
+      }
+
+      var customMeals = Array.isArray(srcTemplates.meals)
+        ? srcTemplates.meals
+        : (Array.isArray(parsed.meals) ? parsed.meals : null);
+      if (customMeals) {
+        if (!Array.isArray(targetData.mealTemplates.meals) || targetData.mealTemplates.meals.length === 0) {
+          targetData.mealTemplates.meals = [
+            { id: 'breakfast', slot: 'Breakfast', title: 'Greek Scramble & Grelot Potatoes', cookingMethod: 'Skillet scramble + crispy air-fried potatoes', seasoningTwist: 'Oregano, lemon zest & green onion', swappable: false },
+            { id: 'lunch', slot: 'Lunch', title: 'Poulet Rouge / Boustan Bowl', cookingMethod: 'Seared over steamed jasmine rice with slaw & tzatziki', seasoningTwist: 'Smoked paprika, sumac & garlic', swappable: true },
+            { id: 'dinner', slot: 'Dinner', title: 'Malagasy Henakisoa sy Tsaramaso', cookingMethod: 'Slow-braised with white beans, diced tomatoes & ginger', seasoningTwist: 'Fresh ginger, garlic & thyme', swappable: true },
+            { id: 'snack', slot: 'Snack', title: "0% Siggi's Skyr Power Bowl", cookingMethod: 'Chilled skyr with whey isolate & fruit', seasoningTwist: 'Cinnamon & vanilla', swappable: false }
+          ];
+        }
+        customMeals.forEach(function (cm) {
+          if (!cm || typeof cm !== 'object' || !cm.id) return;
+          targetData.mealTemplates.meals.forEach(function (tm) {
+            if (tm.id === cm.id) {
+              if (typeof cm.title === 'string' && cm.title.trim()) tm.title = cm.title.trim();
+              if (typeof cm.cookingMethod === 'string' && cm.cookingMethod.trim()) tm.cookingMethod = cm.cookingMethod.trim();
+              if (typeof cm.seasoningTwist === 'string' && cm.seasoningTwist.trim()) tm.seasoningTwist = cm.seasoningTwist.trim();
+            }
+          });
+        });
+      }
+
+      var customSteps = Array.isArray(parsed.prepTimeline) ? parsed.prepTimeline : null;
+      if (customSteps && customSteps.length > 0) {
+        targetData.prepTimeline = customSteps.map(function (st, idx) {
+          var durMin = clampInt(st.durationMinutes, 1, 240, 15);
+          return {
+            id: typeof st.id === 'string' && st.id.trim() ? st.id.trim() : ('step_' + (idx + 1)),
+            order: idx + 1,
+            title: typeof st.title === 'string' && st.title.trim() ? st.title.trim() : ('Step ' + (idx + 1)),
+            station: typeof st.station === 'string' && st.station.trim() ? st.station.trim() : 'Kitchen Station',
+            startMinute: clampInt(st.startMinute, 0, 240, idx * 5),
+            durationMinutes: durMin,
+            timerSeconds: clampInt(st.timerSeconds, 10, 86400, durMin * 60),
+            parallelNote: typeof st.parallelNote === 'string' ? st.parallelNote.trim() : '',
+            zeroOilNote: ''
+          };
+        });
+      }
+      return true;
+    } catch (_err) {
+      return false;
+    }
+  }
+
+  function buildGeminiMealPrompt() {
+    var disliked = [];
+    var liked = [];
+    MEAL_SLOTS.forEach(function (slot) {
+      var fb = appState.feedback && appState.feedback[slot];
+      if (!fb) return;
+      var label = slot.charAt(0).toUpperCase() + slot.slice(1);
+      if (fb.rating === 'down') disliked.push(label + (fb.note ? ' (' + fb.note + ')' : ''));
+      if (fb.rating === 'up') liked.push(label + (fb.note ? ' (' + fb.note + ')' : ''));
+      else if (fb.note && fb.rating !== 'down') liked.push(label + ' note: ' + fb.note);
+    });
+    var feedbackLine = '';
+    if (disliked.length > 0) feedbackLine += '\nMeals I want to change / replace: ' + disliked.join(', ') + '.';
+    if (liked.length > 0) feedbackLine += '\nMeals/notes I liked: ' + liked.join(', ') + '.';
+
+    return [
+      'Generate a fresh weekly meal prep menu & parallel cooking timeline for my Meal Plan app.',
+      'Target Macros: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.',
+      'Winning Grocery Store: ' + (appData.winningStore || 'Super C') + ' (' + appState.postalCode + ').' + feedbackLine,
+      '',
+      'Return ONLY a valid JSON object (no markdown commentary) with this exact structure:',
+      '{',
+      '  "weeklyTheme": "Short catchy weekly culinary theme",',
+      '  "meals": [',
+      '    { "id": "breakfast", "title": "New Breakfast Name", "cookingMethod": "How to cook it", "seasoningTwist": "Spices, herbs & sauce" },',
+      '    { "id": "lunch", "title": "New Lunch Bowl Name", "cookingMethod": "How to cook it", "seasoningTwist": "Spices, herbs & sauce" },',
+      '    { "id": "dinner", "title": "New Dinner Name", "cookingMethod": "How to cook it", "seasoningTwist": "Spices, herbs & sauce" },',
+      '    { "id": "snack", "title": "New Snack Name", "cookingMethod": "How to prep it", "seasoningTwist": "Flavorings & toppings" }',
+      '  ],',
+      '  "prepTimeline": [',
+      '    { "id": "step_1", "order": 1, "title": "Step 1 Title", "station": "Dutch Oven / Rice Cooker", "startMinute": 0, "durationMinutes": 35, "timerSeconds": 2100, "parallelNote": "What to do while this cooks" },',
+      '    { "id": "step_2", "order": 2, "title": "Step 2 Title", "station": "Air Fryer / Oven", "startMinute": 5, "durationMinutes": 20, "timerSeconds": 1200, "parallelNote": "What to do in parallel" },',
+      '    { "id": "step_3", "order": 3, "title": "Step 3 Title", "station": "Skillet", "startMinute": 10, "durationMinutes": 12, "timerSeconds": 720, "parallelNote": "What to do in parallel" },',
+      '    { "id": "step_4", "order": 4, "title": "Step 4 Title", "station": "Prep Board", "startMinute": 15, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Chop veggies & sauces" },',
+      '    { "id": "step_5", "order": 5, "title": "Step 5 Title", "station": "Counter", "startMinute": 30, "durationMinutes": 10, "timerSeconds": 600, "parallelNote": "Portion into Fridge (Days 1-4) & Freezer (Day 5+)" }',
+      '  ]',
+      '}'
+    ].join('\n');
+  }
+
+  if (appState.customMealJsonRaw) {
+    applyCustomMealJsonOverlay(appData, appState.customMealJsonRaw);
+  }
 
   function saveState() {
     safeStorageSet(STORAGE_STATE_KEY, appState);
@@ -467,14 +598,32 @@
   function recomputePlan() {
     var engine = getEngine();
     if (!engine) return;
-    currentDailyPlan = engine.solveDailyPortions(appData, {
+    var day = clampInt(appState.selectedDay, 1, appState.horizonDays, 1);
+    var isAltDay = Boolean(appState.splitWeekVariety && appState.horizonDays > 1 && day % 2 === 0);
+
+    var primaryDailyPlan = engine.solveDailyPortions(appData, {
       preset: appState.preset === 'custom' ? 'cut' : appState.preset,
       targets: appState.targets,
       lunchSwap: appState.lunchSwap,
       dinnerSwap: appState.dinnerSwap
     });
-    currentScaledPlan = engine.scaleToHorizon(currentDailyPlan, appData, {
+
+    var altDailyPlan = null;
+    if (appState.splitWeekVariety && appState.horizonDays > 1) {
+      altDailyPlan = engine.solveDailyPortions(appData, {
+        preset: appState.preset === 'custom' ? 'cut' : appState.preset,
+        targets: appState.targets,
+        lunchSwap: appState.lunchSwapAlt,
+        dinnerSwap: appState.dinnerSwapAlt
+      });
+    }
+
+    currentDailyPlan = (isAltDay && altDailyPlan) ? altDailyPlan : primaryDailyPlan;
+
+    currentScaledPlan = engine.scaleToHorizon(primaryDailyPlan, appData, {
       days: appState.horizonDays,
+      secondaryDailyPlan: altDailyPlan,
+      secondaryDays: altDailyPlan ? Math.floor(appState.horizonDays / 2) : 0,
       haveAtHome: appState.haveAtHome,
       frozenMealsOnHand: Math.min(appState.horizonDays, appState.frozenMealsOnHand)
     });
@@ -600,51 +749,179 @@
 
     var day = clampInt(appState.selectedDay, 1, appState.horizonDays, 1);
     appState.selectedDay = day;
+    var isAltDay = Boolean(appState.splitWeekVariety && appState.horizonDays > 1 && day % 2 === 0);
     var eatenTotals = computeEatenTotals(currentDailyPlan, day);
     var targets = currentDailyPlan.targets;
     var eatenMap = getDayEatenMap(day);
     var storageLabel = day <= 4 ? 'Fridge (Days 1–4)' : 'Freezer (Day 5+)';
+    var presets = getGoalPresets(appData);
 
     var frag = document.createDocumentFragment();
 
-    // 1. Controls & Day Switcher Card
+    // 1. Controls, Quick-Bar (Horizon + Goal Preset) & Compact Day Stepper Card
     var ctrlCard = el('div', 'card space-stack');
-    var themeRow = el('div', 'flex-wrap-row justify-between');
-    var themeTitle = el('h2', 'text-base font-bold text-slate-100', 'Day ' + day + ' of ' + appState.horizonDays + ' Meal Plan');
-    var zeroOilBadge = el('span', 'badge radar-historic', 'Zero Added Oil (0g cooking oil)');
-    themeRow.appendChild(themeTitle);
-    themeRow.appendChild(zeroOilBadge);
-    ctrlCard.appendChild(themeRow);
+
+    // Quick-Bar Row 1: Horizon & Goal Presets right on Meals Tab
+    var quickBar = el('div', 'subcard space-y-2');
+    var quickTop = el('div', 'flex-wrap-row justify-between');
+    quickTop.appendChild(el('span', 'text-xs font-bold text-emerald-300', 'Quick Prep & Goal Bar'));
+    var varietyBtn = el('button', 'pill-btn text-xs', appState.splitWeekVariety ? 'Split-Week Variety: ON' : 'Split-Week Variety: OFF');
+    varietyBtn.type = 'button';
+    varietyBtn.id = 'meals-variety-toggle';
+    varietyBtn.setAttribute('aria-pressed', appState.splitWeekVariety ? 'true' : 'false');
+    varietyBtn.addEventListener('click', function () {
+      appState.splitWeekVariety = !appState.splitWeekVariety;
+      saveState();
+      recomputePlan();
+      renderMealsTab();
+      renderPrepTab();
+      renderGroceriesTab();
+    });
+    quickTop.appendChild(varietyBtn);
+    quickBar.appendChild(quickTop);
+
+    var quickHorizonRow = el('div', 'flex-wrap-row');
+    quickHorizonRow.appendChild(el('span', 'text-xs font-semibold text-slate-300', 'Horizon:'));
+    [3, 7, 14].forEach(function (hDays) {
+      var hBtn = el('button', 'pill-btn text-xs', hDays + 'd');
+      hBtn.type = 'button';
+      hBtn.setAttribute('aria-pressed', appState.horizonDays === hDays ? 'true' : 'false');
+      hBtn.addEventListener('click', function () {
+        appState.horizonDays = hDays;
+        appState.selectedDay = clampInt(appState.selectedDay, 1, hDays, 1);
+        appState.frozenMealsOnHand = clampInt(appState.frozenMealsOnHand, 0, hDays, 0);
+        saveState();
+        recomputePlan();
+        updateSettingsControlsInPlace();
+        renderMealsTab();
+        renderPrepTab();
+        renderGroceriesTab();
+      });
+      quickHorizonRow.appendChild(hBtn);
+    });
+    quickBar.appendChild(quickHorizonRow);
+
+    var quickPresetRow = el('div', 'flex-wrap-row');
+    quickPresetRow.appendChild(el('span', 'text-xs font-semibold text-slate-300', 'Goal:'));
+    [
+      { id: 'cut', shortLabel: 'Cut' },
+      { id: 'recomp', shortLabel: 'Recomp' },
+      { id: 'maintenance', shortLabel: 'Maint' }
+    ].forEach(function (gSpec) {
+      var p = presets[gSpec.id];
+      var gBtn = el('button', 'pill-btn text-xs', gSpec.shortLabel);
+      gBtn.type = 'button';
+      gBtn.setAttribute('aria-pressed', appState.preset === gSpec.id ? 'true' : 'false');
+      gBtn.addEventListener('click', function () {
+        appState.preset = gSpec.id;
+        appState.targets = {
+          calories: p.calories,
+          protein: p.protein,
+          fat: p.fat,
+          carbs: p.carbs
+        };
+        saveState();
+        recomputePlan();
+        updateSettingsControlsInPlace();
+        renderMealsTab();
+        renderPrepTab();
+        renderGroceriesTab();
+      });
+      quickPresetRow.appendChild(gBtn);
+    });
+    quickBar.appendChild(quickPresetRow);
+
+    if (appState.splitWeekVariety && appState.horizonDays > 1) {
+      var priCount = Math.ceil(appState.horizonDays / 2);
+      var altCount = Math.floor(appState.horizonDays / 2);
+      var splitInfo = el('p', 'text-xs text-emerald-200 wrap-anywhere',
+        'Split-Week active: Odd days (' + priCount + 'd) use rotation A • Even days (' + altCount + 'd) use rotation B. Viewing ' + (isAltDay ? 'Rotation B (Even Day)' : 'Rotation A (Odd Day)') + '.'
+      );
+      quickBar.appendChild(splitInfo);
+    }
+    ctrlCard.appendChild(quickBar);
+
+    // Compact Day Stepper Row (replaces 14-button wall)
+    var stepperBar = el('div', 'flex-wrap-row justify-between');
+    stepperBar.setAttribute('role', 'group');
+    stepperBar.setAttribute('aria-label', 'Select prep day');
+
+    var prevDayBtn = el('button', 'btn-secondary text-xs', '‹ Prev');
+    prevDayBtn.type = 'button';
+    prevDayBtn.disabled = day <= 1;
+    prevDayBtn.setAttribute('aria-label', 'Previous day');
+    prevDayBtn.addEventListener('click', function () {
+      if (day > 1) {
+        appState.selectedDay = day - 1;
+        saveState();
+        recomputePlan();
+        renderMealsTab();
+      }
+    });
+
+    var daySelect = el('select', 'text-sm font-bold text-emerald-300');
+    daySelect.id = 'meals-day-select';
+    daySelect.setAttribute('aria-label', 'Select active day');
+    for (var d = 1; d <= appState.horizonDays; d++) {
+      var opt = document.createElement('option');
+      opt.value = String(d);
+      var rotSuffix = (appState.splitWeekVariety && appState.horizonDays > 1)
+        ? (d % 2 === 0 ? ' • Rot B' : ' • Rot A')
+        : '';
+      opt.textContent = 'Day ' + d + ' of ' + appState.horizonDays + ' (' + (d <= 4 ? 'Fridge' : 'Freezer') + rotSuffix + ')';
+      if (d === day) opt.selected = true;
+      daySelect.appendChild(opt);
+    }
+    daySelect.addEventListener('change', function () {
+      appState.selectedDay = clampInt(daySelect.value, 1, appState.horizonDays, 1);
+      saveState();
+      recomputePlan();
+      renderMealsTab();
+    });
+
+    var nextDayBtn = el('button', 'btn-secondary text-xs', 'Next ›');
+    nextDayBtn.type = 'button';
+    nextDayBtn.disabled = day >= appState.horizonDays;
+    nextDayBtn.setAttribute('aria-label', 'Next day');
+    nextDayBtn.addEventListener('click', function () {
+      if (day < appState.horizonDays) {
+        appState.selectedDay = day + 1;
+        saveState();
+        recomputePlan();
+        renderMealsTab();
+      }
+    });
+
+    stepperBar.appendChild(prevDayBtn);
+    stepperBar.appendChild(daySelect);
+    stepperBar.appendChild(nextDayBtn);
+    ctrlCard.appendChild(stepperBar);
 
     if (appData.mealTemplates && appData.mealTemplates.weeklyTheme) {
       ctrlCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', appData.mealTemplates.weeklyTheme));
     }
 
-    var badgeRow = el('div', 'flex-wrap-row');
-    badgeRow.appendChild(el('span', 'badge', 'Storage: ' + storageLabel));
-    badgeRow.appendChild(el('span', 'badge', 'Store: ' + (appData.winningStore || 'Super C')));
-    ctrlCard.appendChild(badgeRow);
+    var badgeRow = el('div', 'flex-wrap-row justify-between');
+    var leftBadges = el('div', 'flex-wrap-row');
+    leftBadges.appendChild(el('span', 'badge', 'Storage: ' + storageLabel));
+    leftBadges.appendChild(el('span', 'badge', 'Store: ' + (appData.winningStore || 'Super C')));
+    badgeRow.appendChild(leftBadges);
 
-    var dayStrip = el('div', 'flex-wrap-row');
-    dayStrip.setAttribute('role', 'group');
-    dayStrip.setAttribute('aria-label', 'Select prep day');
-    for (var d = 1; d <= appState.horizonDays; d++) {
-      (function (dayNum) {
-        var btn = el('button', 'pill-btn', 'Day ' + dayNum);
-        btn.type = 'button';
-        btn.setAttribute('aria-pressed', dayNum === day ? 'true' : 'false');
-        btn.addEventListener('click', function () {
-          appState.selectedDay = dayNum;
-          saveState();
-          renderMealsTab();
-        });
-        dayStrip.appendChild(btn);
-      })(d);
+    var anyEatenToday = MEAL_SLOTS.some(function (sKey) { return isMealEaten(eatenMap[sKey]); });
+    if (anyEatenToday) {
+      var resetDayBtn = el('button', 'btn-secondary text-xs', 'Reset Day');
+      resetDayBtn.type = 'button';
+      resetDayBtn.addEventListener('click', function () {
+        appState.eatenByDay[String(day)] = { breakfast: false, lunch: false, dinner: false, snack: false };
+        saveState();
+        renderMealsTab();
+      });
+      badgeRow.appendChild(resetDayBtn);
     }
-    ctrlCard.appendChild(dayStrip);
+    ctrlCard.appendChild(badgeRow);
     frag.appendChild(ctrlCard);
 
-    // 2. Fat Ceiling Alert / OK Banner
+    // 2. Fat Ceiling Alert Banner (only shown if fat ceiling is exceeded)
     var fatBreached = eatenTotals.fat > targets.fat || Boolean(currentDailyPlan.fatCeilingExceeded);
     var fatAlert = el('div', 'fat-alert');
     fatAlert.id = 'fat-ceiling-alert';
@@ -653,36 +930,7 @@
     fatAlert.textContent = 'Fat Ceiling Exceeded: Eaten ' + eatenTotals.fat + 'g / Planned ' + currentDailyPlan.totals.fat + 'g vs ' + targets.fat + 'g ceiling. Switch to Chicken Breast or Tuna Patties, or adjust Fat Ceiling in Settings.';
     frag.appendChild(fatAlert);
 
-    var fatOk = el('div', 'ok-banner');
-    fatOk.id = 'fat-ceiling-ok';
-    fatOk.hidden = fatBreached;
-    fatOk.textContent = 'Under fat ceiling (' + eatenTotals.fat + 'g eaten / ' + currentDailyPlan.totals.fat + 'g planned vs ' + targets.fat + 'g max • 0g oil)';
-    frag.appendChild(fatOk);
-
-    // 3. 24h When to Thaw Banner (strictly hidden when thawAlerts.length === 0)
-    var thawAlerts = Array.isArray(currentScaledPlan.thawAlerts) ? currentScaledPlan.thawAlerts : [];
-    var thawBanner = el('aside', 'thaw-banner');
-    thawBanner.id = 'thaw-banner';
-    thawBanner.setAttribute('aria-label', '24-hour thaw reminders');
-    thawBanner.hidden = thawAlerts.length === 0;
-    if (thawAlerts.length > 0) {
-      thawBanner.appendChild(el('h2', 'text-sm font-bold text-amber-200 mb-1', 'When to Thaw (24h Ahead)'));
-      var thawList = el('ul', 'text-xs text-amber-100 space-y-1 pl-4 list-disc');
-      var shown = 0;
-      thawAlerts.forEach(function (alertItem) {
-        if (alertItem.type === 'ingredient' || shown < 3) {
-          thawList.appendChild(el('li', 'wrap-anywhere', alertItem.detail));
-          shown++;
-        }
-      });
-      if (thawAlerts.length > shown) {
-        thawList.appendChild(el('li', null, '+' + (thawAlerts.length - shown) + ' more Day 5+ batch thaw reminders (24h before each day).'));
-      }
-      thawBanner.appendChild(thawList);
-    }
-    frag.appendChild(thawBanner);
-
-    // 4. Macro Progress Bars Card
+    // 3. Macro Progress Bars Card
     var macroCard = el('div', 'card space-stack');
     macroCard.appendChild(el('h2', 'text-base font-bold text-slate-100', 'Daily Macros — Day ' + day));
     var macroSpecs = [
@@ -716,10 +964,6 @@
       row.appendChild(track);
       macroCard.appendChild(row);
     });
-
-    if (currentDailyPlan.totals.calories < targets.calories - 100) {
-      macroCard.appendChild(el('p', 'text-xs text-slate-400', 'Zero-oil fat ceiling active: planned intake ' + Math.round(currentDailyPlan.totals.calories) + ' kcal stays safely under your ' + targets.fat + 'g fat limit.'));
-    }
     frag.appendChild(macroCard);
 
     // 5. 4 Meal Cards
@@ -763,7 +1007,10 @@
       // 1-Tap Protein Swap Pills (Lunch / Dinner)
       if (meal.swappable && appData.proteinSwaps && Array.isArray(appData.proteinSwaps[meal.id])) {
         var swapWrap = el('div', 'space-y-1');
-        swapWrap.appendChild(el('div', 'text-xs font-semibold text-slate-300', '1-Tap Protein Swap:'));
+        var swapLabelText = (appState.splitWeekVariety && appState.horizonDays > 1)
+          ? ('1-Tap Protein Swap (' + (isAltDay ? 'Rotation B — Even Days' : 'Rotation A — Odd Days') + '):')
+          : '1-Tap Protein Swap:';
+        swapWrap.appendChild(el('div', 'text-xs font-semibold text-slate-300', swapLabelText));
         var swapRow = el('div', 'flex-wrap-row');
         appData.proteinSwaps[meal.id].forEach(function (swap) {
           var isActive = meal.activeSwap === swap.id;
@@ -776,8 +1023,13 @@
           pill.type = 'button';
           pill.setAttribute('aria-pressed', isActive ? 'true' : 'false');
           pill.addEventListener('click', function () {
-            if (meal.id === 'lunch') appState.lunchSwap = swap.id;
-            if (meal.id === 'dinner') appState.dinnerSwap = swap.id;
+            if (isAltDay) {
+              if (meal.id === 'lunch') appState.lunchSwapAlt = swap.id;
+              if (meal.id === 'dinner') appState.dinnerSwapAlt = swap.id;
+            } else {
+              if (meal.id === 'lunch') appState.lunchSwap = swap.id;
+              if (meal.id === 'dinner') appState.dinnerSwap = swap.id;
+            }
             saveState();
             recomputePlan();
             renderMealsTab();
@@ -900,7 +1152,7 @@
       freezerBox.appendChild(el('p', 'text-xs text-slate-300', '0 days in freezer — all ' + currentScaledPlan.days + ' days fit in Fridge (' + fridge.dayRange + ').'));
     } else {
       freezerBox.appendChild(el('h3', 'text-sm font-bold text-amber-300', 'Freezer (' + freezer.dayRange + ')'));
-      freezerBox.appendChild(el('p', 'text-xs text-slate-300', freezer.days + (freezer.days === 1 ? ' day' : ' days') + ' (' + freezer.dayRange + ') frozen with 24h thaw reminders'));
+      freezerBox.appendChild(el('p', 'text-xs text-slate-300', freezer.days + (freezer.days === 1 ? ' day' : ' days') + ' (' + freezer.dayRange + ') batch portions frozen'));
       freezerBox.appendChild(buildBatchSplitList(freezer.batchWeights));
     }
     splitCard.appendChild(freezerBox);
@@ -943,7 +1195,6 @@
       stepEl.appendChild(metaRow);
 
       stepEl.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', step.parallelNote));
-      stepEl.appendChild(el('p', 'text-xs text-emerald-300 wrap-anywhere', step.zeroOilNote));
 
       // Direct-sibling timer container: readout + Start/Pause + Reset inside immediate parent div
       var timerRow = el('div', 'flex-wrap-row prep-timer-row');
@@ -1126,6 +1377,39 @@
     summaryCard.appendChild(totLine);
     summaryCard.appendChild(savLine);
     summaryCard.appendChild(taxLine);
+
+    var aisleCtrlRow = el('div', 'flex-wrap-row pt-2 border-t border-slate-700');
+    var compactBtn = el('button', 'pill-btn text-xs', appState.compactAisleMode ? 'Compact Aisle View: ON' : 'Compact Aisle View: OFF');
+    compactBtn.type = 'button';
+    compactBtn.setAttribute('aria-pressed', appState.compactAisleMode ? 'true' : 'false');
+    compactBtn.addEventListener('click', function () {
+      appState.compactAisleMode = !appState.compactAisleMode;
+      saveState();
+      renderGroceriesTab();
+    });
+
+    var hideCartBtn = el('button', 'pill-btn text-xs', appState.hideInCart ? 'Hide In-Cart (' + cartCount + ')' : 'Show All Items');
+    hideCartBtn.type = 'button';
+    hideCartBtn.setAttribute('aria-pressed', appState.hideInCart ? 'true' : 'false');
+    hideCartBtn.addEventListener('click', function () {
+      appState.hideInCart = !appState.hideInCart;
+      saveState();
+      renderGroceriesTab();
+    });
+
+    aisleCtrlRow.appendChild(compactBtn);
+    aisleCtrlRow.appendChild(hideCartBtn);
+    if (cartCount > 0) {
+      var clearCartBtn = el('button', 'btn-secondary text-xs', 'Clear Cart');
+      clearCartBtn.type = 'button';
+      clearCartBtn.addEventListener('click', function () {
+        appState.inCart = {};
+        saveState();
+        renderGroceriesTab();
+      });
+      aisleCtrlRow.appendChild(clearCartBtn);
+    }
+    summaryCard.appendChild(aisleCtrlRow);
     frag.appendChild(summaryCard);
 
     // 3. Frozen Batch Portions on Hand Stepper
@@ -1215,32 +1499,43 @@
       var ul = el('ul', 'space-y-3 list-none p-0 m-0');
 
       aisleSection.items.forEach(function (item) {
-        var li = el('li', 'subcard grocery-row space-y-1.5');
+        var isCartChecked = Boolean(appState.inCart[item.id]);
+        var isHomeChecked = Boolean(appState.haveAtHome[item.id]);
+        var isCollapsed = Boolean(appState.compactAisleMode && (isCartChecked || isHomeChecked));
+
+        var li = el('li', 'subcard grocery-row ' + (isCollapsed ? 'opacity-60 py-1.5 px-2.5' : 'space-y-1.5'));
         li.setAttribute('data-grocery-item', item.id);
+        if (appState.hideInCart && isCartChecked) {
+          li.hidden = true;
+        }
 
         var topRow = el('div', 'flex-wrap-row justify-between');
-        topRow.appendChild(el('span', 'text-sm font-bold text-slate-100 wrap-anywhere', item.name));
+        var nameSpan = el('span', 'text-sm font-bold wrap-anywhere ' + (isCartChecked ? 'line-through text-slate-400' : 'text-slate-100'), item.name);
+        topRow.appendChild(nameSpan);
 
         var tagsRow = el('div', 'flex-wrap-row');
         tagsRow.appendChild(el('span', radarBadgeClass(item.radarTag), item.radarTag));
-        if (item.price && item.price.savingsPct > 0) {
-          tagsRow.appendChild(el('span', 'badge radar-historic', '-' + item.price.savingsPct + '%'));
-        }
-        if (activeSwapMap[item.id]) {
-          tagsRow.appendChild(el('span', 'badge', activeSwapMap[item.id]));
-        }
-        if (item.pantryDefault) {
-          tagsRow.appendChild(el('span', 'badge', 'Pantry staple'));
+        if (!isCollapsed) {
+          if (item.price && item.price.savingsPct > 0) {
+            tagsRow.appendChild(el('span', 'badge radar-historic', '-' + item.price.savingsPct + '%'));
+          }
+          if (activeSwapMap[item.id]) {
+            tagsRow.appendChild(el('span', 'badge', activeSwapMap[item.id]));
+          }
+          if (item.pantryDefault) {
+            tagsRow.appendChild(el('span', 'badge', 'Pantry staple'));
+          }
         }
         topRow.appendChild(tagsRow);
         li.appendChild(topRow);
 
-        if (item.onFlyer && item.price && item.price.flyerItemName) {
+        if (!isCollapsed && item.onFlyer && item.price && item.price.flyerItemName) {
           li.appendChild(el('div', 'text-xs text-slate-300 wrap-anywhere', item.price.flyerItemName));
         }
 
         var qtyEl = el('div', 'text-xs text-slate-300 wrap-anywhere');
         qtyEl.setAttribute('data-row-qty', 'true');
+        qtyEl.hidden = isCollapsed;
         if (item.isBulk) {
           qtyEl.textContent = item.remainingGrams + 'g (' + item.unitLabel + ') • ' + formatCad(item.price.cadPer100g) + '/100g';
         } else {
@@ -1261,18 +1556,22 @@
         var homeCb = document.createElement('input');
         homeCb.type = 'checkbox';
         homeCb.id = 'home-' + item.id;
-        homeCb.checked = Boolean(appState.haveAtHome[item.id]);
+        homeCb.checked = isHomeChecked;
         homeCb.addEventListener('change', function () {
           appState.haveAtHome[item.id] = homeCb.checked;
           saveState();
           recomputePlan();
-          var updated = null;
-          currentScaledPlan.groceryListByAisle.forEach(function (sec) {
-            sec.items.forEach(function (it) {
-              if (it.id === item.id) updated = it;
+          if (appState.compactAisleMode) {
+            renderGroceriesTab();
+          } else {
+            var updated = null;
+            currentScaledPlan.groceryListByAisle.forEach(function (sec) {
+              sec.items.forEach(function (it) {
+                if (it.id === item.id) updated = it;
+              });
             });
-          });
-          updateGrocerySummaryAndRow(summaryCard, li, updated);
+            updateGrocerySummaryAndRow(summaryCard, li, updated);
+          }
         });
         homeLabel.appendChild(homeCb);
         homeLabel.appendChild(el('span', null, 'Have at Home'));
@@ -1282,11 +1581,15 @@
         var cartCb = document.createElement('input');
         cartCb.type = 'checkbox';
         cartCb.id = 'cart-' + item.id;
-        cartCb.checked = Boolean(appState.inCart[item.id]);
+        cartCb.checked = isCartChecked;
         cartCb.addEventListener('change', function () {
           appState.inCart[item.id] = cartCb.checked;
           saveState();
-          updateGrocerySummaryAndRow(summaryCard, null, null);
+          if (appState.compactAisleMode || appState.hideInCart) {
+            renderGroceriesTab();
+          } else {
+            updateGrocerySummaryAndRow(summaryCard, null, null);
+          }
         });
         cartLabel.appendChild(cartCb);
         cartLabel.appendChild(el('span', null, 'In Cart'));
@@ -1350,12 +1653,25 @@
     }
     var profLocEl = document.getElementById('settings-profile-location');
     if (profLocEl) {
-      profLocEl.textContent = 'Postal Code: ' + appState.postalCode + ' • Zero Added Cooking Oil (0g oil)';
+      profLocEl.textContent = 'Postal Code: ' + appState.postalCode;
     }
     var storeEl = document.getElementById('settings-store-info');
     if (storeEl) {
       var flyer = appData.flyerPeriod || FALLBACK_META.flyerPeriod;
-      storeEl.textContent = 'Winning Store: ' + (appData.winningStore || 'Super C') + ' (' + flyer.validFrom + ' to ' + flyer.validTo + ')';
+      var syncedPostal = (appData.location && appData.location.postalCodeDisplay) || 'H1W';
+      storeEl.textContent = 'Winning Store: ' + (appData.winningStore || 'Super C') + ' (' + flyer.validFrom + ' to ' + flyer.validTo + ' • Flyer FSA: ' + syncedPostal + ')';
+    }
+    var postalHintEl = document.getElementById('settings-postal-hint');
+    if (postalHintEl) {
+      var dataFsa = (appData.location && appData.location.postalCodeDisplay) || 'H1W';
+      var userFsa = appState.postalCode.slice(0, 3);
+      if (userFsa !== dataFsa) {
+        postalHintEl.textContent = 'Note: Active flyer deals were fetched for ' + dataFsa + '. To fetch live Flipp prices for ' + appState.postalCode + ', run "Weekly Flyer Sync" in GitHub Actions with postal_code=' + appState.postalCode + ' (or set repo variable POSTAL_CODE).';
+        postalHintEl.className = 'text-xs text-amber-300 wrap-anywhere';
+      } else {
+        postalHintEl.textContent = 'Live Flipp store deals match your postal code (' + dataFsa + ').';
+        postalHintEl.className = 'text-xs text-slate-400 wrap-anywhere';
+      }
     }
     var syncedEl = document.getElementById('settings-last-synced');
     if (syncedEl) {
@@ -1364,6 +1680,10 @@
     var statusEl = document.getElementById('sync-status');
     if (statusEl && syncMessageText) {
       statusEl.textContent = syncMessageText;
+    }
+    var customStatusEl = document.getElementById('custom-json-status');
+    if (customStatusEl && customJsonStatusText) {
+      customStatusEl.textContent = customJsonStatusText;
     }
   }
 
@@ -1385,8 +1705,8 @@
     descInp.id = 'profile-description-input';
     descInp.type = 'text';
     descInp.maxLength = 140;
-    descInp.placeholder = 'e.g., High-Protein Batch Prep • Zero Added Oil';
-    descInp.value = appState.profileDescription || 'High-Protein Batch Prep • Zero Added Oil';
+    descInp.placeholder = 'e.g., High-Protein Batch Prep';
+    descInp.value = appState.profileDescription || 'High-Protein Batch Prep';
 
     descInp.addEventListener('input', function () {
       var val = descInp.value.trim();
@@ -1397,7 +1717,7 @@
       }
     });
     descInp.addEventListener('change', function () {
-      var val = descInp.value.trim() || 'High-Protein Batch Prep • Zero Added Oil';
+      var val = descInp.value.trim() || 'High-Protein Batch Prep';
       appState.profileDescription = val.slice(0, 140);
       descInp.value = appState.profileDescription;
       saveState();
@@ -1409,7 +1729,7 @@
     descWrap.appendChild(descInp);
     profCard.appendChild(descWrap);
 
-    var profLoc = el('p', 'text-xs text-emerald-300', 'Postal Code: ' + appState.postalCode + ' • Zero Added Cooking Oil (0g oil)');
+    var profLoc = el('p', 'text-xs text-emerald-300', 'Postal Code: ' + appState.postalCode);
     profLoc.id = 'settings-profile-location';
     profCard.appendChild(profLoc);
     frag.appendChild(profCard);
@@ -1618,8 +1938,20 @@
     postalRow.appendChild(postalInp);
     syncCard.appendChild(postalRow);
 
+    var dataFsa = (appData.location && appData.location.postalCodeDisplay) || 'H1W';
+    var userFsa = appState.postalCode.slice(0, 3);
+    var postalHint = el(
+      'p',
+      userFsa !== dataFsa ? 'text-xs text-amber-300 wrap-anywhere' : 'text-xs text-slate-400 wrap-anywhere',
+      userFsa !== dataFsa
+        ? ('Note: Active flyer deals were fetched for ' + dataFsa + '. To fetch live Flipp prices for ' + appState.postalCode + ', run "Weekly Flyer Sync" in GitHub Actions with postal_code=' + appState.postalCode + ' (or set repo variable POSTAL_CODE).')
+        : ('Live Flipp store deals match your postal code (' + dataFsa + ').')
+    );
+    postalHint.id = 'settings-postal-hint';
+    syncCard.appendChild(postalHint);
+
     var flyer = appData.flyerPeriod || FALLBACK_META.flyerPeriod;
-    var storeInfo = el('p', 'text-xs text-slate-300', 'Winning Store: ' + (appData.winningStore || 'Super C') + ' (' + flyer.validFrom + ' to ' + flyer.validTo + ')');
+    var storeInfo = el('p', 'text-xs text-slate-300', 'Winning Store: ' + (appData.winningStore || 'Super C') + ' (' + flyer.validFrom + ' to ' + flyer.validTo + ' • Flyer FSA: ' + dataFsa + ')');
     storeInfo.id = 'settings-store-info';
     syncCard.appendChild(storeInfo);
 
@@ -1640,6 +1972,122 @@
     syncCard.appendChild(syncStatus);
 
     frag.appendChild(syncCard);
+
+    // 6. 1-Tap Gemini JSON Paste Sync Card (Change Meals Anytime)
+    var aiCard = el('div', 'card space-stack');
+    aiCard.appendChild(el('h2', 'text-base font-bold text-slate-100', '1-Tap Gemini Meal Customizer (JSON Sync)'));
+    aiCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Tired of a meal? Copy the pre-built prompt (includes your macros & disliked meals), paste it into Gemini or ChatGPT, and paste the JSON reply below to update your menu instantly.'));
+
+    var promptBtnRow = el('div', 'flex-wrap-row');
+    var copyPromptBtn = el('button', 'btn-secondary flex-1', '1. Copy Gemini Prompt');
+    copyPromptBtn.type = 'button';
+    copyPromptBtn.id = 'copy-gemini-prompt-btn';
+    copyPromptBtn.addEventListener('click', function () {
+      var promptText = buildGeminiMealPrompt();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(promptText).then(function () {
+          customJsonStatusText = 'Prompt copied! Paste it into Gemini, then paste the JSON output below.';
+          updateSettingsControlsInPlace();
+          announcePolite(customJsonStatusText);
+        }).catch(function () {
+          jsonArea.value = promptText;
+          jsonArea.select();
+          customJsonStatusText = 'Prompt placed in box below — copy it and send to Gemini.';
+          updateSettingsControlsInPlace();
+        });
+      } else {
+        jsonArea.value = promptText;
+        jsonArea.select();
+        customJsonStatusText = 'Prompt placed in box below — copy it and send to Gemini.';
+        updateSettingsControlsInPlace();
+      }
+    });
+    promptBtnRow.appendChild(copyPromptBtn);
+    aiCard.appendChild(promptBtnRow);
+
+    var jsonLbl = el('label', 'block text-sm font-semibold text-slate-200', '2. Paste Gemini JSON Reply');
+    jsonLbl.setAttribute('for', 'custom-meal-json-input');
+    aiCard.appendChild(jsonLbl);
+
+    var jsonArea = el('textarea', 'w-full text-xs font-mono');
+    jsonArea.id = 'custom-meal-json-input';
+    jsonArea.rows = 5;
+    jsonArea.style.background = '#0f172a';
+    jsonArea.style.color = '#f8fafc';
+    jsonArea.style.border = '1px solid #475569';
+    jsonArea.style.borderRadius = '0.5rem';
+    jsonArea.style.padding = '0.5rem';
+    jsonArea.placeholder = '{"weeklyTheme": "...", "meals": [{"id": "breakfast", "title": "...", "cookingMethod": "...", "seasoningTwist": "..."}]}';
+    jsonArea.value = appState.customMealJsonRaw || '';
+    aiCard.appendChild(jsonArea);
+
+    var applyRow = el('div', 'flex-wrap-row');
+    var pasteApplyBtn = el('button', 'btn-primary flex-1', 'Paste & Apply JSON');
+    pasteApplyBtn.type = 'button';
+    pasteApplyBtn.id = 'apply-custom-json-btn';
+
+    function applyRawJsonString(rawStr) {
+      var ok = applyCustomMealJsonOverlay(appData, rawStr);
+      if (ok) {
+        appState.customMealJsonRaw = rawStr.trim();
+        saveState();
+        customJsonStatusText = 'Custom meals & prep timeline applied!';
+        recomputePlan();
+        renderMealsTab();
+        renderPrepTab();
+        renderGroceriesTab();
+        updateSettingsControlsInPlace();
+        announcePolite(customJsonStatusText);
+      } else {
+        customJsonStatusText = 'Invalid JSON format. Make sure you pasted the JSON object from Gemini.';
+        updateSettingsControlsInPlace();
+        announcePolite(customJsonStatusText);
+      }
+    }
+
+    pasteApplyBtn.addEventListener('click', function () {
+      if (jsonArea.value.trim()) {
+        applyRawJsonString(jsonArea.value);
+      } else if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then(function (clipText) {
+          if (clipText && clipText.trim()) {
+            jsonArea.value = clipText.trim();
+            applyRawJsonString(clipText);
+          } else {
+            customJsonStatusText = 'Paste the JSON reply into the text box first.';
+            updateSettingsControlsInPlace();
+          }
+        }).catch(function () {
+          customJsonStatusText = 'Paste the JSON reply into the text box first, then tap Apply.';
+          updateSettingsControlsInPlace();
+        });
+      } else {
+        customJsonStatusText = 'Paste the JSON reply into the text box first, then tap Apply.';
+        updateSettingsControlsInPlace();
+      }
+    });
+    applyRow.appendChild(pasteApplyBtn);
+
+    if (appState.customMealJsonRaw) {
+      var resetMealsBtn = el('button', 'btn-secondary text-xs', 'Reset to Default Meals');
+      resetMealsBtn.type = 'button';
+      resetMealsBtn.addEventListener('click', function () {
+        appState.customMealJsonRaw = '';
+        jsonArea.value = '';
+        saveState();
+        appData = mergeWithFallbackData(safeStorageGet(STORAGE_DATA_KEY));
+        customJsonStatusText = 'Restored default weekly meal templates.';
+        renderAllTabs();
+      });
+      applyRow.appendChild(resetMealsBtn);
+    }
+    aiCard.appendChild(applyRow);
+
+    var customStatus = el('p', 'text-xs text-emerald-300 wrap-anywhere', customJsonStatusText);
+    customStatus.id = 'custom-json-status';
+    aiCard.appendChild(customStatus);
+
+    frag.appendChild(aiCard);
     root.replaceChildren(frag);
     settingsBuilt = true;
   }
@@ -1727,6 +2175,9 @@
       if (isValidDataPayload(payload)) {
         safeStorageSet(STORAGE_DATA_KEY, payload);
         appData = mergeWithFallbackData(payload);
+        if (appState.customMealJsonRaw) {
+          applyCustomMealJsonOverlay(appData, appState.customMealJsonRaw);
+        }
         renderAllTabs();
       }
     } catch (_err) {
@@ -1756,6 +2207,9 @@
       }
       safeStorageSet(STORAGE_DATA_KEY, payload);
       appData = mergeWithFallbackData(payload);
+      if (appState.customMealJsonRaw) {
+        applyCustomMealJsonOverlay(appData, appState.customMealJsonRaw);
+      }
       appState.lastSyncedAt = new Date().toISOString();
       saveState();
       syncMessageText = 'Synced ' + appData.winningStore + ' flyer data (' + appData.flyerPeriod.validFrom + ' to ' + appData.flyerPeriod.validTo + ').';

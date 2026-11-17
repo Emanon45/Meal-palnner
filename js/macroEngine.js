@@ -1335,6 +1335,27 @@
     var fridgeDays = Math.min(days, 4);
     var freezerDays = Math.max(0, days - 4);
 
+    if (safeOpts.secondaryDailyPlan && typeof safeOpts.secondaryDailyPlan === 'object') {
+      var altDays = Math.min(days, Math.max(0, Math.floor(Number(safeOpts.secondaryDays) || Math.floor(days / 2))));
+      var priDays = days - altDays;
+      if (altDays > 0) {
+        var altGramsMap = extractDailyGramsMap(safeOpts.secondaryDailyPlan, db);
+        var blendedMap = {};
+        var allKeys = Object.keys(dailyGramsMap).concat(Object.keys(altGramsMap));
+        for (var kIdx = 0; kIdx < allKeys.length; kIdx++) {
+          var kId = allKeys[kIdx];
+          if (hasOwn(blendedMap, kId)) continue;
+          var pG = hasOwn(dailyGramsMap, kId) ? dailyGramsMap[kId] : 0;
+          var aG = hasOwn(altGramsMap, kId) ? altGramsMap[kId] : 0;
+          var avgG = (pG * priDays + aG * altDays) / days;
+          if (avgG > 0) {
+            blendedMap[kId] = avgG;
+          }
+        }
+        dailyGramsMap = blendedMap;
+      }
+    }
+
     var storageSplit = {
       fridge: {
         days: fridgeDays,
