@@ -164,8 +164,17 @@
       align-items: center;
       justify-content: space-between;
       gap: 0.625rem;
-      padding: 0.5rem 0.25rem;
+      padding: 0.5rem 0.375rem;
       border-block-end: 1px solid var(--border);
+      transition: background-color 150ms ease, opacity 180ms ease;
+    }
+
+    .grocery-row:hover {
+      background: var(--surface-subtle);
+    }
+
+    .grocery-row:has(input[type="checkbox"]:checked) {
+      background: var(--accent-tint);
     }
 
     .grocery-row:last-child {
@@ -184,6 +193,7 @@
       padding: 0.4375rem 0.75rem;
       border-radius: 4px;
       border: 1px solid var(--border-strong);
+      border-block-end-width: 2px;
       background: var(--surface);
       color: var(--text-main);
       font-family: var(--font-sans);
@@ -196,6 +206,17 @@
       white-space: normal;
       overflow-wrap: anywhere;
       text-align: center;
+      transition:
+        transform 130ms cubic-bezier(0.22, 1, 0.36, 1),
+        background-color 140ms ease,
+        border-color 140ms ease,
+        color 140ms ease;
+    }
+
+    .pill-btn:active:not(:disabled),
+    .btn-primary:active:not(:disabled),
+    .btn-secondary:active:not(:disabled) {
+      transform: translateY(1px) scale(0.985);
     }
 
     .pill-btn:hover,
@@ -276,7 +297,7 @@
       block-size: 100%;
       inline-size: var(--pct, 0%);
       background: var(--accent);
-      transition: inline-size 150ms ease;
+      transition: inline-size 280ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms ease;
     }
 
     .macro-fill[data-over="true"] {
@@ -396,10 +417,23 @@
       font-weight: 600;
       cursor: pointer;
       padding: 0.25rem 0.125rem;
+      transition: color 150ms ease, transform 130ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    [role="tab"]:active {
+      transform: scale(0.95);
+    }
+
+    [role="tab"] svg {
+      transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     [role="tab"][aria-selected="true"] {
       color: var(--accent);
+    }
+
+    [role="tab"][aria-selected="true"] svg {
+      transform: translateY(-1px);
     }
 
     [role="tab"][aria-selected="true"]::after {
@@ -407,6 +441,28 @@
       position: absolute;
       inset: 0 0 auto;
       border-block-start: 2px solid var(--accent);
+    }
+
+    @keyframes fc-panel-in {
+      from {
+        opacity: 0;
+        transform: translateY(4px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    [role="tabpanel"]:not([hidden]) {
+      animation: fc-panel-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
     }
 
     /* Range Sliders: flat paper-and-ink track & square 2px thumb (no gradients) */
