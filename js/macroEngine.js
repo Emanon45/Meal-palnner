@@ -671,13 +671,35 @@
       if (!hasOwn(out, idKey)) continue;
 
       var baseT = DEFAULT_MEAL_TEMPLATES[idKey];
+      var customAddons = [];
+      if (Array.isArray(m.customAddons)) {
+        for (var caIdx = 0; caIdx < m.customAddons.length; caIdx++) {
+          var ca = m.customAddons[caIdx];
+          if (ca && typeof ca === 'object' && typeof ca.id === 'string' && ca.id.trim() && ca.id !== '__proto__') {
+            var caGrams = sanitizeNonNegNumber(ca.grams, 0);
+            if (caGrams > 0) {
+              customAddons.push({ id: ca.id.trim(), grams: Math.round(caGrams) });
+            }
+          }
+        }
+      }
+      var customSwaps = (m.ingredientSwaps && typeof m.ingredientSwaps === 'object' && !Array.isArray(m.ingredientSwaps))
+        ? m.ingredientSwaps
+        : null;
+      var customPrimaryProtein = (typeof m.primaryProteinId === 'string' && m.primaryProteinId.trim() && m.primaryProteinId !== '__proto__')
+        ? m.primaryProteinId.trim()
+        : null;
+
       out[idKey] = {
         id: idKey,
         slot: baseT.slot,
         title: sanitizeInstruction(m.title, baseT.title),
         cookingMethod: sanitizeInstruction(m.cookingMethod, baseT.cookingMethod),
         seasoningTwist: sanitizeInstruction(m.seasoningTwist, baseT.seasoningTwist),
-        swappable: baseT.swappable
+        swappable: m.swappable !== undefined ? Boolean(m.swappable) : baseT.swappable,
+        customAddons: customAddons,
+        ingredientSwaps: customSwaps,
+        primaryProteinId: customPrimaryProtein
       };
     }
 
@@ -813,33 +835,67 @@
       ? ['ground_chicken']
       : (lunchSwap === 'tuna_patties' ? ['tuna_water'] : ['sardines_water', 'tuna_water']);
 
-    var lunchTitle = templates.lunch.title.indexOf(lunchSwapInfo.label) !== -1
+    var lunchTitle = templates.lunch.primaryProteinId
       ? templates.lunch.title
-      : templates.lunch.title + ' — ' + lunchSwapInfo.label;
+      : (templates.lunch.title.indexOf(lunchSwapInfo.label) !== -1
+        ? templates.lunch.title
+        : templates.lunch.title + ' — ' + lunchSwapInfo.label);
 
-    var dinnerTitle = templates.dinner.title.indexOf(dinnerSwapInfo.label) !== -1
+    var dinnerTitle = templates.dinner.primaryProteinId
       ? templates.dinner.title
-      : templates.dinner.title + ' — ' + dinnerSwapInfo.label;
+      : (templates.dinner.title.indexOf(dinnerSwapInfo.label) !== -1
+        ? templates.dinner.title
+        : templates.dinner.title + ' — ' + dinnerSwapInfo.label);
+
+    function applySlotOverrides(template, rawPairs) {
+      var swaps = template && template.ingredientSwaps ? template.ingredientSwaps : null;
+      var mapped = [];
+      for (var pIdx = 0; pIdx < rawPairs.length; pIdx++) {
+        var origId = rawPairs[pIdx][0];
+        var gramsVal = rawPairs[pIdx][1];
+        var targetId = (swaps && typeof swaps[origId] === 'string' && hasOwn(db, swaps[origId]))
+          ? swaps[origId]
+          : origId;
+        mapped.push([targetId, gramsVal]);
+      }
+      if (template && Array.isArray(template.customAddons)) {
+        for (var aIdx = 0; aIdx < template.customAddons.length; aIdx++) {
+          var addon = template.customAddons[aIdx];
+          if (addon && hasOwn(db, addon.id) && addon.grams > 0) {
+            mapped.push([addon.id, addon.grams]);
+          }
+        }
+      }
+      return mapped;
+    }
+
+    var resolvedLunchMeatPairs = (templates.lunch.primaryProteinId && hasOwn(db, templates.lunch.primaryProteinId))
+      ? [[templates.lunch.primaryProteinId, g[lunchMeatIds[0]] || 160]]
+      : lunchMeatIds.map(function (mid) { return [mid, g[mid] || 0]; });
+
+    var resolvedDinnerMeatId = (templates.dinner.primaryProteinId && hasOwn(db, templates.dinner.primaryProteinId))
+      ? templates.dinner.primaryProteinId
+      : dinnerSwap;
 
     var slotSpecs = [
       {
         template: templates.breakfast,
         title: templates.breakfast.title,
         activeSwap: null,
-        pairs: [
+        pairs: applySlotOverrides(templates.breakfast, [
           ['whole_egg', g.whole_egg || 0],
           ['egg_whites', g.egg_whites || 0],
           ['potatoes_raw', potB],
           ['green_onion', g.green_onion || 0],
           ['pico', picoB],
           ['berries', berriesB]
-        ]
+        ])
       },
       {
         template: templates.lunch,
         title: lunchTitle,
-        activeSwap: lunchSwap,
-        pairs: lunchMeatIds.map(function (mid) { return [mid, g[mid] || 0]; }).concat([
+        activeSwap: templates.lunch.primaryProteinId ? null : lunchSwap,
+        pairs: applySlotOverrides(templates.lunch, resolvedLunchMeatPairs.concat([
           ['potatoes_raw', potL],
           ['rice_dry', riceL],
           ['cabbage', g.cabbage || 0],
@@ -850,31 +906,31 @@
           ['pico', picoL],
           ['tzatziki_0', g.tzatziki_0 || 0],
           ['aromatics_zero', aromL]
-        ])
+        ]))
       },
       {
         template: templates.dinner,
         title: dinnerTitle,
-        activeSwap: dinnerSwap,
-        pairs: [
-          [dinnerSwap, g[dinnerSwap] || 0],
+        activeSwap: templates.dinner.primaryProteinId ? null : dinnerSwap,
+        pairs: applySlotOverrides(templates.dinner, [
+          [resolvedDinnerMeatId, g[dinnerSwap] || 0],
           ['white_beans_cnd', g.white_beans_cnd || 0],
           ['diced_tomatoes', g.diced_tomatoes || 0],
           ['rice_dry', riceD],
           ['skyr_0', skyrD],
           ['aromatics_zero', aromD]
-        ]
+        ])
       },
       {
         template: templates.snack,
         title: templates.snack.title,
         activeSwap: null,
-        pairs: [
+        pairs: applySlotOverrides(templates.snack, [
           ['skyr_0', skyrS],
           ['whey_isolate', g.whey_isolate || 0],
           ['berries', berriesS],
           ['banana', g.banana || 0]
-        ]
+        ])
       }
     ];
 

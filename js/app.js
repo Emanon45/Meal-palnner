@@ -260,6 +260,7 @@
       frozenMealsOnHand: 0,
       postalCode: 'H1W',
       profileDescription: 'High-Protein Batch Prep',
+      geminiPromptMode: 'flyer_locked',
       customMealJsonRaw: '',
       timers: {},
       lastSyncedAt: null
@@ -395,6 +396,9 @@
       profileDescription: (typeof raw.profileDescription === 'string' && raw.profileDescription.trim())
         ? raw.profileDescription.trim().replace(/\s*•\s*Zero Added Oil/i, '').slice(0, 140)
         : def.profileDescription,
+      geminiPromptMode: (raw.geminiPromptMode === 'allow_custom' || raw.geminiPromptMode === 'flyer_locked')
+        ? raw.geminiPromptMode
+        : 'flyer_locked',
       customMealJsonRaw: typeof raw.customMealJsonRaw === 'string' ? raw.customMealJsonRaw : '',
       timers: timers,
       lastSyncedAt: typeof raw.lastSyncedAt === 'string' ? raw.lastSyncedAt : null
@@ -439,6 +443,50 @@
       var parsed = JSON.parse(cleaned);
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
 
+      if (!targetData.nutritionDb || typeof targetData.nutritionDb !== 'object') {
+        targetData.nutritionDb = {};
+      } else {
+        targetData.nutritionDb = Object.assign({}, targetData.nutritionDb);
+      }
+
+      // 1. Merge any customIngredients into targetData.nutritionDb so Groceries & MacroEngine include them!
+      if (parsed.customIngredients && typeof parsed.customIngredients === 'object' && !Array.isArray(parsed.customIngredients)) {
+        Object.keys(parsed.customIngredients).forEach(function (cid) {
+          if (cid === '__proto__' || cid === 'constructor' || cid === 'prototype') return;
+          var ci = parsed.customIngredients[cid];
+          if (!ci || typeof ci !== 'object') return;
+          var per = (ci.per100g && typeof ci.per100g === 'object') ? ci.per100g : ci;
+          var pkgG = clampNum(ci.packageGrams, 50, 10000, 500);
+          var cadPkg = clampNum(ci.cadPerPackage !== undefined ? ci.cadPerPackage : (ci.price && ci.price.cadPerPackage), 0.5, 200, 4.99);
+          var cad100 = clampNum(ci.cadPer100g !== undefined ? ci.cadPer100g : (ci.price && ci.price.cadPer100g), 0.05, 50, Math.round((cadPkg / (pkgG / 100)) * 100) / 100);
+          targetData.nutritionDb[cid] = {
+            name: typeof ci.name === 'string' && ci.name.trim() ? ci.name.trim() : cid,
+            aisle: typeof ci.aisle === 'string' ? ci.aisle : 'Produce',
+            per100g: {
+              calories: clampNum(per.calories, 0, 900, 100),
+              protein: clampNum(per.protein, 0, 100, 5),
+              fat: clampNum(per.fat, 0, 100, 2),
+              carbs: clampNum(per.carbs, 0, 100, 10)
+            },
+            cookedYield: clampNum(ci.cookedYield, 0.2, 4.0, 1.0),
+            packageGrams: pkgG,
+            unitLabel: typeof ci.unitLabel === 'string' && ci.unitLabel.trim() ? ci.unitLabel.trim() : ('pack (' + pkgG + 'g)'),
+            requiresThaw: false,
+            pantryDefault: Boolean(ci.pantryDefault),
+            price: {
+              cadPer100g: cad100,
+              cadPerPackage: cadPkg,
+              regularCadPer100g: cad100,
+              historicalLowCadPer100g: cad100,
+              savingsPct: 0,
+              radarTag: 'CUSTOM',
+              flyerItemName: 'Custom Recipe Ingredient',
+              onFlyer: false
+            }
+          };
+        });
+      }
+
       var srcTemplates = (parsed.mealTemplates && typeof parsed.mealTemplates === 'object') ? parsed.mealTemplates : parsed;
       if (!targetData.mealTemplates || typeof targetData.mealTemplates !== 'object') {
         targetData.mealTemplates = JSON.parse(JSON.stringify(FALLBACK_META.mealTemplates));
@@ -473,6 +521,9 @@
               if (typeof cm.title === 'string' && cm.title.trim()) tm.title = cm.title.trim();
               if (typeof cm.cookingMethod === 'string' && cm.cookingMethod.trim()) tm.cookingMethod = cm.cookingMethod.trim();
               if (typeof cm.seasoningTwist === 'string' && cm.seasoningTwist.trim()) tm.seasoningTwist = cm.seasoningTwist.trim();
+              if (Array.isArray(cm.customAddons)) tm.customAddons = cm.customAddons;
+              if (cm.ingredientSwaps && typeof cm.ingredientSwaps === 'object') tm.ingredientSwaps = cm.ingredientSwaps;
+              if (typeof cm.primaryProteinId === 'string' && cm.primaryProteinId.trim()) tm.primaryProteinId = cm.primaryProteinId.trim();
             }
           });
         });
@@ -516,19 +567,112 @@
     if (disliked.length > 0) feedbackLine += '\nMeals I want to change / replace: ' + disliked.join(', ') + '.';
     if (liked.length > 0) feedbackLine += '\nMeals/notes I liked: ' + liked.join(', ') + '.';
 
+    var isCustomMode = appState.geminiPromptMode === 'allow_custom';
+
+    var rulesBlock = [
+      'CRITICAL RULES SO MY GROCERY LIST & MACRO ENGINE STAY 100% SYNCED:',
+      '1. NEVER write hardcoded weights or volumes (like "6 oz", "200g", or "1/2 cup") inside "cookingMethod" or "seasoningTwist"—the app dynamically calculates exact gram and cup portions underneath based on my macro sliders.',
+      '2. Current active proteins selected in my app: Lunch = ' + appState.lunchSwap + ', Dinner = ' + appState.dinnerSwap + '.',
+      '3. Built-in Flyer Basket Ingredient IDs already in my database:',
+      '   - Breakfast base: whole_egg, egg_whites, potatoes_raw, green_onion, pico, berries',
+      '   - Lunch base: ' + appState.lunchSwap + ' (or ground_chicken / tuna_water / sardines_water), rice_dry, potatoes_raw, cabbage, cucumber, carrots, edamame, corn, pico, tzatziki_0',
+      '   - Dinner base: ' + appState.dinnerSwap + ' (or pork_loin_lean / pork_shoulder / chicken_breast), white_beans_cnd, diced_tomatoes, rice_dry, skyr_0, aromatics_zero',
+      '   - Snack base: skyr_0, whey_isolate, berries, banana'
+    ];
+
+    if (!isCustomMode) {
+      rulesBlock.push(
+        '4. FLYER-LOCKED MODE: Build your new culinary theme and recipes strictly around the built-in Flyer Basket ingredients above (plus herbs, spices, citrus, vinegar, mustard, soy sauce, hot sauce, or aromatics). Do NOT invent un-tracked meats or vegetables that are not in the list above.'
+      );
+      return [
+        'Generate a fresh weekly meal prep menu & parallel cooking timeline for my Meal Plan app.',
+        'Target Macros: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.',
+        'Winning Grocery Store: ' + (appData.winningStore || 'Super C') + ' (' + appState.postalCode + ').' + feedbackLine,
+        '',
+        rulesBlock.join('\n'),
+        '',
+        'Return ONLY a valid JSON object (no markdown commentary) with this exact structure:',
+        '{',
+        '  "weeklyTheme": "Short catchy weekly culinary theme",',
+        '  "meals": [',
+        '    { "id": "breakfast", "title": "New Breakfast Name", "cookingMethod": "Step-by-step method (no hardcoded weights)", "seasoningTwist": "Spices, herbs & sauce" },',
+        '    { "id": "lunch", "title": "New Lunch Bowl Name", "cookingMethod": "Step-by-step method (no hardcoded weights)", "seasoningTwist": "Spices, herbs & sauce" },',
+        '    { "id": "dinner", "title": "New Dinner Name", "cookingMethod": "Step-by-step method (no hardcoded weights)", "seasoningTwist": "Spices, herbs & sauce" },',
+        '    { "id": "snack", "title": "New Snack Name", "cookingMethod": "How to prep it", "seasoningTwist": "Flavorings & toppings" }',
+        '  ],',
+        '  "prepTimeline": [',
+        '    { "id": "step_1", "order": 1, "title": "Step 1 Title", "station": "Dutch Oven / Rice Cooker", "startMinute": 0, "durationMinutes": 35, "timerSeconds": 2100, "parallelNote": "What to do while this cooks" },',
+        '    { "id": "step_2", "order": 2, "title": "Step 2 Title", "station": "Air Fryer / Oven", "startMinute": 5, "durationMinutes": 20, "timerSeconds": 1200, "parallelNote": "What to do in parallel" },',
+        '    { "id": "step_3", "order": 3, "title": "Step 3 Title", "station": "Skillet", "startMinute": 10, "durationMinutes": 12, "timerSeconds": 720, "parallelNote": "What to do in parallel" },',
+        '    { "id": "step_4", "order": 4, "title": "Step 4 Title", "station": "Prep Board", "startMinute": 15, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Chop veggies & sauces" },',
+        '    { "id": "step_5", "order": 5, "title": "Step 5 Title", "station": "Counter", "startMinute": 30, "durationMinutes": 10, "timerSeconds": 600, "parallelNote": "Portion into Fridge (Days 1-4) & Freezer (Day 5+)" }',
+        '  ]',
+        '}'
+      ].join('\n');
+    }
+
+    rulesBlock.push(
+      '4. DYNAMIC GROCERY SYNC MODE: If your recipe uses ANY new protein, carb, vegetable, or sauce not in the built-in list above (for example: sirloin_steak, black_beans, zucchini, bell_peppers, salsa_verde), you MUST:',
+      '   (a) Define each new item in "customIngredients" with its aisle ("Produce", "Meat", "Dairy/Eggs", "Pantry/Canned", or "Frozen"), per100g macros, packageGrams, unitLabel, and estimated cadPerPackage.',
+      '   (b) Map it into the meal using "primaryProteinId" (to replace the main meat of lunch/dinner), "ingredientSwaps" (e.g. {"white_beans_cnd": "black_beans", "cabbage": "zucchini"}), or "customAddons" ([{"id": "bell_peppers", "grams": 100}]) so the app automatically updates the meal macros AND adds the new items to my Grocery List!'
+    );
+
     return [
-      'Generate a fresh weekly meal prep menu & parallel cooking timeline for my Meal Plan app.',
+      'Generate a fresh weekly meal prep menu, custom grocery ingredients, & parallel cooking timeline for my Meal Plan app.',
       'Target Macros: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.',
       'Winning Grocery Store: ' + (appData.winningStore || 'Super C') + ' (' + appState.postalCode + ').' + feedbackLine,
+      '',
+      rulesBlock.join('\n'),
       '',
       'Return ONLY a valid JSON object (no markdown commentary) with this exact structure:',
       '{',
       '  "weeklyTheme": "Short catchy weekly culinary theme",',
+      '  "customIngredients": {',
+      '    "custom_id_example": {',
+      '      "name": "Display Name (e.g. Extra-Lean Sirloin or Bell Peppers)",',
+      '      "aisle": "Meat",',
+      '      "per100g": { "calories": 135, "protein": 22.0, "fat": 4.5, "carbs": 0.0 },',
+      '      "cookedYield": 0.75,',
+      '      "packageGrams": 500,',
+      '      "unitLabel": "pack (500g)",',
+      '      "cadPerPackage": 8.99',
+      '    }',
+      '  },',
       '  "meals": [',
-      '    { "id": "breakfast", "title": "New Breakfast Name", "cookingMethod": "How to cook it", "seasoningTwist": "Spices, herbs & sauce" },',
-      '    { "id": "lunch", "title": "New Lunch Bowl Name", "cookingMethod": "How to cook it", "seasoningTwist": "Spices, herbs & sauce" },',
-      '    { "id": "dinner", "title": "New Dinner Name", "cookingMethod": "How to cook it", "seasoningTwist": "Spices, herbs & sauce" },',
-      '    { "id": "snack", "title": "New Snack Name", "cookingMethod": "How to prep it", "seasoningTwist": "Flavorings & toppings" }',
+      '    {',
+      '      "id": "breakfast",',
+      '      "title": "New Breakfast Name",',
+      '      "cookingMethod": "Step-by-step method (no hardcoded weights)",',
+      '      "seasoningTwist": "Spices, herbs & sauce",',
+      '      "ingredientSwaps": {},',
+      '      "customAddons": []',
+      '    },',
+      '    {',
+      '      "id": "lunch",',
+      '      "title": "New Lunch Bowl Name",',
+      '      "cookingMethod": "Step-by-step method (no hardcoded weights)",',
+      '      "seasoningTwist": "Spices, herbs & sauce",',
+      '      "primaryProteinId": null,',
+      '      "ingredientSwaps": {},',
+      '      "customAddons": []',
+      '    },',
+      '    {',
+      '      "id": "dinner",',
+      '      "title": "New Dinner Name",',
+      '      "cookingMethod": "Step-by-step method (no hardcoded weights)",',
+      '      "seasoningTwist": "Spices, herbs & sauce",',
+      '      "primaryProteinId": null,',
+      '      "ingredientSwaps": {},',
+      '      "customAddons": []',
+      '    },',
+      '    {',
+      '      "id": "snack",',
+      '      "title": "New Snack Name",',
+      '      "cookingMethod": "How to prep it",',
+      '      "seasoningTwist": "Flavorings & toppings",',
+      '      "ingredientSwaps": {},',
+      '      "customAddons": []',
+      '    }',
       '  ],',
       '  "prepTimeline": [',
       '    { "id": "step_1", "order": 1, "title": "Step 1 Title", "station": "Dutch Oven / Rice Cooker", "startMinute": 0, "durationMinutes": 35, "timerSeconds": 2100, "parallelNote": "What to do while this cooks" },',
@@ -1976,7 +2120,34 @@
     // 6. 1-Tap Gemini JSON Paste Sync Card (Change Meals Anytime)
     var aiCard = el('div', 'card space-stack');
     aiCard.appendChild(el('h2', 'text-base font-bold text-slate-100', '1-Tap Gemini Meal Customizer (JSON Sync)'));
-    aiCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Tired of a meal? Copy the pre-built prompt (includes your macros & disliked meals), paste it into Gemini or ChatGPT, and paste the JSON reply below to update your menu instantly.'));
+    aiCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Choose whether Gemini should build recipes strictly from your weekly flyer basket (cheapest) or introduce new custom ingredients that automatically update your Grocery List & Macro Engine.'));
+
+    var modeRow = el('div', 'flex-wrap-row');
+    var lockedModeBtn = el('button', 'pill-btn text-xs flex-1', 'Use Flyer Basket Only (Cheapest)');
+    lockedModeBtn.type = 'button';
+    lockedModeBtn.setAttribute('aria-pressed', appState.geminiPromptMode !== 'allow_custom' ? 'true' : 'false');
+
+    var customModeBtn = el('button', 'pill-btn text-xs flex-1', 'Allow New Ingredients (Updates Grocery List)');
+    customModeBtn.type = 'button';
+    customModeBtn.setAttribute('aria-pressed', appState.geminiPromptMode === 'allow_custom' ? 'true' : 'false');
+
+    lockedModeBtn.addEventListener('click', function () {
+      appState.geminiPromptMode = 'flyer_locked';
+      lockedModeBtn.setAttribute('aria-pressed', 'true');
+      customModeBtn.setAttribute('aria-pressed', 'false');
+      saveState();
+    });
+
+    customModeBtn.addEventListener('click', function () {
+      appState.geminiPromptMode = 'allow_custom';
+      lockedModeBtn.setAttribute('aria-pressed', 'false');
+      customModeBtn.setAttribute('aria-pressed', 'true');
+      saveState();
+    });
+
+    modeRow.appendChild(lockedModeBtn);
+    modeRow.appendChild(customModeBtn);
+    aiCard.appendChild(modeRow);
 
     var promptBtnRow = el('div', 'flex-wrap-row');
     var copyPromptBtn = el('button', 'btn-secondary flex-1', '1. Copy Gemini Prompt');
@@ -1984,21 +2155,22 @@
     copyPromptBtn.id = 'copy-gemini-prompt-btn';
     copyPromptBtn.addEventListener('click', function () {
       var promptText = buildGeminiMealPrompt();
+      var modeLabel = appState.geminiPromptMode === 'allow_custom' ? 'Dynamic Grocery Sync' : 'Flyer-Locked';
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(promptText).then(function () {
-          customJsonStatusText = 'Prompt copied! Paste it into Gemini, then paste the JSON output below.';
+          customJsonStatusText = modeLabel + ' prompt copied! Paste it into Gemini, then paste the JSON output below.';
           updateSettingsControlsInPlace();
           announcePolite(customJsonStatusText);
         }).catch(function () {
           jsonArea.value = promptText;
           jsonArea.select();
-          customJsonStatusText = 'Prompt placed in box below — copy it and send to Gemini.';
+          customJsonStatusText = modeLabel + ' prompt placed in box below — copy it and send to Gemini.';
           updateSettingsControlsInPlace();
         });
       } else {
         jsonArea.value = promptText;
         jsonArea.select();
-        customJsonStatusText = 'Prompt placed in box below — copy it and send to Gemini.';
+        customJsonStatusText = modeLabel + ' prompt placed in box below — copy it and send to Gemini.';
         updateSettingsControlsInPlace();
       }
     });
@@ -2017,7 +2189,7 @@
     jsonArea.style.border = '1px solid #475569';
     jsonArea.style.borderRadius = '0.5rem';
     jsonArea.style.padding = '0.5rem';
-    jsonArea.placeholder = '{"weeklyTheme": "...", "meals": [{"id": "breakfast", "title": "...", "cookingMethod": "...", "seasoningTwist": "..."}]}';
+    jsonArea.placeholder = '{"weeklyTheme": "...", "customIngredients": {...}, "meals": [...]}';
     jsonArea.value = appState.customMealJsonRaw || '';
     aiCard.appendChild(jsonArea);
 
@@ -2027,16 +2199,19 @@
     pasteApplyBtn.id = 'apply-custom-json-btn';
 
     function applyRawJsonString(rawStr) {
-      var ok = applyCustomMealJsonOverlay(appData, rawStr);
+      var freshBase = mergeWithFallbackData(safeStorageGet(STORAGE_DATA_KEY));
+      var ok = applyCustomMealJsonOverlay(freshBase, rawStr);
       if (ok) {
+        appData = freshBase;
         appState.customMealJsonRaw = rawStr.trim();
         saveState();
-        customJsonStatusText = 'Custom meals & prep timeline applied!';
+        customJsonStatusText = 'Custom meals, grocery items & prep timeline applied!';
         recomputePlan();
         renderMealsTab();
         renderPrepTab();
         renderGroceriesTab();
-        updateSettingsControlsInPlace();
+        settingsBuilt = false;
+        renderSettingsTab();
         announcePolite(customJsonStatusText);
       } else {
         customJsonStatusText = 'Invalid JSON format. Make sure you pasted the JSON object from Gemini.';
