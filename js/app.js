@@ -678,6 +678,11 @@
               if (typeof cm.cookingMethod === 'string' && cm.cookingMethod.trim()) tm.cookingMethod = cm.cookingMethod.trim();
               if (typeof cm.seasoningTwist === 'string' && cm.seasoningTwist.trim()) tm.seasoningTwist = cm.seasoningTwist.trim();
               if (Array.isArray(cm.customAddons)) tm.customAddons = cm.customAddons;
+              if (Array.isArray(cm.ingredients) && cm.ingredients.length > 0) {
+                tm.ingredients = cm.ingredients;
+                tm.targetCalories = clampNum(parsed.targetCalories, 500, 5000, appState.targets.calories);
+                tm.swappable = false;
+              }
               if (cm.ingredientSwaps && typeof cm.ingredientSwaps === 'object') tm.ingredientSwaps = cm.ingredientSwaps;
               if (typeof cm.primaryProteinId === 'string' && cm.primaryProteinId.trim()) tm.primaryProteinId = cm.primaryProteinId.trim();
             }
@@ -804,21 +809,22 @@
       return [
         'Act as my Montreal (' + appState.postalCode + ') Full-Store Grocery & Macro Meal Planner using your browser.',
         'Target Store Scope: Browse Super C (superc.ca), Maxi (maxi.ca), and Walmart Canada (walmart.ca) for postal code ' + appState.postalCode + '.',
-        'Active Macro Targets: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.' + householdLine + feedbackLine,
+        'Active Daily Macro Targets: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.' + householdLine + feedbackLine,
         '',
-        'FULL-STORE BROWSER HUNT RULES (DO NOT LIMIT TO FLYERS):',
-        '1. Check BOTH regular everyday shelf/value-pack prices AND weekly flyers on superc.ca, maxi.ca, and walmart.ca. Everyday staples (dry beans, rice, oats, frozen veg, value-pack meats, bananas, carrots) are often cheaper than featured flyer items—pick whichever is genuinely lowest cost in $/100g of protein and $/100g.',
-        '2. Design 4 cohesive, delicious, ZERO-ADDED-OIL recipes (Breakfast, Lunch, Dinner, Snack) built around the cheapest real items you found.',
-        '3. Every ingredient you use MUST either match a built-in ID below OR be defined in "customIngredients" with its real store ("Super C", "Maxi", or "Walmart"), aisle ("Produce", "Meat", "Dairy/Eggs", "Pantry/Canned", or "Frozen"), exact per100g nutrition, cookedYield, packageGrams, unitLabel, and exact cadPerPackage you observed:',
-        allDbLines.join('\n'),
-        '4. To replace Lunch/Dinner main meat, set "primaryProteinId" on that meal. To replace a default side/veggie, map it in "ingredientSwaps". To add extra ingredients, list them in "customAddons" ([{"id": "...", "grams": 100}]).',
-        '5. NEVER write hardcoded weights or volumes (like "6 oz", "200g", or "1/2 cup") inside "cookingMethod" or "seasoningTwist"—my app scales exact gram/cup portions dynamically per person.',
+        'ZERO-INFLUENCE FULL-STORE BROWSER HUNT RULES:',
+        '1. Start from a completely BLANK SLATE—do NOT copy or assume any prior menu, preset dishes, or flyer-only list.',
+        '2. Check BOTH regular everyday shelf/value-pack prices AND weekly flyers on superc.ca, maxi.ca, and walmart.ca. Everyday staples (dry beans, rice, oats, frozen veg, value-pack meats, bananas, carrots) often beat featured flyer items—pick whichever is genuinely cheapest in $/100g of protein and $/100g.',
+        '3. Design 4 cohesive, delicious, ZERO-ADDED-OIL recipes (Breakfast, Lunch, Dinner, Snack) built strictly around the cheapest real items you found, with daily ingredient gram weights summing close to the Active Daily Macro Targets above.',
+        '4. Define EVERY ingredient you use inside "customIngredients" with its real store ("Super C", "Maxi", or "Walmart"), aisle ("Produce", "Meat", "Dairy/Eggs", "Pantry/Canned", or "Frozen"), exact per100g nutrition, cookedYield, packageGrams, unitLabel, and exact cadPerPackage you observed.',
+        '5. List each meal\'s exact ingredients inside its "ingredients" array ([{"id": "...", "grams": 150}]) using raw/as-purchased gram weights.',
+        '6. NEVER write hardcoded weights or volumes inside "cookingMethod" or "seasoningTwist"—my app scales exact gram/cup portions dynamically per person.',
         '',
         'Return ONLY a valid JSON object (no markdown commentary) with this exact structure:',
         '{',
         '  "weeklyTheme": "Short catchy weekly culinary theme",',
+        '  "targetCalories": ' + appState.targets.calories + ',',
         '  "customIngredients": {',
-        '    "custom_id_example": {',
+        '    "example_item_id": {',
         '      "name": "Display Name (e.g. Selection Lean Pork Loin or Great Value Frozen Broccoli)",',
         '      "store": "Super C",',
         '      "aisle": "Meat",',
@@ -830,10 +836,10 @@
         '    }',
         '  },',
         '  "meals": [',
-        '    { "id": "breakfast", "title": "Breakfast Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "ingredientSwaps": {}, "customAddons": [] },',
-        '    { "id": "lunch", "title": "Lunch Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "primaryProteinId": null, "ingredientSwaps": {}, "customAddons": [] },',
-        '    { "id": "dinner", "title": "Dinner Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "primaryProteinId": null, "ingredientSwaps": {}, "customAddons": [] },',
-        '    { "id": "snack", "title": "Snack Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Cinnamon, vanilla, or citrus zest", "ingredientSwaps": {}, "customAddons": [] }',
+        '    { "id": "breakfast", "title": "Breakfast Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "ingredients": [{ "id": "example_item_id", "grams": 150 }] },',
+        '    { "id": "lunch", "title": "Lunch Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "ingredients": [{ "id": "example_item_id", "grams": 180 }] },',
+        '    { "id": "dinner", "title": "Dinner Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "ingredients": [{ "id": "example_item_id", "grams": 180 }] },',
+        '    { "id": "snack", "title": "Snack Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Cinnamon, vanilla, or citrus zest", "ingredients": [{ "id": "example_item_id", "grams": 200 }] }',
         '  ],',
         '  "prepTimeline": [',
         '    { "id": "step_1", "order": 1, "title": "Step 1 Title", "station": "Dutch Oven / Rice Cooker", "startMinute": 0, "durationMinutes": 35, "timerSeconds": 2100, "parallelNote": "What to do while cooking" },',

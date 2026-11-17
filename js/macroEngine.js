@@ -835,13 +835,22 @@
       ? ['ground_chicken']
       : (lunchSwap === 'tuna_patties' ? ['tuna_water'] : ['sardines_water', 'tuna_water']);
 
-    var lunchTitle = templates.lunch.primaryProteinId
+    var lunchHasCustom = Boolean(
+      templates.lunch.primaryProteinId ||
+      (Array.isArray(templates.lunch.ingredients) && templates.lunch.ingredients.length > 0)
+    );
+    var dinnerHasCustom = Boolean(
+      templates.dinner.primaryProteinId ||
+      (Array.isArray(templates.dinner.ingredients) && templates.dinner.ingredients.length > 0)
+    );
+
+    var lunchTitle = lunchHasCustom
       ? templates.lunch.title
       : (templates.lunch.title.indexOf(lunchSwapInfo.label) !== -1
         ? templates.lunch.title
         : templates.lunch.title + ' — ' + lunchSwapInfo.label);
 
-    var dinnerTitle = templates.dinner.primaryProteinId
+    var dinnerTitle = dinnerHasCustom
       ? templates.dinner.title
       : (templates.dinner.title.indexOf(dinnerSwapInfo.label) !== -1
         ? templates.dinner.title
@@ -850,6 +859,23 @@
     function applySlotOverrides(template, rawPairs) {
       var swaps = template && template.ingredientSwaps ? template.ingredientSwaps : null;
       var mapped = [];
+      if (template && Array.isArray(template.ingredients) && template.ingredients.length > 0) {
+        var baseCal = (Number(template.targetCalories) > 0) ? Number(template.targetCalories) : 0;
+        var ratio = (baseCal > 0 && targets && Number(targets.calories) > 0)
+          ? Math.max(0.4, Math.min(2.5, Number(targets.calories) / baseCal))
+          : 1;
+        for (var cIdx = 0; cIdx < template.ingredients.length; cIdx++) {
+          var ci = template.ingredients[cIdx];
+          if (!ci || !ci.id || !(Number(ci.grams) > 0)) continue;
+          var resolvedId = (swaps && typeof swaps[ci.id] === 'string' && hasOwn(db, swaps[ci.id]))
+            ? swaps[ci.id]
+            : ci.id;
+          if (hasOwn(db, resolvedId)) {
+            mapped.push([resolvedId, Math.round(Number(ci.grams) * ratio)]);
+          }
+        }
+        return mapped;
+      }
       for (var pIdx = 0; pIdx < rawPairs.length; pIdx++) {
         var origId = rawPairs[pIdx][0];
         var gramsVal = rawPairs[pIdx][1];
