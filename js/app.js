@@ -497,8 +497,6 @@
       found = appState.householdMembers[0];
       appState.activeMemberId = found.id;
     }
-    appState.preset = found.preset;
-    appState.targets = Object.assign({}, found.targets);
     return found;
   }
 
@@ -1070,6 +1068,67 @@
     }
   }
 
+  function computeSwapDeltaMap(slotId) {
+    var engine = getEngine();
+    var out = {};
+    if (!engine || !appData.proteinSwaps || !Array.isArray(appData.proteinSwaps[slotId])) return out;
+    var options = appData.proteinSwaps[slotId];
+    var totals = [];
+    var minCost = Infinity;
+    options.forEach(function (sw) {
+      var lId = slotId === 'lunch' ? sw.id : appState.lunchSwap;
+      var dId = slotId === 'dinner' ? sw.id : appState.dinnerSwap;
+      var daily = engine.solveDailyPortions(appData, {
+        preset: appState.preset === 'custom' ? 'cut' : appState.preset,
+        targets: appState.targets,
+        lunchSwap: lId,
+        dinnerSwap: dId
+      });
+      var scaled = engine.scaleToHorizon(daily, appData, {
+        days: appState.horizonDays,
+        haveAtHome: appState.haveAtHome,
+        frozenMealsOnHand: Math.min(appState.horizonDays, appState.frozenMealsOnHand)
+      });
+      var cost = scaled.summary.remainingCostCad;
+      if (cost < minCost) minCost = cost;
+      totals.push({ id: sw.id, cost: cost });
+    });
+    totals.forEach(function (entry) {
+      var diff = Math.round((entry.cost - minCost) * 100) / 100;
+      out[entry.id] = {
+        cost: entry.cost,
+        diff: diff,
+        isCheapest: diff <= 0.01
+      };
+    });
+    return out;
+  }
+
+  function applyCheapestProteinSwaps() {
+    var lunchMap = computeSwapDeltaMap('lunch');
+    var bestLunch = appState.lunchSwap;
+    var minL = Infinity;
+    Object.keys(lunchMap).forEach(function (id) {
+      if (lunchMap[id].cost < minL) {
+        minL = lunchMap[id].cost;
+        bestLunch = id;
+      }
+    });
+    appState.lunchSwap = bestLunch;
+
+    var dinnerMap = computeSwapDeltaMap('dinner');
+    var bestDinner = appState.dinnerSwap;
+    var minD = Infinity;
+    Object.keys(dinnerMap).forEach(function (id) {
+      if (dinnerMap[id].cost < minD) {
+        minD = dinnerMap[id].cost;
+        bestDinner = id;
+      }
+    });
+    appState.dinnerSwap = bestDinner;
+    appState.splitWeekVariety = false;
+  }
+
   function updateHeader() {
     var subtitle = document.getElementById('header-subtitle');
     var storeBadge = document.getElementById('header-store-badge');
@@ -1149,6 +1208,19 @@
     var quickBar = el('div', 'subcard space-y-2');
     var quickTop = el('div', 'flex-wrap-row justify-between');
     quickTop.appendChild(el('span', 'text-xs font-bold text-emerald-300', 'Quick Prep & Goal Bar'));
+    var quickActions = el('div', 'flex-wrap-row');
+    var cheapestBtn = el('button', 'btn-secondary text-xs', 'Cheapest Proteins');
+    cheapestBtn.type = 'button';
+    cheapestBtn.id = 'meals-cheapest-btn';
+    cheapestBtn.addEventListener('click', function () {
+      applyCheapestProteinSwaps();
+      saveState();
+      recomputePlan();
+      renderMealsTab();
+      renderPrepTab();
+      renderGroceriesTab();
+      announcePolite('Switched to lowest-cost flyer proteins.');
+    });
     var varietyBtn = el('button', 'pill-btn text-xs', appState.splitWeekVariety ? 'Split-Week Variety: ON' : 'Split-Week Variety: OFF');
     varietyBtn.type = 'button';
     varietyBtn.id = 'meals-variety-toggle';
@@ -1161,7 +1233,9 @@
       renderPrepTab();
       renderGroceriesTab();
     });
-    quickTop.appendChild(varietyBtn);
+    quickActions.appendChild(cheapestBtn);
+    quickActions.appendChild(varietyBtn);
+    quickTop.appendChild(quickActions);
     quickBar.appendChild(quickTop);
 
     var quickHorizonRow = el('div', 'flex-wrap-row');
@@ -1397,13 +1471,23 @@
           : '1-Tap Protein Swap:';
         swapWrap.appendChild(el('div', 'text-xs font-semibold text-slate-300', swapLabelText));
         var swapRow = el('div', 'flex-wrap-row');
+        var swapDeltas = computeSwapDeltaMap(meal.id);
         appData.proteinSwaps[meal.id].forEach(function (swap) {
           var isActive = meal.activeSwap === swap.id;
           var primaryDb = appData.nutritionDb && swap.primaryIngredient ? appData.nutritionDb[swap.primaryIngredient] : null;
-          var dealSuffix = '';
+          var priceInfo = swapDeltas[swap.id];
+          var tags = [];
           if (primaryDb && primaryDb.price && primaryDb.price.onFlyer && primaryDb.price.radarTag && primaryDb.price.radarTag !== 'REGULAR') {
-            dealSuffix = ' (' + primaryDb.price.radarTag + ')';
+            tags.push(primaryDb.price.radarTag);
           }
+          if (priceInfo) {
+            if (priceInfo.isCheapest) {
+              tags.push('Best Price');
+            } else if (priceInfo.diff >= 0.5) {
+              tags.push('+$' + priceInfo.diff.toFixed(2));
+            }
+          }
+          var dealSuffix = tags.length > 0 ? (' (' + tags.join(' • ') + ')') : '';
           var pill = el('button', 'pill-btn', (swap.shortLabel || swap.label) + dealSuffix);
           pill.type = 'button';
           pill.setAttribute('aria-pressed', isActive ? 'true' : 'false');
@@ -1820,6 +1904,31 @@
 
     aisleCtrlRow.appendChild(compactBtn);
     aisleCtrlRow.appendChild(hideCartBtn);
+
+    var uncheckedPantryItems = [];
+    var pantrySavingsCents = 0;
+    currentScaledPlan.groceryListByAisle.forEach(function (sec) {
+      sec.items.forEach(function (it) {
+        if (it.pantryDefault && !appState.haveAtHome[it.id] && it.remainingCostCad > 0) {
+          uncheckedPantryItems.push(it.id);
+          pantrySavingsCents += Math.round(it.remainingCostCad * 100);
+        }
+      });
+    });
+    if (uncheckedPantryItems.length > 0) {
+      var pantryDeductBtn = el('button', 'btn-secondary text-xs', 'Already Have Whey/Spices (-' + formatCad(pantrySavingsCents / 100) + ')');
+      pantryDeductBtn.type = 'button';
+      pantryDeductBtn.addEventListener('click', function () {
+        uncheckedPantryItems.forEach(function (pid) {
+          appState.haveAtHome[pid] = true;
+        });
+        saveState();
+        recomputePlan();
+        renderGroceriesTab();
+      });
+      aisleCtrlRow.appendChild(pantryDeductBtn);
+    }
+
     if (cartCount > 0) {
       var clearCartBtn = el('button', 'btn-secondary text-xs', 'Clear Cart');
       clearCartBtn.type = 'button';
