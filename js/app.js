@@ -684,7 +684,39 @@
                 tm.swappable = false;
               }
               if (cm.ingredientSwaps && typeof cm.ingredientSwaps === 'object') tm.ingredientSwaps = cm.ingredientSwaps;
-              if (typeof cm.primaryProteinId === 'string' && cm.primaryProteinId.trim()) tm.primaryProteinId = cm.primaryProteinId.trim();
+              if (typeof cm.primaryProteinId === 'string' && cm.primaryProteinId.trim()) {
+                tm.primaryProteinId = cm.primaryProteinId.trim();
+              } else if ((tm.id === 'lunch' || tm.id === 'dinner') && !cm.primaryProteinId && (!Array.isArray(cm.ingredients) || cm.ingredients.length === 0)) {
+                var mealTxt = ((cm.title || '') + ' ' + (cm.cookingMethod || '')).toLowerCase();
+                var matchedCustomMeat = null;
+                if (parsed.customIngredients && typeof parsed.customIngredients === 'object') {
+                  Object.keys(parsed.customIngredients).forEach(function (cid) {
+                    if (matchedCustomMeat || cid === '__proto__' || cid === 'constructor' || cid === 'prototype') return;
+                    var ci = parsed.customIngredients[cid];
+                    if (!ci || ci.aisle !== 'Meat' || typeof ci.name !== 'string') return;
+                    var words = ci.name.toLowerCase().split(/\s+/).filter(function (w) { return w.length >= 4; });
+                    var hits = words.filter(function (w) { return mealTxt.indexOf(w) !== -1; });
+                    if (hits.length >= Math.min(2, words.length) && words.length > 0) {
+                      matchedCustomMeat = cid;
+                    }
+                  });
+                }
+                if (matchedCustomMeat) {
+                  tm.primaryProteinId = matchedCustomMeat;
+                } else if (/chicken\s*breast|poitrine/i.test(mealTxt)) {
+                  tm.primaryProteinId = 'chicken_breast';
+                } else if (/ground\s*chicken|poulet\s*hach/i.test(mealTxt)) {
+                  tm.primaryProteinId = 'ground_chicken';
+                } else if (/pork\s*shoulder|épaule|epaule/i.test(mealTxt)) {
+                  tm.primaryProteinId = 'pork_shoulder';
+                } else if (/pork\s*loin|tenderloin|filet\s*de\s*porc|longe/i.test(mealTxt)) {
+                  tm.primaryProteinId = 'pork_loin_lean';
+                } else if (/sardine/i.test(mealTxt)) {
+                  tm.primaryProteinId = 'sardines_water';
+                } else if (/\btuna\b|thon/i.test(mealTxt)) {
+                  tm.primaryProteinId = 'tuna_water';
+                }
+              }
             }
           });
         });
@@ -1078,6 +1110,7 @@
       haveAtHome: appState.haveAtHome,
       frozenMealsOnHand: Math.min(appState.horizonDays, appState.frozenMealsOnHand)
     });
+    updateHeader();
   }
 
   function isMealEaten(entry) {
@@ -1252,6 +1285,22 @@
       var online = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
       connBadge.textContent = online ? 'Online' : 'Offline (Cached)';
       connBadge.className = online ? 'badge radar-historic' : 'badge radar-hot';
+    }
+    var macroReadout = document.getElementById('sticky-macro-readout');
+    var macroPresetEl = document.getElementById('sticky-macro-preset');
+    var t = (currentDailyPlan && currentDailyPlan.targets) || appState.targets;
+    if (macroReadout && t) {
+      var kcalFmt = Math.round(t.calories || 0).toLocaleString('en-CA');
+      macroReadout.textContent = kcalFmt + ' kcal · ' + Math.round(t.protein || 0) + 'g P · ' + Math.round(t.carbs || 0) + 'g C · ' + Math.round(t.fat || 0) + 'g F';
+    }
+    if (macroPresetEl) {
+      var pLabel = (appState.preset || 'cut').toUpperCase();
+      if (macroPresetEl.textContent !== pLabel) {
+        macroPresetEl.textContent = pLabel;
+      }
+      macroPresetEl.className = (currentDailyPlan && currentDailyPlan.fatCeilingExceeded)
+        ? 'badge radar-historic'
+        : 'badge';
     }
   }
 
@@ -1760,16 +1809,14 @@
       freezerBox.appendChild(buildBatchSplitList(freezer.batchWeights));
     }
     splitCard.appendChild(freezerBox);
-    frag.appendChild(splitCard);
 
-    // 1b. Batch-Cook Now vs. Prepare Fresh Guide (saves time & prevents rubbery eggs/soggy berries)
+    // Prepare Fresh / 2-5 Min Assembly (Do NOT Freeze) inside the unified Prep Split card
     var COLD_FRESH_IDS = {
       cabbage: true, cucumber: true, carrots: true, pico: true,
       tzatziki_0: true, skyr_0: true, berries: true, banana: true,
       whey_isolate: true, green_onion: true, whole_egg: true, egg_whites: true,
       aromatics_zero: true
     };
-    var batchTotalsMap = {};
     var freshDailyMap = {};
     var prepDays = currentScaledPlan.days || 1;
     var plansForPrep = (Array.isArray(currentHouseholdPlans) && currentHouseholdPlans.length > 0)
@@ -1777,50 +1824,21 @@
       : [{ primaryPlan: currentDailyPlan, altPlan: null }];
 
     plansForPrep.forEach(function (hp) {
-      var pDays = hp.altPlan ? (prepDays - Math.floor(prepDays / 2)) : prepDays;
-      var aDays = hp.altPlan ? Math.floor(prepDays / 2) : 0;
-      var collectPlan = function (planObj, multDays) {
-        if (!planObj || !Array.isArray(planObj.meals) || multDays <= 0) return;
-        planObj.meals.forEach(function (ml) {
-          var isBatchSlot = ml.id === 'lunch' || ml.id === 'dinner';
-          (ml.ingredients || []).forEach(function (ing) {
-            if (!ing || ing.grams <= 0) return;
-            if (isBatchSlot && !COLD_FRESH_IDS[ing.id]) {
-              if (!batchTotalsMap[ing.id]) {
-                batchTotalsMap[ing.id] = { name: ing.name, rawGrams: 0, cookedGrams: 0 };
-              }
-              batchTotalsMap[ing.id].rawGrams += Math.round(ing.grams * multDays);
-              batchTotalsMap[ing.id].cookedGrams += Math.round(ing.cookedGrams * multDays);
-            } else if (ing.id !== 'aromatics_zero') {
-              if (!freshDailyMap[ing.id]) {
-                freshDailyMap[ing.id] = { name: ing.name, slot: ml.slot, grams: 0 };
-              }
-              freshDailyMap[ing.id].grams += Math.round(ing.grams);
+      var planObj = hp.primaryPlan;
+      if (!planObj || !Array.isArray(planObj.meals)) return;
+      planObj.meals.forEach(function (ml) {
+        var isBatchSlot = ml.id === 'lunch' || ml.id === 'dinner';
+        (ml.ingredients || []).forEach(function (ing) {
+          if (!ing || ing.grams <= 0 || ing.id === 'aromatics_zero') return;
+          if (!isBatchSlot || COLD_FRESH_IDS[ing.id]) {
+            if (!freshDailyMap[ing.id]) {
+              freshDailyMap[ing.id] = { name: ing.name, slot: ml.slot, grams: 0 };
             }
-          });
+            freshDailyMap[ing.id].grams += Math.round(ing.grams);
+          }
         });
-      };
-      collectPlan(hp.primaryPlan, pDays);
-      if (hp.altPlan) collectPlan(hp.altPlan, aDays);
-    });
-
-    var guideCard = el('div', 'card space-stack');
-    guideCard.appendChild(el('h2', 'text-base font-bold text-slate-100', 'Batch-Cook vs. Prepare Fresh (' + prepDays + ' Days)'));
-
-    var batchBox = el('div', 'subcard space-y-1');
-    batchBox.appendChild(el('h3', 'text-sm font-bold text-emerald-300', 'Batch-Cook Now (Lunch & Dinner — Fridge Days 1-4 / Freeze Day 5+)'));
-    var batchKeys = Object.keys(batchTotalsMap);
-    if (batchKeys.length === 0) {
-      batchBox.appendChild(el('p', 'text-xs text-slate-300', 'No batch-cooked items in this plan.'));
-    } else {
-      var batchUl = el('ul', 'text-xs text-slate-200 space-y-1 pl-4 list-disc');
-      batchKeys.forEach(function (bid) {
-        var b = batchTotalsMap[bid];
-        batchUl.appendChild(el('li', 'wrap-anywhere', b.name + ': ' + b.rawGrams + 'g raw (~' + b.cookedGrams + 'g cooked total)'));
       });
-      batchBox.appendChild(batchUl);
-    }
-    guideCard.appendChild(batchBox);
+    });
 
     var freshBox = el('div', 'subcard space-y-1');
     freshBox.appendChild(el('h3', 'text-sm font-bold text-amber-300', 'Prepare Fresh / 2-5 Min Assembly (Do NOT Freeze)'));
@@ -1834,8 +1852,8 @@
       });
       freshBox.appendChild(freshUl);
     }
-    guideCard.appendChild(freshBox);
-    frag.appendChild(guideCard);
+    splitCard.appendChild(freshBox);
+    frag.appendChild(splitCard);
 
     // 2. Parallel Build-System Timeline + Timers
     var timelineCard = el('div', 'card space-stack');
@@ -2330,9 +2348,11 @@
         checkRow.appendChild(homeLabel);
         checkRow.appendChild(cartLabel);
 
-        // 1-Tap Out-of-Stock Ingredient Swap
-        var dbKeys = Object.keys((appData && appData.nutritionDb) || {});
-        if (dbKeys.length > 1 && !isCollapsed) {
+        // 1-Tap Out-of-Stock Ingredient Swap (prioritized by aisle, scales grams by macro density)
+        var dbKeys = Object.keys((appData && appData.nutritionDb) || {}).filter(function (kid) {
+          return kid !== item.id && kid !== 'aromatics_zero';
+        });
+        if (dbKeys.length > 0 && !isCollapsed && item.id !== 'aromatics_zero') {
           var swapSel = document.createElement('select');
           swapSel.className = 'text-xs';
           swapSel.setAttribute('aria-label', 'Swap ' + item.name + ' if out of stock');
@@ -2344,31 +2364,62 @@
           defaultOpt.value = '';
           defaultOpt.textContent = origIdForSwap !== item.id ? 'Reset to Original' : 'Swap (No Stock)';
           swapSel.appendChild(defaultOpt);
+
+          var sameAisleKeys = [];
+          var compatibleKeys = [];
+          var curItemDb = appData.nutritionDb[item.id] || {};
+          var curAisle = item.aisle || curItemDb.aisle || '';
+          var isCurCarbOrProduce = curAisle === 'Produce' || curAisle === 'Pantry/Canned' || curAisle === 'Frozen';
+          var isCurProteinOrDairy = curAisle === 'Meat' || curAisle === 'Dairy/Eggs';
+
           dbKeys.forEach(function (kid) {
-            if (kid === item.id) return;
             var kEntry = appData.nutritionDb[kid];
             if (!kEntry || !kEntry.name) return;
-            var opt = document.createElement('option');
-            opt.value = kid;
-            var kPrice = kEntry.price && Number.isFinite(kEntry.price.cadPerPackage) ? (' (' + formatCad(kEntry.price.cadPerPackage) + ')') : '';
-            opt.textContent = kEntry.name + kPrice;
-            swapSel.appendChild(opt);
-          });
-          swapSel.addEventListener('change', function () {
-            var nextId = swapSel.value;
-            if (!appState.grocerySwaps) appState.grocerySwaps = {};
-            if (!nextId) {
-              delete appState.grocerySwaps[origIdForSwap];
-            } else {
-              appState.grocerySwaps[origIdForSwap] = nextId;
+            if (kEntry.aisle === curAisle) {
+              sameAisleKeys.push(kid);
+            } else if (
+              (isCurProteinOrDairy && (kEntry.aisle === 'Meat' || kEntry.aisle === 'Dairy/Eggs' || (kEntry.per100g && kEntry.per100g.protein >= 12))) ||
+              (isCurCarbOrProduce && (kEntry.aisle === 'Produce' || kEntry.aisle === 'Pantry/Canned' || kEntry.aisle === 'Frozen'))
+            ) {
+              compatibleKeys.push(kid);
             }
-            saveState();
-            recomputePlan();
-            renderMealsTab();
-            renderPrepTab();
-            renderGroceriesTab();
           });
-          checkRow.appendChild(swapSel);
+
+          var appendSwapGroup = function (label, keys) {
+            if (keys.length === 0) return;
+            var grp = document.createElement('optgroup');
+            grp.label = label;
+            keys.forEach(function (kid) {
+              var kEntry = appData.nutritionDb[kid];
+              var opt = document.createElement('option');
+              opt.value = kid;
+              var kPrice = kEntry.price && Number.isFinite(kEntry.price.cadPerPackage) ? (' (' + formatCad(kEntry.price.cadPerPackage) + ')') : '';
+              opt.textContent = kEntry.name + kPrice;
+              grp.appendChild(opt);
+            });
+            swapSel.appendChild(grp);
+          };
+
+          appendSwapGroup('Same Aisle (' + curAisle + ')', sameAisleKeys);
+          appendSwapGroup('Compatible Substitutes', compatibleKeys);
+
+          if (sameAisleKeys.length + compatibleKeys.length > 0) {
+            swapSel.addEventListener('change', function () {
+              var nextId = swapSel.value;
+              if (!appState.grocerySwaps) appState.grocerySwaps = {};
+              if (!nextId) {
+                delete appState.grocerySwaps[origIdForSwap];
+              } else {
+                appState.grocerySwaps[origIdForSwap] = nextId;
+              }
+              saveState();
+              recomputePlan();
+              renderMealsTab();
+              renderPrepTab();
+              renderGroceriesTab();
+            });
+            checkRow.appendChild(swapSel);
+          }
         }
 
         li.appendChild(checkRow);
@@ -2964,11 +3015,6 @@
     var jsonArea = el('textarea', 'w-full text-xs font-mono');
     jsonArea.id = 'custom-meal-json-input';
     jsonArea.rows = 5;
-    jsonArea.style.background = '#0f172a';
-    jsonArea.style.color = '#f8fafc';
-    jsonArea.style.border = '1px solid #475569';
-    jsonArea.style.borderRadius = '0.5rem';
-    jsonArea.style.padding = '0.5rem';
     jsonArea.placeholder = '{"weeklyTheme": "...", "customIngredients": {...}, "meals": [...]}';
     jsonArea.value = appState.customMealJsonRaw || '';
     aiCard.appendChild(jsonArea);

@@ -804,6 +804,23 @@
     };
   }
 
+  function classifyIngredientCategory(id, item) {
+    if (hasOwn(BATCH_PROTEIN_IDS, id)) return 'protein';
+    if (hasOwn(BATCH_CARB_IDS, id)) return 'carb';
+    if (!hasOwn(DEFAULT_NUTRITION_DB, id) && item) {
+      var p = item.per100g || {};
+      if (item.aisle === 'Meat' || (p.protein >= 15 && p.protein >= (p.carbs || 0))) {
+        return 'protein';
+      }
+      if (item.aisle !== 'Dairy/Eggs' && (p.carbs >= 14 && p.carbs > (p.protein || 0))) {
+        return 'carb';
+      }
+    }
+    if (item && item.aisle === 'Dairy/Eggs') return 'dairy';
+    if (item && item.aisle === 'Pantry/Canned') return 'pantry';
+    return 'produce';
+  }
+
   function buildMealsAndTotals(g, db, templates, lunchSwapInfo, dinnerSwapInfo) {
     var lunchSwap = lunchSwapInfo.id;
     var dinnerSwap = dinnerSwapInfo.id;
@@ -856,6 +873,27 @@
         ? templates.dinner.title
         : templates.dinner.title + ' — ' + dinnerSwapInfo.label);
 
+    function scaleSwappedGrams(fromId, toId, rawGrams) {
+      if (!rawGrams || fromId === toId || !hasOwn(db, fromId) || !hasOwn(db, toId)) return rawGrams;
+      var fromItem = db[fromId];
+      var toItem = db[toId];
+      var fp = fromItem.per100g || {};
+      var tp = toItem.per100g || {};
+      if (classifyIngredientCategory(fromId, fromItem) === 'protein' && fp.protein >= 5 && tp.protein >= 5) {
+        var pRatio = Math.max(0.35, Math.min(3.0, fp.protein / tp.protein));
+        return Math.round(rawGrams * pRatio);
+      }
+      if (fp.carbs >= 8 && tp.carbs >= 8) {
+        var cRatio = Math.max(0.25, Math.min(4.0, fp.carbs / tp.carbs));
+        return Math.round(rawGrams * cRatio);
+      }
+      if (fp.calories >= 15 && tp.calories >= 15) {
+        var kRatio = Math.max(0.35, Math.min(3.0, fp.calories / tp.calories));
+        return Math.round(rawGrams * kRatio);
+      }
+      return rawGrams;
+    }
+
     function applySlotOverrides(template, rawPairs) {
       var swaps = template && template.ingredientSwaps ? template.ingredientSwaps : null;
       var mapped = [];
@@ -867,11 +905,12 @@
         for (var cIdx = 0; cIdx < template.ingredients.length; cIdx++) {
           var ci = template.ingredients[cIdx];
           if (!ci || !ci.id || !(Number(ci.grams) > 0)) continue;
+          var baseIngGrams = Math.round(Number(ci.grams) * ratio);
           var resolvedId = (swaps && typeof swaps[ci.id] === 'string' && hasOwn(db, swaps[ci.id]))
             ? swaps[ci.id]
             : ci.id;
           if (hasOwn(db, resolvedId)) {
-            mapped.push([resolvedId, Math.round(Number(ci.grams) * ratio)]);
+            mapped.push([resolvedId, scaleSwappedGrams(ci.id, resolvedId, baseIngGrams)]);
           }
         }
         return mapped;
@@ -882,7 +921,7 @@
         var targetId = (swaps && typeof swaps[origId] === 'string' && hasOwn(db, swaps[origId]))
           ? swaps[origId]
           : origId;
-        mapped.push([targetId, gramsVal]);
+        mapped.push([targetId, scaleSwappedGrams(origId, targetId, gramsVal)]);
       }
       if (template && Array.isArray(template.customAddons)) {
         for (var aIdx = 0; aIdx < template.customAddons.length; aIdx++) {
@@ -1253,6 +1292,109 @@
       assembled = buildMealsAndTotals(g, db, templates, lunchSwapInfo, dinnerSwapInfo);
     }
 
+    var hasCustomRecipeArray = (
+      (Array.isArray(templates.breakfast.ingredients) && templates.breakfast.ingredients.length > 0) ||
+      (Array.isArray(templates.lunch.ingredients) && templates.lunch.ingredients.length > 0) ||
+      (Array.isArray(templates.dinner.ingredients) && templates.dinner.ingredients.length > 0) ||
+      (Array.isArray(templates.snack.ingredients) && templates.snack.ingredients.length > 0)
+    );
+    var hasCustomPrimaryProtein = Boolean(templates.lunch.primaryProteinId || templates.dinner.primaryProteinId);
+
+    if (hasCustomRecipeArray || hasCustomPrimaryProtein) {
+      var recalcAssembled = function () {
+        var tot = { calories: 0, protein: 0, fat: 0, carbs: 0 };
+        var gMap = {};
+        for (var mi = 0; mi < assembled.meals.length; mi++) {
+          var ml = assembled.meals[mi];
+          var mt = { calories: 0, protein: 0, fat: 0, carbs: 0 };
+          for (var ii = 0; ii < ml.ingredients.length; ii++) {
+            var e = ml.ingredients[ii];
+            mt.calories += e.macros.calories;
+            mt.protein += e.macros.protein;
+            mt.fat += e.macros.fat;
+            mt.carbs += e.macros.carbs;
+            gMap[e.id] = (hasOwn(gMap, e.id) ? gMap[e.id] : 0) + e.grams;
+          }
+          ml.totals = {
+            calories: round1(mt.calories),
+            protein: round1(mt.protein),
+            fat: round1(mt.fat),
+            carbs: round1(mt.carbs)
+          };
+          tot.calories += ml.totals.calories;
+          tot.protein += ml.totals.protein;
+          tot.fat += ml.totals.fat;
+          tot.carbs += ml.totals.carbs;
+        }
+        assembled.totals = {
+          calories: round1(tot.calories),
+          protein: round1(tot.protein),
+          fat: round1(tot.fat),
+          carbs: round1(tot.carbs)
+        };
+        assembled.ingredientGrams = gMap;
+      };
+
+      // Trim highest-fat ingredients in custom menus if fat exceeds ceiling
+      var fatIter = 0;
+      while (assembled.totals.fat > targets.fat && fatIter < 250) {
+        fatIter++;
+        var bestFatRef = null;
+        var maxFatRate = 0;
+        for (var mIdx = 0; mIdx < assembled.meals.length; mIdx++) {
+          var mealRef = assembled.meals[mIdx];
+          for (var iIdx = 0; iIdx < mealRef.ingredients.length; iIdx++) {
+            var ingRef = mealRef.ingredients[iIdx];
+            if (!hasOwn(db, ingRef.id) || ingRef.grams <= 40) continue;
+            var fRate = (db[ingRef.id].per100g && db[ingRef.id].per100g.fat) || 0;
+            if (fRate >= 4 && fRate > maxFatRate) {
+              maxFatRate = fRate;
+              bestFatRef = { mealIdx: mIdx, ingIdx: iIdx, id: ingRef.id, grams: ingRef.grams };
+            }
+          }
+        }
+        if (!bestFatRef) break;
+        assembled.meals[bestFatRef.mealIdx].ingredients[bestFatRef.ingIdx] = buildIngredientEntry(
+          bestFatRef.id,
+          Math.max(40, bestFatRef.grams - 5),
+          db
+        );
+        recalcAssembled();
+      }
+
+      // Close large protein gaps on full-custom recipe arrays using highest lean protein item
+      if (hasCustomRecipeArray && Math.abs(assembled.totals.protein - targets.protein) > 8) {
+        var leanRef = null;
+        var bestLeanScore = -1;
+        for (var lmIdx = 0; lmIdx < assembled.meals.length; lmIdx++) {
+          var lMeal = assembled.meals[lmIdx];
+          for (var liIdx = 0; liIdx < lMeal.ingredients.length; liIdx++) {
+            var lIng = lMeal.ingredients[liIdx];
+            if (!hasOwn(db, lIng.id)) continue;
+            var lp = db[lIng.id].per100g || {};
+            if (lp.protein >= 10 && lp.fat <= 5 && lp.protein > bestLeanScore) {
+              bestLeanScore = lp.protein;
+              leanRef = { mealIdx: lmIdx, ingIdx: liIdx, id: lIng.id, grams: lIng.grams, p100: lp.protein, f100: lp.fat };
+            }
+          }
+        }
+        if (leanRef) {
+          var pGap = targets.protein - assembled.totals.protein;
+          var dG = Math.round((pGap * 100) / leanRef.p100 / 5) * 5;
+          var nextLeanG = Math.max(30, Math.min(450, leanRef.grams + dG));
+          var fatHeadroom = Math.max(0, targets.fat - assembled.totals.fat);
+          if (nextLeanG > leanRef.grams && leanRef.f100 > 0) {
+            var maxExtraByFat = Math.floor((fatHeadroom * 100) / leanRef.f100);
+            nextLeanG = Math.min(nextLeanG, leanRef.grams + maxExtraByFat);
+          }
+          if (nextLeanG !== leanRef.grams) {
+            assembled.meals[leanRef.mealIdx].ingredients[leanRef.ingIdx] = buildIngredientEntry(leanRef.id, nextLeanG, db);
+            recalcAssembled();
+          }
+        }
+      }
+    }
+
     return {
       meals: assembled.meals,
       ingredientGrams: assembled.ingredientGrams,
@@ -1342,13 +1484,7 @@
 
       var rawGrams = round1(dailyGramsMap[id] * splitDays);
       var cookedGrams = round1(rawGrams * item.cookedYield);
-      var category = hasOwn(BATCH_PROTEIN_IDS, id)
-        ? 'protein'
-        : (hasOwn(BATCH_CARB_IDS, id)
-          ? 'carb'
-          : (item.aisle === 'Dairy/Eggs'
-            ? 'dairy'
-            : (item.aisle === 'Pantry/Canned' ? 'pantry' : 'produce')));
+      var category = classifyIngredientCategory(id, item);
 
       var record = {
         id: id,
