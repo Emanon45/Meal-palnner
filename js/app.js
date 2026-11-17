@@ -699,6 +699,7 @@
             order: idx + 1,
             title: typeof st.title === 'string' && st.title.trim() ? st.title.trim() : ('Step ' + (idx + 1)),
             station: typeof st.station === 'string' && st.station.trim() ? st.station.trim() : 'Kitchen Station',
+            prepType: (st.prepType === 'batch' || st.prepType === 'fresh') ? st.prepType : '',
             startMinute: clampInt(st.startMinute, 0, 240, idx * 5),
             durationMinutes: durMin,
             timerSeconds: clampInt(st.timerSeconds, 10, 86400, durMin * 60),
@@ -784,22 +785,22 @@
         allDbLines.join('\n'),
         '3. DO NOT hallucinate or mention ANY meat, fish, vegetable, bean, grain, dairy, or tortilla/bread that is not listed in that meal slot above! (For example: do NOT mention beef/sirloin, bell peppers, zucchini, black beans, avocado, cheese, or tortillas—only use the exact protein, veggies, and carbs listed for that slot, plus zero-calorie dry spices, herbs, citrus juice, vinegar, mustard, soy sauce, or hot sauce).',
         '4. NEVER write hardcoded weights, ounces, or cup measurements (like "6 oz", "200g", or "1/2 cup") inside "cookingMethod" or "seasoningTwist"—the app dynamically calculates exact gram/cup portions per person underneath.',
+        '5. TIME-SAVING BATCH PREP RULES: I am short on time (keep Sunday batch prep <= 35-40 min, max 2-3 stations). Tag each prepTimeline step with "prepType": "batch" (only Lunch & Dinner meats/rice/stew for Fridge Days 1-4 & Freezer Day 5+) vs "prepType": "fresh" (Breakfast, Snack, and cold raw toppings made fresh in 2-5 min—never batch-scramble 7 days of eggs or freeze berries in yogurt).',
         '',
         'Return ONLY a valid JSON object (no markdown commentary) with this exact structure:',
         '{',
         '  "weeklyTheme": "Short catchy weekly culinary theme",',
         '  "meals": [',
-        '    { "id": "breakfast", "title": "New Breakfast Name matching Breakfast ingredients", "cookingMethod": "Step-by-step method using ONLY the Breakfast ingredients above (no hardcoded weights)", "seasoningTwist": "Dry spices, herbs & zero-cal aromatics" },',
-        '    { "id": "lunch", "title": "New Lunch Name matching Lunch ingredients", "cookingMethod": "Step-by-step method using ONLY the Lunch ingredients above (no hardcoded weights)", "seasoningTwist": "Dry spices, herbs & zero-cal aromatics" },',
-        '    { "id": "dinner", "title": "New Dinner Name matching Dinner ingredients", "cookingMethod": "Step-by-step method using ONLY the Dinner ingredients above (no hardcoded weights)", "seasoningTwist": "Dry spices, herbs & zero-cal aromatics" },',
-        '    { "id": "snack", "title": "New Snack Name matching Snack ingredients", "cookingMethod": "How to prep using ONLY the Snack ingredients above", "seasoningTwist": "Cinnamon, vanilla, cocoa, espresso, or citrus zest" }',
+        '    { "id": "breakfast", "title": "New Breakfast Name matching Breakfast ingredients", "cookingMethod": "Quick 5-min fresh morning prep using ONLY Breakfast ingredients", "seasoningTwist": "Dry spices, herbs & zero-cal aromatics" },',
+        '    { "id": "lunch", "title": "New Lunch Name matching Lunch ingredients", "cookingMethod": "Batch-cook method using ONLY Lunch ingredients", "seasoningTwist": "Dry spices, herbs & zero-cal aromatics" },',
+        '    { "id": "dinner", "title": "New Dinner Name matching Dinner ingredients", "cookingMethod": "Batch-cook method using ONLY Dinner ingredients", "seasoningTwist": "Dry spices, herbs & zero-cal aromatics" },',
+        '    { "id": "snack", "title": "New Snack Name matching Snack ingredients", "cookingMethod": "2-min fresh assembly using ONLY Snack ingredients", "seasoningTwist": "Cinnamon, vanilla, cocoa, espresso, or citrus zest" }',
         '  ],',
         '  "prepTimeline": [',
-        '    { "id": "step_1", "order": 1, "title": "Step 1 Title", "station": "Dutch Oven / Rice Cooker", "startMinute": 0, "durationMinutes": 35, "timerSeconds": 2100, "parallelNote": "What to do while this cooks" },',
-        '    { "id": "step_2", "order": 2, "title": "Step 2 Title", "station": "Air Fryer / Oven", "startMinute": 5, "durationMinutes": 20, "timerSeconds": 1200, "parallelNote": "What to do in parallel" },',
-        '    { "id": "step_3", "order": 3, "title": "Step 3 Title", "station": "Skillet", "startMinute": 10, "durationMinutes": 12, "timerSeconds": 720, "parallelNote": "What to do in parallel" },',
-        '    { "id": "step_4", "order": 4, "title": "Step 4 Title", "station": "Prep Board", "startMinute": 15, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Chop the exact produce from the meal slots" },',
-        '    { "id": "step_5", "order": 5, "title": "Step 5 Title", "station": "Counter", "startMinute": 30, "durationMinutes": 10, "timerSeconds": 600, "parallelNote": "Portion into Fridge (Days 1-4) & Freezer (Day 5+)" }',
+        '    { "id": "step_1", "order": 1, "prepType": "batch", "title": "Batch: Rice Cooker + Dinner Braise", "station": "Dutch Oven / Rice Cooker", "startMinute": 0, "durationMinutes": 30, "timerSeconds": 1800, "parallelNote": "Start rice and dinner braise together" },',
+        '    { "id": "step_2", "order": 2, "prepType": "batch", "title": "Batch: Sear Lunch Protein", "station": "Skillet", "startMinute": 5, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Cook lunch protein in one batch while dinner simmers" },',
+        '    { "id": "step_3", "order": 3, "prepType": "batch", "title": "Batch: Portion Fridge (Days 1-4) & Freezer (Day 5+)", "station": "Counter", "startMinute": 30, "durationMinutes": 10, "timerSeconds": 600, "parallelNote": "Cool and pack Lunch & Dinner containers" },',
+        '    { "id": "step_4", "order": 4, "prepType": "fresh", "title": "Daily Fresh (2-5 min): Breakfast, Snack & Raw Toppings", "station": "Skillet / Prep Board", "startMinute": 0, "durationMinutes": 5, "timerSeconds": 300, "parallelNote": "Cook eggs/potatoes and mix skyr/berries/raw veggies fresh so nothing gets soggy" }',
         '  ]',
         '}'
       ].join('\n');
@@ -817,7 +818,10 @@
         '3. Design 4 cohesive, delicious, ZERO-ADDED-OIL recipes (Breakfast, Lunch, Dinner, Snack) built strictly around the cheapest real items you found, with daily ingredient gram weights summing close to the Active Daily Macro Targets above.',
         '4. Define EVERY ingredient you use inside "customIngredients" with its real store ("Super C", "Maxi", or "Walmart"), aisle ("Produce", "Meat", "Dairy/Eggs", "Pantry/Canned", or "Frozen"), exact per100g nutrition, cookedYield, packageGrams, unitLabel, and exact cadPerPackage you observed.',
         '5. List each meal\'s exact ingredients inside its "ingredients" array ([{"id": "...", "grams": 150}]) using raw/as-purchased gram weights.',
-        '6. NEVER write hardcoded weights or volumes inside "cookingMethod" or "seasoningTwist"—my app scales exact gram/cup portions dynamically per person.',
+        '6. TIME-SAVING BATCH PREP RULES (I DO NOT HAVE A LOT OF TIME):',
+        '   - Keep total active batch cooking to <= 35-40 minutes using at most 2-3 stations in parallel (never 4 hot pans at once).',
+        '   - Strictly separate "prepType": "batch" (Lunch & Dinner meats, rice, stews, beans that store in Fridge Days 1-4 and Freeze Day 5+) from "prepType": "fresh" (Breakfast, Snack, and raw crunchy toppings/sauces prepared fresh in 2-5 min on the day of eating—NEVER tell me to batch-scramble 7 days of eggs or freeze berries in yogurt!).',
+        '7. NEVER write hardcoded weights or volumes inside "cookingMethod" or "seasoningTwist"—my app scales exact gram/cup portions dynamically per person.',
         '',
         'Return ONLY a valid JSON object (no markdown commentary) with this exact structure:',
         '{',
@@ -836,17 +840,16 @@
         '    }',
         '  },',
         '  "meals": [',
-        '    { "id": "breakfast", "title": "Breakfast Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "ingredients": [{ "id": "example_item_id", "grams": 150 }] },',
-        '    { "id": "lunch", "title": "Lunch Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "ingredients": [{ "id": "example_item_id", "grams": 180 }] },',
-        '    { "id": "dinner", "title": "Dinner Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "ingredients": [{ "id": "example_item_id", "grams": 180 }] },',
-        '    { "id": "snack", "title": "Snack Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Cinnamon, vanilla, or citrus zest", "ingredients": [{ "id": "example_item_id", "grams": 200 }] }',
+        '    { "id": "breakfast", "title": "Breakfast Name", "cookingMethod": "Quick 5-min fresh morning prep (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "ingredients": [{ "id": "example_item_id", "grams": 150 }] },',
+        '    { "id": "lunch", "title": "Lunch Name", "cookingMethod": "Batch-cook method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "ingredients": [{ "id": "example_item_id", "grams": 180 }] },',
+        '    { "id": "dinner", "title": "Dinner Name", "cookingMethod": "Batch-cook method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "ingredients": [{ "id": "example_item_id", "grams": 180 }] },',
+        '    { "id": "snack", "title": "Snack Name", "cookingMethod": "2-min fresh assembly (no hardcoded weights)", "seasoningTwist": "Cinnamon, vanilla, or citrus zest", "ingredients": [{ "id": "example_item_id", "grams": 200 }] }',
         '  ],',
         '  "prepTimeline": [',
-        '    { "id": "step_1", "order": 1, "title": "Step 1 Title", "station": "Dutch Oven / Rice Cooker", "startMinute": 0, "durationMinutes": 35, "timerSeconds": 2100, "parallelNote": "What to do while cooking" },',
-        '    { "id": "step_2", "order": 2, "title": "Step 2 Title", "station": "Air Fryer / Oven", "startMinute": 5, "durationMinutes": 20, "timerSeconds": 1200, "parallelNote": "What to do in parallel" },',
-        '    { "id": "step_3", "order": 3, "title": "Step 3 Title", "station": "Skillet", "startMinute": 10, "durationMinutes": 12, "timerSeconds": 720, "parallelNote": "What to do in parallel" },',
-        '    { "id": "step_4", "order": 4, "title": "Step 4 Title", "station": "Prep Board", "startMinute": 15, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Chop produce & prep dressings/sauces" },',
-        '    { "id": "step_5", "order": 5, "title": "Step 5 Title", "station": "Counter", "startMinute": 30, "durationMinutes": 10, "timerSeconds": 600, "parallelNote": "Portion into Fridge (Days 1-4) & Freezer (Day 5+)" }',
+        '    { "id": "step_1", "order": 1, "prepType": "batch", "title": "Batch: Rice Cooker + Dinner Simmer", "station": "Rice Cooker + Dutch Oven", "startMinute": 0, "durationMinutes": 30, "timerSeconds": 1800, "parallelNote": "Start rice and dinner braise together; no babysitting needed." },',
+        '    { "id": "step_2", "order": 2, "prepType": "batch", "title": "Batch: Sear Lunch Protein", "station": "Skillet", "startMinute": 5, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Cook all lunch protein in one batch while dinner simmers." },',
+        '    { "id": "step_3", "order": 3, "prepType": "batch", "title": "Batch: Cool & Split Fridge (Days 1-4) + Freezer (Day 5+)", "station": "Counter", "startMinute": 30, "durationMinutes": 10, "timerSeconds": 600, "parallelNote": "Portion Lunch & Dinner containers; freeze Day 5+ portions." },',
+        '    { "id": "step_4", "order": 4, "prepType": "fresh", "title": "Daily Fresh (2-5 min): Breakfast, Snack & Cold Toppings", "station": "Skillet / Bowl", "startMinute": 0, "durationMinutes": 5, "timerSeconds": 300, "parallelNote": "Make breakfast, snack bowl, and raw crunchy toppings fresh so nothing gets soggy or rubbery." }',
         '  ]',
         '}'
       ].join('\n');
@@ -867,9 +870,10 @@
       '1. NEVER write hardcoded weights or volumes (like "6 oz", "200g", or "1/2 cup") inside "cookingMethod" or "seasoningTwist"—the app dynamically calculates exact gram/cup portions per person.',
       '2. Every single ingredient you mention in a meal\'s "title" or "cookingMethod" MUST either be one of the slot\'s existing ingredients above OR be explicitly swapped/added in the JSON so my Grocery List and Macro Engine stay 100% accurate:',
       '   (a) If you introduce ANY new food item not in the 25 built-in IDs above (e.g. "sirloin_steak", "black_beans", "zucchini", "bell_peppers", "salsa_verde"), define it inside "customIngredients" with its aisle ("Produce", "Meat", "Dairy/Eggs", "Pantry/Canned", or "Frozen"), per100g macros, packageGrams, unitLabel, and estimated cadPerPackage.',
-      '   (b) To replace Lunch or Dinner\'s main meat, set "primaryProteinId" on that meal (e.g. "primaryProteinId": "sirloin_steak").',
+      '   (b) To replace Lunch or Dinner\'s main meat, ALWAYS set "primaryProteinId" on that meal (e.g. "primaryProteinId": "chicken_breast" or "sirloin_steak")—never leave it null if the title names a specific meat.',
       '   (c) To replace a default side/veggie/bean in a meal, map it in "ingredientSwaps" (e.g. {"white_beans_cnd": "black_beans", "cabbage": "zucchini"}).',
       '   (d) To add extra veggies/toppings to a meal, list them in "customAddons" (e.g. [{"id": "bell_peppers", "grams": 100}, {"id": "salsa_verde", "grams": 45}]).',
+      '3. TIME-SAVING BATCH PREP RULES: I am short on time (keep Sunday batch prep <= 35-40 min, max 2-3 stations). Tag each prepTimeline step with "prepType": "batch" (only Lunch & Dinner meats/rice/stew for Fridge Days 1-4 & Freezer Day 5+) vs "prepType": "fresh" (Breakfast, Snack, and cold raw toppings made fresh in 2-5 min—never batch-scramble 7 days of eggs or freeze berries in yogurt).',
       '',
       'Return ONLY a valid JSON object (no markdown commentary) with this exact structure:',
       '{',
@@ -922,11 +926,10 @@
       '    }',
       '  ],',
       '  "prepTimeline": [',
-      '    { "id": "step_1", "order": 1, "title": "Step 1 Title", "station": "Dutch Oven / Rice Cooker", "startMinute": 0, "durationMinutes": 35, "timerSeconds": 2100, "parallelNote": "What to do while this cooks" },',
-      '    { "id": "step_2", "order": 2, "title": "Step 2 Title", "station": "Air Fryer / Oven", "startMinute": 5, "durationMinutes": 20, "timerSeconds": 1200, "parallelNote": "What to do in parallel" },',
-      '    { "id": "step_3", "order": 3, "title": "Step 3 Title", "station": "Skillet", "startMinute": 10, "durationMinutes": 12, "timerSeconds": 720, "parallelNote": "What to do in parallel" },',
-      '    { "id": "step_4", "order": 4, "title": "Step 4 Title", "station": "Prep Board", "startMinute": 15, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Chop veggies & sauces" },',
-      '    { "id": "step_5", "order": 5, "title": "Step 5 Title", "station": "Counter", "startMinute": 30, "durationMinutes": 10, "timerSeconds": 600, "parallelNote": "Portion into Fridge (Days 1-4) & Freezer (Day 5+)" }',
+      '    { "id": "step_1", "order": 1, "prepType": "batch", "title": "Batch: Rice Cooker + Dinner Simmer", "station": "Dutch Oven / Rice Cooker", "startMinute": 0, "durationMinutes": 30, "timerSeconds": 1800, "parallelNote": "Start rice and dinner braise together" },',
+      '    { "id": "step_2", "order": 2, "prepType": "batch", "title": "Batch: Sear Lunch Protein", "station": "Skillet", "startMinute": 5, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Cook lunch protein in one batch while dinner simmers" },',
+      '    { "id": "step_3", "order": 3, "prepType": "batch", "title": "Batch: Portion Fridge (Days 1-4) & Freezer (Day 5+)", "station": "Counter", "startMinute": 30, "durationMinutes": 10, "timerSeconds": 600, "parallelNote": "Cool and pack Lunch & Dinner containers" },',
+      '    { "id": "step_4", "order": 4, "prepType": "fresh", "title": "Daily Fresh (2-5 min): Breakfast, Snack & Raw Toppings", "station": "Skillet / Prep Board", "startMinute": 0, "durationMinutes": 5, "timerSeconds": 300, "parallelNote": "Cook eggs/potatoes and mix skyr/berries/raw veggies fresh so nothing gets soggy" }',
       '  ]',
       '}'
     ].join('\n');
@@ -1759,6 +1762,81 @@
     splitCard.appendChild(freezerBox);
     frag.appendChild(splitCard);
 
+    // 1b. Batch-Cook Now vs. Prepare Fresh Guide (saves time & prevents rubbery eggs/soggy berries)
+    var COLD_FRESH_IDS = {
+      cabbage: true, cucumber: true, carrots: true, pico: true,
+      tzatziki_0: true, skyr_0: true, berries: true, banana: true,
+      whey_isolate: true, green_onion: true, whole_egg: true, egg_whites: true,
+      aromatics_zero: true
+    };
+    var batchTotalsMap = {};
+    var freshDailyMap = {};
+    var prepDays = currentScaledPlan.days || 1;
+    var plansForPrep = (Array.isArray(currentHouseholdPlans) && currentHouseholdPlans.length > 0)
+      ? currentHouseholdPlans
+      : [{ primaryPlan: currentDailyPlan, altPlan: null }];
+
+    plansForPrep.forEach(function (hp) {
+      var pDays = hp.altPlan ? (prepDays - Math.floor(prepDays / 2)) : prepDays;
+      var aDays = hp.altPlan ? Math.floor(prepDays / 2) : 0;
+      var collectPlan = function (planObj, multDays) {
+        if (!planObj || !Array.isArray(planObj.meals) || multDays <= 0) return;
+        planObj.meals.forEach(function (ml) {
+          var isBatchSlot = ml.id === 'lunch' || ml.id === 'dinner';
+          (ml.ingredients || []).forEach(function (ing) {
+            if (!ing || ing.grams <= 0) return;
+            if (isBatchSlot && !COLD_FRESH_IDS[ing.id]) {
+              if (!batchTotalsMap[ing.id]) {
+                batchTotalsMap[ing.id] = { name: ing.name, rawGrams: 0, cookedGrams: 0 };
+              }
+              batchTotalsMap[ing.id].rawGrams += Math.round(ing.grams * multDays);
+              batchTotalsMap[ing.id].cookedGrams += Math.round(ing.cookedGrams * multDays);
+            } else if (ing.id !== 'aromatics_zero') {
+              if (!freshDailyMap[ing.id]) {
+                freshDailyMap[ing.id] = { name: ing.name, slot: ml.slot, grams: 0 };
+              }
+              freshDailyMap[ing.id].grams += Math.round(ing.grams);
+            }
+          });
+        });
+      };
+      collectPlan(hp.primaryPlan, pDays);
+      if (hp.altPlan) collectPlan(hp.altPlan, aDays);
+    });
+
+    var guideCard = el('div', 'card space-stack');
+    guideCard.appendChild(el('h2', 'text-base font-bold text-slate-100', 'Batch-Cook vs. Prepare Fresh (' + prepDays + ' Days)'));
+
+    var batchBox = el('div', 'subcard space-y-1');
+    batchBox.appendChild(el('h3', 'text-sm font-bold text-emerald-300', 'Batch-Cook Now (Lunch & Dinner — Fridge Days 1-4 / Freeze Day 5+)'));
+    var batchKeys = Object.keys(batchTotalsMap);
+    if (batchKeys.length === 0) {
+      batchBox.appendChild(el('p', 'text-xs text-slate-300', 'No batch-cooked items in this plan.'));
+    } else {
+      var batchUl = el('ul', 'text-xs text-slate-200 space-y-1 pl-4 list-disc');
+      batchKeys.forEach(function (bid) {
+        var b = batchTotalsMap[bid];
+        batchUl.appendChild(el('li', 'wrap-anywhere', b.name + ': ' + b.rawGrams + 'g raw (~' + b.cookedGrams + 'g cooked total)'));
+      });
+      batchBox.appendChild(batchUl);
+    }
+    guideCard.appendChild(batchBox);
+
+    var freshBox = el('div', 'subcard space-y-1');
+    freshBox.appendChild(el('h3', 'text-sm font-bold text-amber-300', 'Prepare Fresh / 2-5 Min Assembly (Do NOT Freeze)'));
+    freshBox.appendChild(el('p', 'text-xs text-slate-300', 'Keep eggs, skyr, berries, and raw crunchy veggies separate until eating so nothing gets watery or soggy.'));
+    var freshKeys = Object.keys(freshDailyMap);
+    if (freshKeys.length > 0) {
+      var freshUl = el('ul', 'text-xs text-slate-200 space-y-1 pl-4 list-disc');
+      freshKeys.forEach(function (fid) {
+        var f = freshDailyMap[fid];
+        freshUl.appendChild(el('li', 'wrap-anywhere', f.name + ' (' + f.slot + '): ~' + f.grams + 'g/day'));
+      });
+      freshBox.appendChild(freshUl);
+    }
+    guideCard.appendChild(freshBox);
+    frag.appendChild(guideCard);
+
     // 2. Parallel Build-System Timeline + Timers
     var timelineCard = el('div', 'card space-stack');
     timelineCard.appendChild(el('h2', 'text-base font-bold text-slate-100', 'Parallel "Build-System" Cooking Timeline'));
@@ -1788,9 +1866,15 @@
       var stepEl = el('article', 'subcard space-y-2');
       stepEl.setAttribute('data-step-id', step.id);
 
+      var inferredFresh = step.prepType === 'fresh' ||
+        (!step.prepType && /\b(egg|scramble|skyr|whey|berry|berries|pico|tzatziki|slaw|cucumber|cabbage|fresh)\b/i.test((step.title || '') + ' ' + (step.parallelNote || '')));
+      var stepTypeLabel = inferredFresh ? 'PREP FRESH' : 'BATCH COOK';
+      var stepTypeClass = inferredFresh ? 'badge radar-flyer' : 'badge radar-historic';
+
       stepEl.appendChild(el('h3', 'text-sm font-bold text-slate-100 wrap-anywhere', step.order + '. ' + step.title));
 
       var metaRow = el('div', 'flex-wrap-row');
+      metaRow.appendChild(el('span', stepTypeClass, stepTypeLabel));
       metaRow.appendChild(el('span', 'badge', step.station));
       metaRow.appendChild(el('span', 'badge', 'T+' + step.startMinute + ' min (' + step.durationMinutes + ' min)'));
       stepEl.appendChild(metaRow);

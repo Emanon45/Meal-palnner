@@ -895,13 +895,24 @@
       return mapped;
     }
 
+    function scaleCustomMeatGrams(baseId, baseGrams, customId) {
+      if (!baseGrams || baseId === customId || !hasOwn(db, baseId) || !hasOwn(db, customId)) return baseGrams;
+      var baseP = (db[baseId].per100g && db[baseId].per100g.protein) || 0;
+      var custP = (db[customId].per100g && db[customId].per100g.protein) || 0;
+      if (baseP > 0 && custP > 0) {
+        return Math.max(60, Math.min(450, Math.round(baseGrams * (baseP / custP))));
+      }
+      return baseGrams;
+    }
+
     var resolvedLunchMeatPairs = (templates.lunch.primaryProteinId && hasOwn(db, templates.lunch.primaryProteinId))
-      ? [[templates.lunch.primaryProteinId, g[lunchMeatIds[0]] || 160]]
+      ? [[templates.lunch.primaryProteinId, scaleCustomMeatGrams(lunchMeatIds[0], g[lunchMeatIds[0]] || 160, templates.lunch.primaryProteinId)]]
       : lunchMeatIds.map(function (mid) { return [mid, g[mid] || 0]; });
 
     var resolvedDinnerMeatId = (templates.dinner.primaryProteinId && hasOwn(db, templates.dinner.primaryProteinId))
       ? templates.dinner.primaryProteinId
       : dinnerSwap;
+    var resolvedDinnerMeatGrams = scaleCustomMeatGrams(dinnerSwap, g[dinnerSwap] || 0, resolvedDinnerMeatId);
 
     var slotSpecs = [
       {
@@ -939,7 +950,7 @@
         title: dinnerTitle,
         activeSwap: templates.dinner.primaryProteinId ? null : dinnerSwap,
         pairs: applySlotOverrides(templates.dinner, [
-          [resolvedDinnerMeatId, g[dinnerSwap] || 0],
+          [resolvedDinnerMeatId, resolvedDinnerMeatGrams],
           ['white_beans_cnd', g.white_beans_cnd || 0],
           ['diced_tomatoes', g.diced_tomatoes || 0],
           ['rice_dry', riceD],
