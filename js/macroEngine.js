@@ -118,10 +118,10 @@
       cadPer100g: 1.29, regularCadPer100g: 1.49, historicalLowCadPer100g: 0.88
     }),
     pico: makeDbEntry({
-      name: 'Pico de Gallo',
+      name: 'Roma Tomatoes, Onion & Lime (for Pico de Gallo)',
       aisle: 'Produce',
       calories: 20, protein: 0.9, fat: 0.2, carbs: 4.3,
-      cookedYield: 1.00, packageGrams: 400, unitLabel: 'tub (400g)',
+      cookedYield: 1.00, packageGrams: 400, unitLabel: 'batch (400g)',
       requiresThaw: false, pantryDefault: false,
       cadPer100g: 0.99, regularCadPer100g: 1.12, historicalLowCadPer100g: 0.75
     }),
@@ -255,10 +255,10 @@
       cadPer100g: 0.40, regularCadPer100g: 0.47, historicalLowCadPer100g: 0.27
     }),
     tzatziki_0: makeDbEntry({
-      name: '0% Greek Yogurt Tzatziki / Light Toum',
+      name: '0% Greek Yogurt + Cucumber/Garlic/Lemon (for Tzatziki)',
       aisle: 'Dairy/Eggs',
       calories: 55, protein: 8.0, fat: 0.2, carbs: 4.5,
-      cookedYield: 1.00, packageGrams: 500, unitLabel: 'tub (500g)',
+      cookedYield: 1.00, packageGrams: 500, unitLabel: 'yogurt + veg (500g)',
       requiresThaw: false, pantryDefault: false,
       cadPer100g: 0.90, regularCadPer100g: 1.00, historicalLowCadPer100g: 0.70
     }),

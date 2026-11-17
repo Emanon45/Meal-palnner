@@ -162,7 +162,7 @@
       }
     },
     "pico": {
-      "name": "Pico de Gallo (Tomato/Onion/Lime)",
+      "name": "Roma Tomatoes, Onion & Lime (for Pico de Gallo)",
       "aisle": "Produce",
       "per100g": {
         "calories": 20,
@@ -172,7 +172,7 @@
       },
       "cookedYield": 1.0,
       "packageGrams": 400,
-      "unitLabel": "tub",
+      "unitLabel": "batch (400g)",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
@@ -587,7 +587,7 @@
       }
     },
     "tzatziki_0": {
-      "name": "0% Greek Yogurt Tzatziki / Light Toum",
+      "name": "0% Greek Yogurt + Cucumber/Garlic/Lemon (for Tzatziki)",
       "aisle": "Dairy/Eggs",
       "per100g": {
         "calories": 55,
@@ -597,7 +597,7 @@
       },
       "cookedYield": 1.0,
       "packageGrams": 500,
-      "unitLabel": "tub",
+      "unitLabel": "yogurt + veg (500g)",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
@@ -844,13 +844,13 @@
     {
       "id": "step_4",
       "order": 4,
-      "title": "Cold Prep: Shred Cabbage, Carrots, Cucumber & Lasary Voatabia",
+      "title": "Cold Prep: Make Pico de Gallo, 0% Tzatziki & Slaw",
       "station": "Prep Board",
       "startMinute": 18,
       "durationMinutes": 15,
       "timerSeconds": 900,
-      "parallelNote": "Shred green cabbage and carrots, dice English cucumber and tomatoes for lasary voatabia, and portion 0% tzatziki.",
-      "zeroOilNote": "Dress lasary voatabia with lime juice, salt, and scallion with zero added oil."
+      "parallelNote": "Shred cabbage and carrots; dice Roma tomatoes, onion, and lime for pico de gallo; grate and squeeze cucumber dry to mix with 0% Greek yogurt, garlic, and lemon for tzatziki.",
+      "zeroOilNote": "Dress pico de gallo and lasary voatabia with lime juice, salt, and scallion with zero added oil."
     },
     {
       "id": "step_5",

@@ -94,13 +94,13 @@
       {
         id: 'step_4',
         order: 4,
-        title: 'Cold Prep: Shred Cabbage, Carrots, Cucumber & Lasary Voatabia',
+        title: 'Cold Prep: Make Pico de Gallo, 0% Tzatziki & Slaw',
         station: 'Prep Board',
         startMinute: 18,
         durationMinutes: 15,
         timerSeconds: 900,
-        parallelNote: 'Shred cabbage and carrots, dice cucumber and tomatoes for lasary voatabia, portion 0% tzatziki.',
-        zeroOilNote: 'Dress lasary voatabia with lime juice and scallion with zero added oil.'
+        parallelNote: 'Shred cabbage and carrots; dice Roma tomatoes, onion, and lime for pico de gallo; grate and squeeze cucumber dry to mix with 0% Greek yogurt, garlic, and lemon for tzatziki.',
+        zeroOilNote: 'Dress pico de gallo and lasary voatabia with lime juice and scallion with zero added oil.'
       },
       {
         id: 'step_5',
@@ -1434,7 +1434,7 @@
       headerRow.appendChild(el('h3', 'text-base font-bold text-emerald-300 wrap-anywhere', meal.slot + ': ' + meal.title));
 
       var isEaten = isMealEaten(eatenMap[meal.id]);
-      var eatenBtn = el('button', 'pill-btn', isEaten ? 'Eaten ✓' : 'Mark Eaten');
+      var eatenBtn = el('button', 'pill-btn', isEaten ? 'Eaten' : 'Mark Eaten');
       eatenBtn.type = 'button';
       eatenBtn.setAttribute('aria-pressed', isEaten ? 'true' : 'false');
       eatenBtn.addEventListener('click', function () {
@@ -1517,6 +1517,10 @@
         var line = ing.name + ' — ' + ing.householdMeasure;
         if (ing.id === 'rice_dry') {
           line += ' (' + ing.grams + 'g dry / ' + ing.cookedGrams + 'g cooked)';
+        } else if (ing.id === 'pico') {
+          line += ' [Prep: dice tomatoes, onion & scallion, toss with lime & salt]';
+        } else if (ing.id === 'tzatziki_0') {
+          line += ' [Prep: grate & squeeze cucumber dry, mix with 0% Greek yogurt, garlic & lemon]';
         }
         ingList.appendChild(el('li', 'wrap-anywhere', line));
       });
@@ -1530,8 +1534,7 @@
       upBtn.type = 'button';
       upBtn.setAttribute('aria-label', 'Thumbs up ' + meal.slot);
       upBtn.setAttribute('aria-pressed', fb.rating === 'up' ? 'true' : 'false');
-      upBtn.appendChild(el('span', null, '👍'));
-      upBtn.firstChild.setAttribute('aria-hidden', 'true');
+      upBtn.innerHTML = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>';
       upBtn.addEventListener('click', function () {
         var cur = appState.feedback[meal.id];
         cur.rating = cur.rating === 'up' ? null : 'up';
@@ -1545,8 +1548,7 @@
       downBtn.type = 'button';
       downBtn.setAttribute('aria-label', 'Thumbs down ' + meal.slot);
       downBtn.setAttribute('aria-pressed', fb.rating === 'down' ? 'true' : 'false');
-      downBtn.appendChild(el('span', null, '👎'));
-      downBtn.firstChild.setAttribute('aria-hidden', 'true');
+      downBtn.innerHTML = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/></svg>';
       downBtn.addEventListener('click', function () {
         var cur = appState.feedback[meal.id];
         cur.rating = cur.rating === 'down' ? null : 'down';
