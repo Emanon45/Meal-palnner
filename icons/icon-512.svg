@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Meal Plan icon">
+  <rect width="512" height="512" fill="#0f172a"/>
+  <circle cx="256" cy="256" r="152" fill="#1e293b" stroke="#059669" stroke-width="16"/>
+  <path d="M 248 232 C 208 232 184 200 184 168 C 216 168 248 192 248 232 Z" fill="#059669"/>
+  <path d="M 256 232 C 256 176 288 144 336 144 C 336 192 304 232 256 232 Z" fill="#10b981"/>
+  <path d="M 168 248 L 344 248 C 344 304 304 344 256 344 C 208 344 168 304 168 248 Z" fill="#f8fafc"/>
+  <rect x="224" y="344" width="64" height="16" rx="8" fill="#cbd5e1"/>
+  <path d="M 216 288 L 248 312 L 296 264" fill="none" stroke="#059669" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

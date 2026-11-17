@@ -1,0 +1,67 @@
+name: Weekly Flyer Sync
+
+on:
+  schedule:
+    # Every Thursday at 8:00 AM EST (13:00 UTC)
+    - cron: '0 13 * * 4'
+  workflow_dispatch:
+    inputs:
+      postal_code:
+        description: 'Canadian Postal Code or 3-character FSA (e.g. H1W, H2X 1Y4)'
+        required: false
+        default: 'H1W'
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  sync-flyer-plan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'scripts/requirements.txt'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r scripts/requirements.txt
+
+      - name: Run pipeline unit tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Update weekly flyer and meal plan
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          POSTAL_CODE: ${{ inputs.postal_code || vars.POSTAL_CODE || 'H1W' }}
+        run: python scripts/update_plan.py
+
+      - name: Verify dual data.json outputs are identical
+        run: |
+          test -f public/data.json
+          test -f data.json
+          cmp -s public/data.json data.json
+
+      - name: Commit and push updated data.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add public/data.json data.json
+          if git diff --cached --quiet && [ -z "$(git status --porcelain -- public/data.json data.json)" ]; then
+            echo "No flyer or meal plan changes to commit."
+            exit 0
+          fi
+
+          git commit -m "chore: weekly Canadian flyer & meal plan sync [skip ci]"
+          git push
