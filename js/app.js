@@ -260,6 +260,15 @@
       frozenMealsOnHand: 0,
       postalCode: 'H1W',
       profileDescription: 'High-Protein Batch Prep',
+      householdMembers: [
+        {
+          id: 'p1',
+          name: 'Me',
+          preset: 'cut',
+          targets: { calories: 1900, protein: 200, fat: 50, carbs: 160 }
+        }
+      ],
+      activeMemberId: 'p1',
       geminiPromptMode: 'flyer_locked',
       customMealJsonRaw: '',
       timers: {},
@@ -396,6 +405,37 @@
       profileDescription: (typeof raw.profileDescription === 'string' && raw.profileDescription.trim())
         ? raw.profileDescription.trim().replace(/\s*•\s*Zero Added Oil/i, '').slice(0, 140)
         : def.profileDescription,
+      householdMembers: (function () {
+        if (!Array.isArray(raw.householdMembers) || raw.householdMembers.length === 0) {
+          return [
+            {
+              id: 'p1',
+              name: 'Me',
+              preset: preset,
+              targets: Object.assign({}, targets)
+            }
+          ];
+        }
+        return raw.householdMembers.slice(0, 8).map(function (m, idx) {
+          if (!m || typeof m !== 'object') {
+            return { id: 'p' + (idx + 1), name: 'Person ' + (idx + 1), preset: 'cut', targets: Object.assign({}, def.targets) };
+          }
+          var mPreset = ['cut', 'recomp', 'maintenance', 'custom'].indexOf(m.preset) !== -1 ? m.preset : 'cut';
+          var mRawT = (m.targets && typeof m.targets === 'object') ? m.targets : {};
+          return {
+            id: typeof m.id === 'string' && m.id.trim() ? m.id.trim() : ('p' + (idx + 1)),
+            name: typeof m.name === 'string' && m.name.trim() ? m.name.trim().slice(0, 32) : ('Person ' + (idx + 1)),
+            preset: mPreset,
+            targets: {
+              calories: clampInt(mRawT.calories, 500, 5000, def.targets.calories),
+              protein: clampInt(mRawT.protein, 40, 350, def.targets.protein),
+              fat: clampInt(mRawT.fat, 0, 200, def.targets.fat),
+              carbs: clampInt(mRawT.carbs, 0, 600, def.targets.carbs)
+            }
+          };
+        });
+      })(),
+      activeMemberId: typeof raw.activeMemberId === 'string' && raw.activeMemberId.trim() ? raw.activeMemberId.trim() : 'p1',
       geminiPromptMode: (raw.geminiPromptMode === 'allow_custom' || raw.geminiPromptMode === 'flyer_locked')
         ? raw.geminiPromptMode
         : 'flyer_locked',
@@ -427,11 +467,115 @@
   var appState = validateState(safeStorageGet(STORAGE_STATE_KEY));
   var currentDailyPlan = null;
   var currentScaledPlan = null;
+  var currentHouseholdPlans = [];
   var syncMessageText = '';
   var customJsonStatusText = '';
+  var shareStatusText = '';
   var lastTimerStatusText = '';
   var settingsBuilt = false;
   var timerIntervalId = null;
+
+  function getActiveMember() {
+    if (!Array.isArray(appState.householdMembers) || appState.householdMembers.length === 0) {
+      appState.householdMembers = [
+        {
+          id: 'p1',
+          name: 'Me',
+          preset: appState.preset || 'cut',
+          targets: Object.assign({}, appState.targets)
+        }
+      ];
+    }
+    var found = null;
+    for (var i = 0; i < appState.householdMembers.length; i++) {
+      if (appState.householdMembers[i].id === appState.activeMemberId) {
+        found = appState.householdMembers[i];
+        break;
+      }
+    }
+    if (!found) {
+      found = appState.householdMembers[0];
+      appState.activeMemberId = found.id;
+    }
+    appState.preset = found.preset;
+    appState.targets = Object.assign({}, found.targets);
+    return found;
+  }
+
+  function syncActiveMemberFromTopState() {
+    var active = getActiveMember();
+    active.preset = appState.preset;
+    active.targets = Object.assign({}, appState.targets);
+  }
+
+  function switchActiveMember(memberId) {
+    for (var i = 0; i < appState.householdMembers.length; i++) {
+      if (appState.householdMembers[i].id === memberId) {
+        appState.activeMemberId = memberId;
+        appState.preset = appState.householdMembers[i].preset;
+        appState.targets = Object.assign({}, appState.householdMembers[i].targets);
+        break;
+      }
+    }
+  }
+
+  function encodeSharePayload(viewMemberId) {
+    var payload = {
+      v: 1,
+      viewId: viewMemberId || appState.activeMemberId,
+      h: appState.horizonDays,
+      lSwap: appState.lunchSwap,
+      dSwap: appState.dinnerSwap,
+      split: appState.splitWeekVariety,
+      lAlt: appState.lunchSwapAlt,
+      dAlt: appState.dinnerSwapAlt,
+      postal: appState.postalCode,
+      members: appState.householdMembers,
+      customJson: appState.customMealJsonRaw || ''
+    };
+    var jsonStr = JSON.stringify(payload);
+    var b64 = window.btoa(unescape(encodeURIComponent(jsonStr)));
+    var baseUrl = window.location.href.split('#')[0];
+    return baseUrl + '#plan=' + encodeURIComponent(b64);
+  }
+
+  function tryImportSharedPlanFromHash() {
+    try {
+      var hash = window.location.hash || '';
+      if (hash.indexOf('#plan=') !== 0) return false;
+      var encoded = decodeURIComponent(hash.slice('#plan='.length));
+      var jsonStr = decodeURIComponent(escape(window.atob(encoded)));
+      var shared = JSON.parse(jsonStr);
+      if (!shared || typeof shared !== 'object') return false;
+
+      if (typeof shared.h === 'number') appState.horizonDays = clampInt(shared.h, 1, 30, 7);
+      if (typeof shared.lSwap === 'string') appState.lunchSwap = shared.lSwap;
+      if (typeof shared.dSwap === 'string') appState.dinnerSwap = shared.dSwap;
+      if (typeof shared.split === 'boolean') appState.splitWeekVariety = shared.split;
+      if (typeof shared.lAlt === 'string') appState.lunchSwapAlt = shared.lAlt;
+      if (typeof shared.dAlt === 'string') appState.dinnerSwapAlt = shared.dAlt;
+      if (typeof shared.postal === 'string') appState.postalCode = normalizePostalCode(shared.postal);
+      if (Array.isArray(shared.members) && shared.members.length > 0) {
+        appState = validateState(Object.assign({}, appState, {
+          householdMembers: shared.members,
+          activeMemberId: shared.viewId || shared.members[0].id,
+          customMealJsonRaw: typeof shared.customJson === 'string' ? shared.customJson : appState.customMealJsonRaw
+        }));
+      }
+      if (typeof shared.customJson === 'string' && shared.customJson.trim()) {
+        appState.customMealJsonRaw = shared.customJson.trim();
+        applyCustomMealJsonOverlay(appData, appState.customMealJsonRaw);
+      }
+      switchActiveMember(shared.viewId || appState.activeMemberId);
+      saveState();
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+      return true;
+    } catch (_err) {
+      return false;
+    }
+  }
 
   function applyCustomMealJsonOverlay(targetData, rawJsonStr) {
     if (!rawJsonStr || typeof rawJsonStr !== 'string' || !rawJsonStr.trim()) return false;
@@ -567,62 +711,99 @@
     if (disliked.length > 0) feedbackLine += '\nMeals I want to change / replace: ' + disliked.join(', ') + '.';
     if (liked.length > 0) feedbackLine += '\nMeals/notes I liked: ' + liked.join(', ') + '.';
 
+    var householdLine = '';
+    if (Array.isArray(appState.householdMembers) && appState.householdMembers.length > 1) {
+      var memberSummaries = appState.householdMembers.map(function (m) {
+        return m.name + ' (' + m.targets.calories + ' kcal / ' + m.targets.protein + 'g P)';
+      });
+      householdLine = '\nHousehold Members eating these meals (portions scale automatically per person): ' + memberSummaries.join(', ') + '.';
+    }
+
     var isCustomMode = appState.geminiPromptMode === 'allow_custom';
 
-    var rulesBlock = [
-      'CRITICAL RULES SO MY GROCERY LIST & MACRO ENGINE STAY 100% SYNCED:',
-      '1. NEVER write hardcoded weights or volumes (like "6 oz", "200g", or "1/2 cup") inside "cookingMethod" or "seasoningTwist"—the app dynamically calculates exact gram and cup portions underneath based on my macro sliders.',
-      '2. Current active proteins selected in my app: Lunch = ' + appState.lunchSwap + ', Dinner = ' + appState.dinnerSwap + '.',
-      '3. Built-in Flyer Basket Ingredient IDs already in my database:',
-      '   - Breakfast base: whole_egg, egg_whites, potatoes_raw, green_onion, pico, berries',
-      '   - Lunch base: ' + appState.lunchSwap + ' (or ground_chicken / tuna_water / sardines_water), rice_dry, potatoes_raw, cabbage, cucumber, carrots, edamame, corn, pico, tzatziki_0',
-      '   - Dinner base: ' + appState.dinnerSwap + ' (or pork_loin_lean / pork_shoulder / chicken_breast), white_beans_cnd, diced_tomatoes, rice_dry, skyr_0, aromatics_zero',
-      '   - Snack base: skyr_0, whey_isolate, berries, banana'
-    ];
+    var basePlanForPrompt = currentDailyPlan;
+    if (!basePlanForPrompt && getEngine()) {
+      basePlanForPrompt = getEngine().solveDailyPortions(appData, {
+        preset: appState.preset === 'custom' ? 'cut' : appState.preset,
+        targets: appState.targets,
+        lunchSwap: appState.lunchSwap,
+        dinnerSwap: appState.dinnerSwap
+      });
+    }
+
+    var exactSlotLines = [];
+    if (basePlanForPrompt && Array.isArray(basePlanForPrompt.meals)) {
+      basePlanForPrompt.meals.forEach(function (m) {
+        var names = (m.ingredients || []).map(function (ing) {
+          return ing.name + ' [`' + ing.id + '`]';
+        });
+        exactSlotLines.push('   - ' + m.slot + ' (`' + m.id + '` MUST use ONLY these grocery items): ' + names.join(', '));
+      });
+    }
+
+    var allDbLines = [];
+    var dbSource = (appData && appData.nutritionDb) || (getEngine() && getEngine().DEFAULT_NUTRITION_DB) || {};
+    Object.keys(dbSource).forEach(function (k) {
+      var item = dbSource[k];
+      if (!item || !item.name) return;
+      var tag = (item.price && item.price.onFlyer && item.price.radarTag && item.price.radarTag !== 'REGULAR')
+        ? (' [' + item.price.radarTag + ' at ' + (appData.winningStore || 'Store') + ']')
+        : '';
+      allDbLines.push('   * `' + k + '`: ' + item.name + tag);
+    });
 
     if (!isCustomMode) {
-      rulesBlock.push(
-        '4. FLYER-LOCKED MODE: Build your new culinary theme and recipes strictly around the built-in Flyer Basket ingredients above (plus herbs, spices, citrus, vinegar, mustard, soy sauce, hot sauce, or aromatics). Do NOT invent un-tracked meats or vegetables that are not in the list above.'
-      );
       return [
         'Generate a fresh weekly meal prep menu & parallel cooking timeline for my Meal Plan app.',
-        'Target Macros: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.',
-        'Winning Grocery Store: ' + (appData.winningStore || 'Super C') + ' (' + appState.postalCode + ').' + feedbackLine,
+        'Active Macro Targets: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.',
+        'Winning Grocery Store: ' + (appData.winningStore || 'Super C') + ' (' + appState.postalCode + ').' + householdLine + feedbackLine,
         '',
-        rulesBlock.join('\n'),
+        'STRICT ANTI-HALLUCINATION RULES (FLYER-BASKET LOCKED MODE):',
+        '1. Every meal card in my app renders a locked list of grocery ingredients underneath your text. You MUST write each meal\'s "title", "cookingMethod", and "seasoningTwist" using ONLY the exact ingredients assigned to that meal slot below:',
+        exactSlotLines.join('\n'),
+        '2. Full 25-item Flyer Database available in my app (for reference):',
+        allDbLines.join('\n'),
+        '3. DO NOT hallucinate or mention ANY meat, fish, vegetable, bean, grain, dairy, or tortilla/bread that is not listed in that meal slot above! (For example: do NOT mention beef/sirloin, bell peppers, zucchini, black beans, avocado, cheese, or tortillas—only use the exact protein, veggies, and carbs listed for that slot, plus zero-calorie dry spices, herbs, citrus juice, vinegar, mustard, soy sauce, or hot sauce).',
+        '4. NEVER write hardcoded weights, ounces, or cup measurements (like "6 oz", "200g", or "1/2 cup") inside "cookingMethod" or "seasoningTwist"—the app dynamically calculates exact gram/cup portions per person underneath.',
         '',
         'Return ONLY a valid JSON object (no markdown commentary) with this exact structure:',
         '{',
         '  "weeklyTheme": "Short catchy weekly culinary theme",',
         '  "meals": [',
-        '    { "id": "breakfast", "title": "New Breakfast Name", "cookingMethod": "Step-by-step method (no hardcoded weights)", "seasoningTwist": "Spices, herbs & sauce" },',
-        '    { "id": "lunch", "title": "New Lunch Bowl Name", "cookingMethod": "Step-by-step method (no hardcoded weights)", "seasoningTwist": "Spices, herbs & sauce" },',
-        '    { "id": "dinner", "title": "New Dinner Name", "cookingMethod": "Step-by-step method (no hardcoded weights)", "seasoningTwist": "Spices, herbs & sauce" },',
-        '    { "id": "snack", "title": "New Snack Name", "cookingMethod": "How to prep it", "seasoningTwist": "Flavorings & toppings" }',
+        '    { "id": "breakfast", "title": "New Breakfast Name matching Breakfast ingredients", "cookingMethod": "Step-by-step method using ONLY the Breakfast ingredients above (no hardcoded weights)", "seasoningTwist": "Dry spices, herbs & zero-cal aromatics" },',
+        '    { "id": "lunch", "title": "New Lunch Name matching Lunch ingredients", "cookingMethod": "Step-by-step method using ONLY the Lunch ingredients above (no hardcoded weights)", "seasoningTwist": "Dry spices, herbs & zero-cal aromatics" },',
+        '    { "id": "dinner", "title": "New Dinner Name matching Dinner ingredients", "cookingMethod": "Step-by-step method using ONLY the Dinner ingredients above (no hardcoded weights)", "seasoningTwist": "Dry spices, herbs & zero-cal aromatics" },',
+        '    { "id": "snack", "title": "New Snack Name matching Snack ingredients", "cookingMethod": "How to prep using ONLY the Snack ingredients above", "seasoningTwist": "Cinnamon, vanilla, cocoa, espresso, or citrus zest" }',
         '  ],',
         '  "prepTimeline": [',
         '    { "id": "step_1", "order": 1, "title": "Step 1 Title", "station": "Dutch Oven / Rice Cooker", "startMinute": 0, "durationMinutes": 35, "timerSeconds": 2100, "parallelNote": "What to do while this cooks" },',
         '    { "id": "step_2", "order": 2, "title": "Step 2 Title", "station": "Air Fryer / Oven", "startMinute": 5, "durationMinutes": 20, "timerSeconds": 1200, "parallelNote": "What to do in parallel" },',
         '    { "id": "step_3", "order": 3, "title": "Step 3 Title", "station": "Skillet", "startMinute": 10, "durationMinutes": 12, "timerSeconds": 720, "parallelNote": "What to do in parallel" },',
-        '    { "id": "step_4", "order": 4, "title": "Step 4 Title", "station": "Prep Board", "startMinute": 15, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Chop veggies & sauces" },',
+        '    { "id": "step_4", "order": 4, "title": "Step 4 Title", "station": "Prep Board", "startMinute": 15, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Chop the exact produce from the meal slots" },',
         '    { "id": "step_5", "order": 5, "title": "Step 5 Title", "station": "Counter", "startMinute": 30, "durationMinutes": 10, "timerSeconds": 600, "parallelNote": "Portion into Fridge (Days 1-4) & Freezer (Day 5+)" }',
         '  ]',
         '}'
       ].join('\n');
     }
 
-    rulesBlock.push(
-      '4. DYNAMIC GROCERY SYNC MODE: If your recipe uses ANY new protein, carb, vegetable, or sauce not in the built-in list above (for example: sirloin_steak, black_beans, zucchini, bell_peppers, salsa_verde), you MUST:',
-      '   (a) Define each new item in "customIngredients" with its aisle ("Produce", "Meat", "Dairy/Eggs", "Pantry/Canned", or "Frozen"), per100g macros, packageGrams, unitLabel, and estimated cadPerPackage.',
-      '   (b) Map it into the meal using "primaryProteinId" (to replace the main meat of lunch/dinner), "ingredientSwaps" (e.g. {"white_beans_cnd": "black_beans", "cabbage": "zucchini"}), or "customAddons" ([{"id": "bell_peppers", "grams": 100}]) so the app automatically updates the meal macros AND adds the new items to my Grocery List!'
-    );
-
     return [
       'Generate a fresh weekly meal prep menu, custom grocery ingredients, & parallel cooking timeline for my Meal Plan app.',
-      'Target Macros: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.',
-      'Winning Grocery Store: ' + (appData.winningStore || 'Super C') + ' (' + appState.postalCode + ').' + feedbackLine,
+      'Active Macro Targets: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.',
+      'Winning Grocery Store: ' + (appData.winningStore || 'Super C') + ' (' + appState.postalCode + ').' + householdLine + feedbackLine,
       '',
-      rulesBlock.join('\n'),
+      'CURRENT DEFAULT SLOT INGREDIENTS IN MY APP:',
+      exactSlotLines.join('\n'),
+      '',
+      'BUILT-IN 25 INGREDIENT IDS ALREADY IN MY DATABASE:',
+      allDbLines.join('\n'),
+      '',
+      'CRITICAL RULES FOR DYNAMIC GROCERY SYNC MODE:',
+      '1. NEVER write hardcoded weights or volumes (like "6 oz", "200g", or "1/2 cup") inside "cookingMethod" or "seasoningTwist"—the app dynamically calculates exact gram/cup portions per person.',
+      '2. Every single ingredient you mention in a meal\'s "title" or "cookingMethod" MUST either be one of the slot\'s existing ingredients above OR be explicitly swapped/added in the JSON so my Grocery List and Macro Engine stay 100% accurate:',
+      '   (a) If you introduce ANY new food item not in the 25 built-in IDs above (e.g. "sirloin_steak", "black_beans", "zucchini", "bell_peppers", "salsa_verde"), define it inside "customIngredients" with its aisle ("Produce", "Meat", "Dairy/Eggs", "Pantry/Canned", or "Frozen"), per100g macros, packageGrams, unitLabel, and estimated cadPerPackage.',
+      '   (b) To replace Lunch or Dinner\'s main meat, set "primaryProteinId" on that meal (e.g. "primaryProteinId": "sirloin_steak").',
+      '   (c) To replace a default side/veggie/bean in a meal, map it in "ingredientSwaps" (e.g. {"white_beans_cnd": "black_beans", "cabbage": "zucchini"}).',
+      '   (d) To add extra veggies/toppings to a meal, list them in "customAddons" (e.g. [{"id": "bell_peppers", "grams": 100}, {"id": "salsa_verde", "grams": 45}]).',
       '',
       'Return ONLY a valid JSON object (no markdown commentary) with this exact structure:',
       '{',
@@ -732,7 +913,8 @@
   }
 
   function getDayEatenMap(day) {
-    var key = String(day);
+    var active = getActiveMember();
+    var key = (active && active.id !== 'p1') ? (active.id + ':' + String(day)) : String(day);
     if (!appState.eatenByDay[key]) {
       appState.eatenByDay[key] = { breakfast: false, lunch: false, dinner: false, snack: false };
     }
@@ -742,32 +924,52 @@
   function recomputePlan() {
     var engine = getEngine();
     if (!engine) return;
+    getActiveMember();
     var day = clampInt(appState.selectedDay, 1, appState.horizonDays, 1);
     var isAltDay = Boolean(appState.splitWeekVariety && appState.horizonDays > 1 && day % 2 === 0);
 
-    var primaryDailyPlan = engine.solveDailyPortions(appData, {
-      preset: appState.preset === 'custom' ? 'cut' : appState.preset,
-      targets: appState.targets,
-      lunchSwap: appState.lunchSwap,
-      dinnerSwap: appState.dinnerSwap
+    currentHouseholdPlans = [];
+    var activePrimaryPlan = null;
+    var activeAltPlan = null;
+
+    var members = Array.isArray(appState.householdMembers) && appState.householdMembers.length > 0
+      ? appState.householdMembers
+      : [{ id: 'p1', name: 'Me', preset: appState.preset, targets: appState.targets }];
+
+    members.forEach(function (member) {
+      var mPrimary = engine.solveDailyPortions(appData, {
+        preset: member.preset === 'custom' ? 'cut' : member.preset,
+        targets: member.targets,
+        lunchSwap: appState.lunchSwap,
+        dinnerSwap: appState.dinnerSwap
+      });
+      var mAlt = null;
+      if (appState.splitWeekVariety && appState.horizonDays > 1) {
+        mAlt = engine.solveDailyPortions(appData, {
+          preset: member.preset === 'custom' ? 'cut' : member.preset,
+          targets: member.targets,
+          lunchSwap: appState.lunchSwapAlt,
+          dinnerSwap: appState.dinnerSwapAlt
+        });
+      }
+      currentHouseholdPlans.push({
+        member: member,
+        primaryPlan: mPrimary,
+        altPlan: mAlt
+      });
+      if (member.id === appState.activeMemberId || !activePrimaryPlan) {
+        activePrimaryPlan = mPrimary;
+        activeAltPlan = mAlt;
+      }
     });
 
-    var altDailyPlan = null;
-    if (appState.splitWeekVariety && appState.horizonDays > 1) {
-      altDailyPlan = engine.solveDailyPortions(appData, {
-        preset: appState.preset === 'custom' ? 'cut' : appState.preset,
-        targets: appState.targets,
-        lunchSwap: appState.lunchSwapAlt,
-        dinnerSwap: appState.dinnerSwapAlt
-      });
-    }
+    currentDailyPlan = (isAltDay && activeAltPlan) ? activeAltPlan : activePrimaryPlan;
 
-    currentDailyPlan = (isAltDay && altDailyPlan) ? altDailyPlan : primaryDailyPlan;
-
-    currentScaledPlan = engine.scaleToHorizon(primaryDailyPlan, appData, {
+    currentScaledPlan = engine.scaleToHorizon(activePrimaryPlan, appData, {
       days: appState.horizonDays,
-      secondaryDailyPlan: altDailyPlan,
-      secondaryDays: altDailyPlan ? Math.floor(appState.horizonDays / 2) : 0,
+      secondaryDailyPlan: activeAltPlan,
+      secondaryDays: activeAltPlan ? Math.floor(appState.horizonDays / 2) : 0,
+      householdPlans: currentHouseholdPlans.length > 1 ? currentHouseholdPlans : null,
       haveAtHome: appState.haveAtHome,
       frozenMealsOnHand: Math.min(appState.horizonDays, appState.frozenMealsOnHand)
     });
@@ -893,6 +1095,7 @@
 
     var day = clampInt(appState.selectedDay, 1, appState.horizonDays, 1);
     appState.selectedDay = day;
+    var activeMember = getActiveMember();
     var isAltDay = Boolean(appState.splitWeekVariety && appState.horizonDays > 1 && day % 2 === 0);
     var eatenTotals = computeEatenTotals(currentDailyPlan, day);
     var targets = currentDailyPlan.targets;
@@ -902,8 +1105,45 @@
 
     var frag = document.createDocumentFragment();
 
-    // 1. Controls, Quick-Bar (Horizon + Goal Preset) & Compact Day Stepper Card
+    // 1. Controls, Household Member Switcher, Quick-Bar & Compact Day Stepper Card
     var ctrlCard = el('div', 'card space-stack');
+
+    // Household Member Roster Bar (when 1+ members exist, lets you switch or jump to Settings to add/share)
+    var memberBar = el('div', 'subcard space-y-1.5');
+    var memberHeader = el('div', 'flex-wrap-row justify-between');
+    memberHeader.appendChild(el('span', 'text-xs font-bold text-emerald-300', 'Viewing Portions For: ' + activeMember.name + ' (' + activeMember.targets.calories + ' kcal)'));
+    var addShareBtn = el('button', 'btn-secondary text-xs', appState.householdMembers.length > 1 ? 'Share / Edit People' : '+ Add Wife / Person');
+    addShareBtn.type = 'button';
+    addShareBtn.addEventListener('click', function () {
+      selectTab('settings', true);
+      var rosterCard = document.getElementById('household-roster-card');
+      if (rosterCard && rosterCard.scrollIntoView) {
+        rosterCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+    memberHeader.appendChild(addShareBtn);
+    memberBar.appendChild(memberHeader);
+
+    if (appState.householdMembers.length > 1) {
+      var memberPillRow = el('div', 'flex-wrap-row');
+      appState.householdMembers.forEach(function (m) {
+        var mPill = el('button', 'pill-btn text-xs', m.name + ' (' + m.targets.calories + ' kcal)');
+        mPill.type = 'button';
+        mPill.setAttribute('aria-pressed', m.id === activeMember.id ? 'true' : 'false');
+        mPill.addEventListener('click', function () {
+          switchActiveMember(m.id);
+          saveState();
+          recomputePlan();
+          updateSettingsControlsInPlace();
+          renderMealsTab();
+          renderPrepTab();
+          renderGroceriesTab();
+        });
+        memberPillRow.appendChild(mPill);
+      });
+      memberBar.appendChild(memberPillRow);
+    }
+    ctrlCard.appendChild(memberBar);
 
     // Quick-Bar Row 1: Horizon & Goal Presets right on Meals Tab
     var quickBar = el('div', 'subcard space-y-2');
@@ -946,7 +1186,7 @@
     quickBar.appendChild(quickHorizonRow);
 
     var quickPresetRow = el('div', 'flex-wrap-row');
-    quickPresetRow.appendChild(el('span', 'text-xs font-semibold text-slate-300', 'Goal:'));
+    quickPresetRow.appendChild(el('span', 'text-xs font-semibold text-slate-300', activeMember.name + ' Goal:'));
     [
       { id: 'cut', shortLabel: 'Cut' },
       { id: 'recomp', shortLabel: 'Recomp' },
@@ -964,6 +1204,7 @@
           fat: p.fat,
           carbs: p.carbs
         };
+        syncActiveMemberFromTopState();
         saveState();
         recomputePlan();
         updateSettingsControlsInPlace();
@@ -1280,7 +1521,33 @@
 
     // 1. Dynamic Fridge vs Freezer Split Card
     var splitCard = el('div', 'card space-stack');
-    splitCard.appendChild(el('h2', 'text-base font-bold text-slate-100', 'Fridge vs. Freezer Batch Split (' + currentScaledPlan.days + ' Days)'));
+    var peopleCount = Array.isArray(currentHouseholdPlans) ? currentHouseholdPlans.length : 1;
+    var splitHeading = peopleCount > 1
+      ? ('Fridge vs. Freezer Combined Batch Split (' + currentScaledPlan.days + ' Days • ' + peopleCount + ' People)')
+      : ('Fridge vs. Freezer Batch Split (' + currentScaledPlan.days + ' Days)');
+    splitCard.appendChild(el('h2', 'text-base font-bold text-slate-100', splitHeading));
+
+    if (peopleCount > 1) {
+      var perPersonCard = el('div', 'subcard space-y-1.5');
+      perPersonCard.appendChild(el('h3', 'text-sm font-bold text-emerald-300', 'Per-Person Container Guide (1 Day / Container)'));
+      currentHouseholdPlans.forEach(function (hp) {
+        var m = hp.member;
+        var pMeals = hp.primaryPlan && Array.isArray(hp.primaryPlan.meals) ? hp.primaryPlan.meals : [];
+        var lunchMeal = pMeals.filter(function (ml) { return ml.id === 'lunch'; })[0];
+        var dinnerMeal = pMeals.filter(function (ml) { return ml.id === 'dinner'; })[0];
+        var summaryParts = [];
+        if (lunchMeal && lunchMeal.ingredients && lunchMeal.ingredients.length > 0) {
+          summaryParts.push('Lunch: ' + lunchMeal.ingredients.slice(0, 2).map(function (i) { return i.cookedGrams + 'g cooked ' + i.name.split('(')[0].trim(); }).join(' + '));
+        }
+        if (dinnerMeal && dinnerMeal.ingredients && dinnerMeal.ingredients.length > 0) {
+          summaryParts.push('Dinner: ' + dinnerMeal.ingredients.slice(0, 2).map(function (i) { return i.cookedGrams + 'g cooked ' + i.name.split('(')[0].trim(); }).join(' + '));
+        }
+        perPersonCard.appendChild(el('p', 'text-xs text-slate-200 wrap-anywhere',
+          '• ' + m.name + ' (' + m.targets.calories + ' kcal): ' + summaryParts.join(' | ')
+        ));
+      });
+      splitCard.appendChild(perPersonCard);
+    }
 
     var fridge = currentScaledPlan.storageSplit.fridge;
     var fridgeBox = el('div', 'subcard space-y-1');
@@ -1479,10 +1746,20 @@
     // 1. Store & Flyer Header Card
     var storeCard = el('div', 'card space-y-2');
     var storeTop = el('div', 'flex-wrap-row justify-between');
-    storeTop.appendChild(el('h2', 'text-base font-bold text-emerald-300', (appData.winningStore || 'Super C') + ' Flyer List (' + currentScaledPlan.days + ' Days)'));
+    var peopleNum = Array.isArray(currentHouseholdPlans) ? currentHouseholdPlans.length : 1;
+    var listSuffix = peopleNum > 1
+      ? (' (' + currentScaledPlan.days + ' Days • ' + peopleNum + ' People Combined)')
+      : (' (' + currentScaledPlan.days + ' Days)');
+    storeTop.appendChild(el('h2', 'text-base font-bold text-emerald-300', (appData.winningStore || 'Super C') + ' Flyer List' + listSuffix));
     storeTop.appendChild(el('span', 'badge radar-historic', appState.postalCode + ' Winner'));
     storeCard.appendChild(storeTop);
     storeCard.appendChild(el('p', 'text-xs text-slate-300', 'Flyer valid: ' + flyer.validFrom + ' to ' + flyer.validTo));
+    if (peopleNum > 1) {
+      var namesStr = currentHouseholdPlans.map(function (hp) {
+        return hp.member.name + ' (' + hp.member.targets.calories + ' kcal)';
+      }).join(' + ');
+      storeCard.appendChild(el('p', 'text-xs text-emerald-200 wrap-anywhere', 'Combined Grocery Cart for: ' + namesStr));
+    }
 
     if (appData.storeComparison) {
       var cmpRow = el('div', 'flex-wrap-row text-xs text-slate-300');
@@ -1829,12 +2106,17 @@
     if (customStatusEl && customJsonStatusText) {
       customStatusEl.textContent = customJsonStatusText;
     }
+    var shareStatusEl = document.getElementById('share-plan-status');
+    if (shareStatusEl && shareStatusText) {
+      shareStatusEl.textContent = shareStatusText;
+    }
   }
 
   function renderSettingsTab() {
     var root = document.getElementById('settings-root');
     if (!root) return;
 
+    var activeMember = getActiveMember();
     var presets = getGoalPresets(appData);
     var frag = document.createDocumentFragment();
 
@@ -1878,9 +2160,136 @@
     profCard.appendChild(profLoc);
     frag.appendChild(profCard);
 
+    // 1b. Household Members & Wife / Partner Share Link Card
+    var rosterCard = el('div', 'card space-stack');
+    rosterCard.id = 'household-roster-card';
+    rosterCard.appendChild(el('h2', 'text-base font-bold text-slate-100', 'Household Members & Wife/Partner Share'));
+    rosterCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Add 2, 3, or more people with different calorie/macro targets. Groceries & batch cooking automatically combine everyone, while the Meals tab shows the selected person\'s exact plate portions.'));
+
+    var memberListRow = el('div', 'flex-wrap-row');
+    appState.householdMembers.forEach(function (m) {
+      var isSelected = m.id === activeMember.id;
+      var mBtn = el('button', 'pill-btn text-xs', m.name + ' (' + m.targets.calories + ' kcal)');
+      mBtn.type = 'button';
+      mBtn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+      mBtn.addEventListener('click', function () {
+        switchActiveMember(m.id);
+        saveState();
+        recomputePlan();
+        settingsBuilt = false;
+        renderAllTabs();
+      });
+      memberListRow.appendChild(mBtn);
+    });
+
+    if (appState.householdMembers.length < 8) {
+      var addPersonBtn = el('button', 'btn-secondary text-xs', appState.householdMembers.length === 1 ? '+ Add Wife / Partner' : '+ Add Person');
+      addPersonBtn.type = 'button';
+      addPersonBtn.addEventListener('click', function () {
+        var nextIdx = appState.householdMembers.length + 1;
+        var defaultName = nextIdx === 2 ? 'Wife' : ('Person ' + nextIdx);
+        var defaultTargets = nextIdx === 2
+          ? { calories: 1650, protein: 130, fat: 50, carbs: 165 }
+          : { calories: 2000, protein: 160, fat: 60, carbs: 200 };
+        var newId = 'p_' + Date.now();
+        appState.householdMembers.push({
+          id: newId,
+          name: defaultName,
+          preset: 'custom',
+          targets: defaultTargets
+        });
+        switchActiveMember(newId);
+        saveState();
+        recomputePlan();
+        settingsBuilt = false;
+        renderAllTabs();
+      });
+      memberListRow.appendChild(addPersonBtn);
+    }
+    rosterCard.appendChild(memberListRow);
+
+    // Edit Active Member Name & Remove Button
+    var editMemberBox = el('div', 'subcard space-y-2');
+    var nameRow = el('div', 'flex-wrap-row justify-between');
+    var nameLbl = el('label', 'text-xs font-semibold text-slate-200', 'Selected Person Name');
+    nameLbl.setAttribute('for', 'member-name-input');
+    var nameInp = el('input', 'w-40 text-sm');
+    nameInp.id = 'member-name-input';
+    nameInp.type = 'text';
+    nameInp.maxLength = 32;
+    nameInp.value = activeMember.name;
+    nameInp.addEventListener('change', function () {
+      activeMember.name = nameInp.value.trim().slice(0, 32) || 'Person';
+      nameInp.value = activeMember.name;
+      saveState();
+      settingsBuilt = false;
+      renderAllTabs();
+    });
+    nameRow.appendChild(nameLbl);
+    nameRow.appendChild(nameInp);
+
+    if (appState.householdMembers.length > 1) {
+      var removeBtn = el('button', 'btn-secondary text-xs', 'Remove ' + activeMember.name);
+      removeBtn.type = 'button';
+      removeBtn.addEventListener('click', function () {
+        appState.householdMembers = appState.householdMembers.filter(function (item) {
+          return item.id !== activeMember.id;
+        });
+        switchActiveMember(appState.householdMembers[0].id);
+        saveState();
+        recomputePlan();
+        settingsBuilt = false;
+        renderAllTabs();
+      });
+      nameRow.appendChild(removeBtn);
+    }
+    editMemberBox.appendChild(nameRow);
+
+    // Share Plan Link Buttons (one button per person so you can send Wife a link that opens directly on her quantities!)
+    var shareRow = el('div', 'flex-wrap-row');
+    appState.householdMembers.forEach(function (m) {
+      var shareBtn = el('button', 'btn-primary text-xs flex-1', 'Share Link for ' + m.name + '\'s Phone');
+      shareBtn.type = 'button';
+      shareBtn.addEventListener('click', function () {
+        var shareUrl = encodeSharePayload(m.id);
+        var shareTitle = 'Meal Plan — ' + m.name + '\'s Portions (' + m.targets.calories + ' kcal)';
+        if (navigator.share) {
+          navigator.share({
+            title: shareTitle,
+            text: 'Here is our weekly Meal Plan pre-set to ' + m.name + '\'s exact portions (' + m.targets.calories + ' kcal):',
+            url: shareUrl
+          }).then(function () {
+            shareStatusText = 'Shared link for ' + m.name + '!';
+            updateSettingsControlsInPlace();
+          }).catch(function () {});
+        } else if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(shareUrl).then(function () {
+            shareStatusText = 'Copied ' + m.name + '\'s link! Send it via WhatsApp/SMS — opening it loads this exact meal plan & ' + m.name + '\'s quantities.';
+            updateSettingsControlsInPlace();
+            announcePolite(shareStatusText);
+          }).catch(function () {
+            shareStatusText = shareUrl;
+            updateSettingsControlsInPlace();
+          });
+        } else {
+          shareStatusText = shareUrl;
+          updateSettingsControlsInPlace();
+        }
+      });
+      shareRow.appendChild(shareBtn);
+    });
+    editMemberBox.appendChild(shareRow);
+
+    var shareStatus = el('p', 'text-xs text-emerald-300 wrap-anywhere', shareStatusText);
+    shareStatus.id = 'share-plan-status';
+    editMemberBox.appendChild(shareStatus);
+
+    rosterCard.appendChild(editMemberBox);
+    frag.appendChild(rosterCard);
+
     // 2. Goal Presets Card
     var presetCard = el('div', 'card space-stack');
-    presetCard.appendChild(el('h2', 'text-base font-bold text-slate-100', 'Goal Presets'));
+    presetCard.appendChild(el('h2', 'text-base font-bold text-slate-100', 'Goal Presets (' + activeMember.name + ')'));
     var presetRow = el('div', 'flex-wrap-row');
     ['cut', 'recomp', 'maintenance'].forEach(function (pid) {
       var p = presets[pid];
@@ -1896,12 +2305,11 @@
           fat: p.fat,
           carbs: p.carbs
         };
+        syncActiveMemberFromTopState();
         saveState();
         recomputePlan();
-        updateSettingsControlsInPlace();
-        renderMealsTab();
-        renderPrepTab();
-        renderGroceriesTab();
+        settingsBuilt = false;
+        renderAllTabs();
       });
       presetRow.appendChild(btn);
     });
@@ -1910,7 +2318,7 @@
 
     // 3. Macro Targets Sliders + Numeric Inputs
     var targetsCard = el('div', 'card space-stack');
-    targetsCard.appendChild(el('h2', 'text-base font-bold text-slate-100', 'Macro Targets'));
+    targetsCard.appendChild(el('h2', 'text-base font-bold text-slate-100', 'Macro Targets (' + activeMember.name + ')'));
 
     MACRO_CONFIG.forEach(function (cfg) {
       var block = el('div', 'space-y-1');
@@ -1945,6 +2353,7 @@
         var clamped = clampInt(val, cfg.min, cfg.max, appState.targets[cfg.key]);
         appState.preset = 'custom';
         appState.targets[cfg.key] = clamped;
+        syncActiveMemberFromTopState();
         if (sourceEl !== numInp) numInp.value = String(clamped);
         if (sourceEl !== rng) rng.value = String(clamped);
         syncSliderVisual(rng);
@@ -2400,10 +2809,16 @@
 
   function init() {
     registerServiceWorker();
+    tryImportSharedPlanFromHash();
     wireTabs();
     renderAllTabs();
     selectTab(appState.activeTab, false);
 
+    window.addEventListener('hashchange', function () {
+      if (tryImportSharedPlanFromHash()) {
+        renderAllTabs();
+      }
+    });
     window.addEventListener('online', function () {
       updateHeader();
     });

@@ -1391,7 +1391,35 @@
     var fridgeDays = Math.min(days, 4);
     var freezerDays = Math.max(0, days - 4);
 
-    if (safeOpts.secondaryDailyPlan && typeof safeOpts.secondaryDailyPlan === 'object') {
+    if (Array.isArray(safeOpts.householdPlans) && safeOpts.householdPlans.length > 0) {
+      var combinedHouseholdMap = {};
+      for (var hpIdx = 0; hpIdx < safeOpts.householdPlans.length; hpIdx++) {
+        var hpEntry = safeOpts.householdPlans[hpIdx];
+        if (!hpEntry || !hpEntry.primaryPlan) continue;
+        var pMap = extractDailyGramsMap(hpEntry.primaryPlan, db);
+        var aMap = (hpEntry.altPlan && typeof hpEntry.altPlan === 'object')
+          ? extractDailyGramsMap(hpEntry.altPlan, db)
+          : null;
+        var altD = aMap
+          ? Math.min(days, Math.max(0, Math.floor(Number(safeOpts.secondaryDays) || Math.floor(days / 2))))
+          : 0;
+        var priD = days - altD;
+        var hKeys = Object.keys(pMap).concat(aMap ? Object.keys(aMap) : []);
+        var seenH = Object.create(null);
+        for (var hk = 0; hk < hKeys.length; hk++) {
+          var hid = hKeys[hk];
+          if (hasOwn(seenH, hid)) continue;
+          seenH[hid] = true;
+          var pg = hasOwn(pMap, hid) ? pMap[hid] : 0;
+          var ag = (aMap && hasOwn(aMap, hid)) ? aMap[hid] : 0;
+          var memberAvgDaily = (pg * priD + ag * altD) / days;
+          if (memberAvgDaily > 0) {
+            combinedHouseholdMap[hid] = (hasOwn(combinedHouseholdMap, hid) ? combinedHouseholdMap[hid] : 0) + memberAvgDaily;
+          }
+        }
+      }
+      dailyGramsMap = combinedHouseholdMap;
+    } else if (safeOpts.secondaryDailyPlan && typeof safeOpts.secondaryDailyPlan === 'object') {
       var altDays = Math.min(days, Math.max(0, Math.floor(Number(safeOpts.secondaryDays) || Math.floor(days / 2))));
       var priDays = days - altDays;
       if (altDays > 0) {
