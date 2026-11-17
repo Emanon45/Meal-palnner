@@ -873,10 +873,10 @@ BASE_MEAL_TEMPLATES: list[dict[str, Any]] = [
     {
         "id": "breakfast",
         "slot": "Breakfast",
-        "title": "Greek Scramble & Air-Fried Grelot Potatoes",
+        "title": "Eggs & Crispy Grelot Potatoes",
         "cookingMethod": (
             "Non-stick dry skillet scramble with splash of water/broth (0g oil) "
-            "+ air-fried crispy potatoes + fresh pico & berries"
+            "+ air-fried crispy potatoes + berries"
         ),
         "seasoningTwist": "Oregano, cracked black pepper, lemon zest, and fresh green onions",
         "swappable": False,
@@ -892,10 +892,10 @@ BASE_MEAL_TEMPLATES: list[dict[str, Any]] = [
     {
         "id": "lunch",
         "slot": "Lunch",
-        "title": "Poulet Rouge / Boustan-Style High-Protein Bowl",
+        "title": "Seared Protein & Jasmine Rice Bowl",
         "cookingMethod": (
             "Dry-seared in natural juices or air-fried (0g oil) over steamed rice "
-            "with crunchy slaw & 0% tzatziki"
+            "with crunchy slaw"
         ),
         "seasoningTwist": "Smoked paprika, sumac, garlic powder, cumin, and lemon juice",
         "swappable": True,
@@ -914,7 +914,7 @@ BASE_MEAL_TEMPLATES: list[dict[str, Any]] = [
     {
         "id": "dinner",
         "slot": "Dinner",
-        "title": "Malagasy Henakisoa sy Tsaramaso (Chili-Style Pork & White Beans)",
+        "title": "Braised Protein & White Beans",
         "cookingMethod": (
             "Trimmed meat braised slowly in diced tomatoes, ginger, garlic, onion, "
             "and broth (0g oil), topped with 0% skyr dollop"
@@ -933,7 +933,7 @@ BASE_MEAL_TEMPLATES: list[dict[str, Any]] = [
     {
         "id": "snack",
         "slot": "Snack",
-        "title": "0% Siggi's Skyr + Whey Isolate Power Bowl",
+        "title": "0% Skyr & Whey Fruit Bowl",
         "cookingMethod": "Whipped cold 0% skyr with whey isolate and fresh/thawed fruit",
         "seasoningTwist": "Cinnamon and vanilla extract",
         "swappable": False,
@@ -945,12 +945,12 @@ BASE_PREP_TIMELINE: list[dict[str, Any]] = [
     {
         "id": "step_1",
         "order": 1,
-        "title": "Start Rice Cooker & Braise Henakisoa sy Tsaramaso",
+        "title": "Start Rice Cooker & Braise Dinner Protein + Beans",
         "station": "Rice Cooker + Dutch Oven",
         "startMinute": 0,
         "durationMinutes": 40,
         "timerSeconds": 2400,
-        "parallelNote": "Rinse jasmine rice and start cooker; sear trimmed pork in hot dry pot, deglaze with diced tomatoes, ginger, garlic, and white beans.",
+        "parallelNote": "Rinse jasmine rice and start cooker; sear trimmed pork or chicken in hot dry pot, deglaze with diced tomatoes, ginger, garlic, and white beans.",
         "zeroOilNote": "Sear meat in its own natural moisture and deglaze with tomato juices and broth (0g oil).",
     },
     {
@@ -978,13 +978,13 @@ BASE_PREP_TIMELINE: list[dict[str, Any]] = [
     {
         "id": "step_4",
         "order": 4,
-        "title": "Cold Prep: Make Pico de Gallo, 0% Tzatziki & Slaw",
+        "title": "Cold Prep: Shred Cabbage, Carrots & Dice Cucumber",
         "station": "Prep Board",
         "startMinute": 18,
         "durationMinutes": 15,
         "timerSeconds": 900,
-        "parallelNote": "Shred cabbage and carrots; dice Roma tomatoes, onion, and lime for pico de gallo; grate and squeeze cucumber dry to mix with 0% Greek yogurt, garlic, and lemon for tzatziki.",
-        "zeroOilNote": "Dress pico de gallo and lasary voatabia with lime juice, salt, and scallion with zero added oil.",
+        "parallelNote": "Shred green cabbage and carrots and dice English cucumber into crisp meal-prep containers.",
+        "zeroOilNote": "Dress slaw with lemon or lime juice, salt, and scallion with zero added oil.",
     },
     {
         "id": "step_5",

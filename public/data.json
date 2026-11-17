@@ -693,7 +693,7 @@
         "id": "ground_chicken",
         "label": "Extra-Lean Ground Chicken",
         "shortLabel": "Ground Chicken",
-        "style": "Poulet Rouge / Boustan Bowl",
+        "style": "Seared Chicken & Rice Bowl",
         "primaryIngredient": "ground_chicken"
       },
       {
@@ -716,35 +716,35 @@
         "id": "pork_loin_lean",
         "label": "Trimmed Lean Pork Loin",
         "shortLabel": "Pork Loin",
-        "style": "Henakisoa sy Tsaramaso",
+        "style": "Braised Pork & White Beans",
         "primaryIngredient": "pork_loin_lean"
       },
       {
         "id": "pork_shoulder",
         "label": "Trimmed Pork Shoulder",
         "shortLabel": "Pork Shoulder",
-        "style": "Traditional Henakisoa",
+        "style": "Slow-Braised Pork & Beans",
         "primaryIngredient": "pork_shoulder"
       },
       {
         "id": "chicken_breast",
         "label": "Lean Chicken Breast",
         "shortLabel": "Chicken Breast",
-        "style": "Malagasy Chili Twist",
+        "style": "Braised Chicken & White Beans",
         "primaryIngredient": "chicken_breast"
       }
     ]
   },
   "mealTemplates": {
-    "weeklyTheme": "Market Value Week — Ginger-Garlic Braise & Sumac Bowl (Super C flyer highlights: épaule picnic de porc frais | fresh pork picnic shoulder, bone-in, econo pack, poitrines de poulet frais avec dos | fresh chicken breasts with back, thon pâle entier Unico | Unico whole light tuna)",
-    "produceRotationNote": "Spotlight crunchy green cabbage slaw, diced English cucumber, and fresh lasary voatabia.",
+    "weeklyTheme": "Baseline High-Protein Meal Prep (Paste Gemini JSON for Custom Menu)",
+    "produceRotationNote": "Crisp green cabbage slaw, diced cucumber, and carrots.",
     "fruitRotationNote": "Pair breakfast with thawed mixed berries and post-workout snack with ripe banana.",
     "meals": [
       {
         "id": "breakfast",
         "slot": "Breakfast",
-        "title": "Greek Scramble & Air-Fried Grelot Potatoes",
-        "cookingMethod": "Non-stick dry skillet scramble with splash of water/broth (0g oil) + air-fried crispy potatoes + fresh pico & berries",
+        "title": "Eggs & Crispy Grelot Potatoes",
+        "cookingMethod": "Non-stick dry skillet scramble with splash of water/broth (0g oil) + air-fried crispy potatoes + berries",
         "seasoningTwist": "Oregano, cracked black pepper, lemon zest, and fresh green onions",
         "swappable": false,
         "baseIngredients": [
@@ -759,8 +759,8 @@
       {
         "id": "lunch",
         "slot": "Lunch",
-        "title": "Poulet Rouge / Boustan-Style High-Protein Bowl",
-        "cookingMethod": "Dry-seared in natural juices or air-fried (0g oil) over steamed rice with crunchy slaw & 0% tzatziki",
+        "title": "Seared Protein & Jasmine Rice Bowl",
+        "cookingMethod": "Dry-seared in natural juices or air-fried (0g oil) over steamed rice with crunchy slaw",
         "seasoningTwist": "Smoked paprika, sumac, garlic powder, cumin, and lemon juice",
         "swappable": true,
         "baseIngredients": [
@@ -778,7 +778,7 @@
       {
         "id": "dinner",
         "slot": "Dinner",
-        "title": "Malagasy Henakisoa sy Tsaramaso (Chili-Style Pork & White Beans)",
+        "title": "Braised Protein & White Beans",
         "cookingMethod": "Trimmed meat braised slowly in diced tomatoes, ginger, garlic, onion, and broth (0g oil), topped with 0% skyr dollop",
         "seasoningTwist": "Fresh grated ginger, crushed garlic, thyme, and mild chili flakes",
         "swappable": true,
@@ -794,7 +794,7 @@
       {
         "id": "snack",
         "slot": "Snack",
-        "title": "0% Siggi's Skyr + Whey Isolate Power Bowl",
+        "title": "0% Skyr & Whey Fruit Bowl",
         "cookingMethod": "Whipped cold 0% skyr with whey isolate and fresh/thawed fruit",
         "seasoningTwist": "Cinnamon and pure vanilla extract",
         "swappable": false,
@@ -811,7 +811,7 @@
     {
       "id": "step_1",
       "order": 1,
-      "title": "Start Rice Cooker & Braise Henakisoa sy Tsaramaso",
+      "title": "Start Rice Cooker & Braise Dinner Protein + Beans",
       "station": "Rice Cooker + Dutch Oven",
       "startMinute": 0,
       "durationMinutes": 40,
@@ -844,13 +844,13 @@
     {
       "id": "step_4",
       "order": 4,
-      "title": "Cold Prep: Make Pico de Gallo, 0% Tzatziki & Slaw",
+      "title": "Cold Prep: Shred Cabbage, Carrots & Dice Cucumber",
       "station": "Prep Board",
       "startMinute": 18,
       "durationMinutes": 15,
       "timerSeconds": 900,
-      "parallelNote": "Shred cabbage and carrots; dice Roma tomatoes, onion, and lime for pico de gallo; grate and squeeze cucumber dry to mix with 0% Greek yogurt, garlic, and lemon for tzatziki.",
-      "zeroOilNote": "Dress pico de gallo and lasary voatabia with lime juice, salt, and scallion with zero added oil."
+      "parallelNote": "Shred green cabbage and carrots and dice English cucumber into crisp meal-prep containers.",
+      "zeroOilNote": "Dress slaw with lemon or lime juice, salt, and scallion with zero added oil."
     },
     {
       "id": "step_5",

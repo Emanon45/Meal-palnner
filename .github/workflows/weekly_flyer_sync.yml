@@ -1,9 +1,6 @@
 name: Weekly Flyer Sync
 
 on:
-  schedule:
-    # Every Thursday at 8:00 AM EST (13:00 UTC)
-    - cron: '0 13 * * 4'
   workflow_dispatch:
     inputs:
       postal_code:

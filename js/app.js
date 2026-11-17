@@ -41,19 +41,19 @@
     },
     proteinSwaps: {
       lunch: [
-        { id: 'ground_chicken', label: 'Extra-Lean Ground Chicken', shortLabel: 'Ground Chicken', style: 'Poulet Rouge / Boustan Bowl', primaryIngredient: 'ground_chicken' },
+        { id: 'ground_chicken', label: 'Extra-Lean Ground Chicken', shortLabel: 'Ground Chicken', style: 'Seared Chicken & Rice Bowl', primaryIngredient: 'ground_chicken' },
         { id: 'tuna_patties', label: 'Spiced Tuna-Potato Patties', shortLabel: 'Tuna Patties', style: 'Crispy Air-Fried', primaryIngredient: 'tuna_water' },
         { id: 'sardine_tuna', label: 'Omega-3 Sardine + Tuna', shortLabel: 'Sardine + Tuna', style: 'Mediterranean Mix', primaryIngredient: 'sardines_water' }
       ],
       dinner: [
-        { id: 'pork_loin_lean', label: 'Trimmed Lean Pork Loin', shortLabel: 'Pork Loin', style: 'Henakisoa sy Tsaramaso', primaryIngredient: 'pork_loin_lean' },
-        { id: 'pork_shoulder', label: 'Trimmed Pork Shoulder', shortLabel: 'Pork Shoulder', style: 'Traditional Henakisoa', primaryIngredient: 'pork_shoulder' },
-        { id: 'chicken_breast', label: 'Lean Chicken Breast', shortLabel: 'Chicken Breast', style: 'Malagasy Chili Twist', primaryIngredient: 'chicken_breast' }
+        { id: 'pork_loin_lean', label: 'Trimmed Lean Pork Loin', shortLabel: 'Pork Loin', style: 'Braised Pork & White Beans', primaryIngredient: 'pork_loin_lean' },
+        { id: 'pork_shoulder', label: 'Trimmed Pork Shoulder', shortLabel: 'Pork Shoulder', style: 'Slow-Braised Pork & Beans', primaryIngredient: 'pork_shoulder' },
+        { id: 'chicken_breast', label: 'Lean Chicken Breast', shortLabel: 'Chicken Breast', style: 'Braised Chicken & White Beans', primaryIngredient: 'chicken_breast' }
       ]
     },
     mealTemplates: {
-      weeklyTheme: 'Weekly Zero-Oil Meal Plan',
-      produceRotationNote: 'Fresh cabbage slaw, cucumber, carrots, and lasary voatabia.',
+      weeklyTheme: 'Baseline High-Protein Meal Prep (Paste Gemini JSON for Custom Menu)',
+      produceRotationNote: 'Crisp green cabbage slaw, diced cucumber, and carrots.',
       fruitRotationNote: 'Mixed berries at breakfast and banana post-workout.',
       meals: []
     },
@@ -61,12 +61,12 @@
       {
         id: 'step_1',
         order: 1,
-        title: 'Start Rice Cooker & Braise Henakisoa sy Tsaramaso',
+        title: 'Start Rice Cooker & Braise Dinner Protein + Beans',
         station: 'Rice Cooker + Dutch Oven',
         startMinute: 0,
         durationMinutes: 40,
         timerSeconds: 2400,
-        parallelNote: 'Rinse jasmine rice and start cooker; sear trimmed pork in hot dry pot, deglaze with diced tomatoes, ginger, garlic, and white beans.',
+        parallelNote: 'Rinse jasmine rice and start cooker; sear trimmed pork or chicken in hot dry pot, deglaze with diced tomatoes, ginger, garlic, and white beans.',
         zeroOilNote: 'Sear meat in natural moisture and deglaze with tomato juices and broth (0g oil).'
       },
       {
@@ -94,13 +94,13 @@
       {
         id: 'step_4',
         order: 4,
-        title: 'Cold Prep: Make Pico de Gallo, 0% Tzatziki & Slaw',
+        title: 'Cold Prep: Shred Cabbage, Carrots & Dice Cucumber',
         station: 'Prep Board',
         startMinute: 18,
         durationMinutes: 15,
         timerSeconds: 900,
-        parallelNote: 'Shred cabbage and carrots; dice Roma tomatoes, onion, and lime for pico de gallo; grate and squeeze cucumber dry to mix with 0% Greek yogurt, garlic, and lemon for tzatziki.',
-        zeroOilNote: 'Dress pico de gallo and lasary voatabia with lime juice and scallion with zero added oil.'
+        parallelNote: 'Shred green cabbage and carrots and dice English cucumber into crisp meal-prep containers.',
+        zeroOilNote: 'Dress slaw with lemon or lime juice and scallion with zero added oil.'
       },
       {
         id: 'step_5',
@@ -269,7 +269,8 @@
         }
       ],
       activeMemberId: 'p1',
-      geminiPromptMode: 'flyer_locked',
+      geminiPromptMode: 'browser_hunt',
+      grocerySwaps: {},
       customMealJsonRaw: '',
       timers: {},
       lastSyncedAt: null
@@ -436,9 +437,21 @@
         });
       })(),
       activeMemberId: typeof raw.activeMemberId === 'string' && raw.activeMemberId.trim() ? raw.activeMemberId.trim() : 'p1',
-      geminiPromptMode: (raw.geminiPromptMode === 'allow_custom' || raw.geminiPromptMode === 'flyer_locked')
+      geminiPromptMode: (raw.geminiPromptMode === 'allow_custom' || raw.geminiPromptMode === 'flyer_locked' || raw.geminiPromptMode === 'browser_hunt')
         ? raw.geminiPromptMode
-        : 'flyer_locked',
+        : 'browser_hunt',
+      grocerySwaps: (function () {
+        var gs = {};
+        if (raw.grocerySwaps && typeof raw.grocerySwaps === 'object' && !Array.isArray(raw.grocerySwaps)) {
+          Object.keys(raw.grocerySwaps).forEach(function (k) {
+            if (k === '__proto__' || k === 'constructor' || k === 'prototype') return;
+            if (typeof raw.grocerySwaps[k] === 'string' && raw.grocerySwaps[k].trim()) {
+              gs[k] = raw.grocerySwaps[k].trim();
+            }
+          });
+        }
+        return gs;
+      })(),
       customMealJsonRaw: typeof raw.customMealJsonRaw === 'string' ? raw.customMealJsonRaw : '',
       timers: timers,
       lastSyncedAt: typeof raw.lastSyncedAt === 'string' ? raw.lastSyncedAt : null
@@ -601,6 +614,7 @@
           var pkgG = clampNum(ci.packageGrams, 50, 10000, 500);
           var cadPkg = clampNum(ci.cadPerPackage !== undefined ? ci.cadPerPackage : (ci.price && ci.price.cadPerPackage), 0.5, 200, 4.99);
           var cad100 = clampNum(ci.cadPer100g !== undefined ? ci.cadPer100g : (ci.price && ci.price.cadPer100g), 0.05, 50, Math.round((cadPkg / (pkgG / 100)) * 100) / 100);
+          var storeName = typeof ci.store === 'string' && ci.store.trim() ? ci.store.trim() : '';
           targetData.nutritionDb[cid] = {
             name: typeof ci.name === 'string' && ci.name.trim() ? ci.name.trim() : cid,
             aisle: typeof ci.aisle === 'string' ? ci.aisle : 'Produce',
@@ -621,8 +635,8 @@
               regularCadPer100g: cad100,
               historicalLowCadPer100g: cad100,
               savingsPct: 0,
-              radarTag: 'CUSTOM',
-              flyerItemName: 'Custom Recipe Ingredient',
+              radarTag: storeName ? storeName.toUpperCase().slice(0, 14) : 'CUSTOM',
+              flyerItemName: storeName ? (storeName + ' — Full-Store Hunt') : 'Custom Recipe Ingredient',
               onFlyer: false
             }
           };
@@ -650,10 +664,10 @@
       if (customMeals) {
         if (!Array.isArray(targetData.mealTemplates.meals) || targetData.mealTemplates.meals.length === 0) {
           targetData.mealTemplates.meals = [
-            { id: 'breakfast', slot: 'Breakfast', title: 'Greek Scramble & Grelot Potatoes', cookingMethod: 'Skillet scramble + crispy air-fried potatoes', seasoningTwist: 'Oregano, lemon zest & green onion', swappable: false },
-            { id: 'lunch', slot: 'Lunch', title: 'Poulet Rouge / Boustan Bowl', cookingMethod: 'Seared over steamed jasmine rice with slaw & tzatziki', seasoningTwist: 'Smoked paprika, sumac & garlic', swappable: true },
-            { id: 'dinner', slot: 'Dinner', title: 'Malagasy Henakisoa sy Tsaramaso', cookingMethod: 'Slow-braised with white beans, diced tomatoes & ginger', seasoningTwist: 'Fresh ginger, garlic & thyme', swappable: true },
-            { id: 'snack', slot: 'Snack', title: "0% Siggi's Skyr Power Bowl", cookingMethod: 'Chilled skyr with whey isolate & fruit', seasoningTwist: 'Cinnamon & vanilla', swappable: false }
+            { id: 'breakfast', slot: 'Breakfast', title: 'Eggs & Crispy Grelot Potatoes', cookingMethod: 'Skillet scramble + crispy air-fried potatoes', seasoningTwist: 'Oregano, lemon zest & green onion', swappable: false },
+            { id: 'lunch', slot: 'Lunch', title: 'Seared Protein & Jasmine Rice Bowl', cookingMethod: 'Seared over steamed jasmine rice with slaw', seasoningTwist: 'Smoked paprika, cumin & garlic', swappable: true },
+            { id: 'dinner', slot: 'Dinner', title: 'Braised Protein & White Beans', cookingMethod: 'Slow-braised with white beans, diced tomatoes & ginger', seasoningTwist: 'Fresh ginger, garlic & thyme', swappable: true },
+            { id: 'snack', slot: 'Snack', title: '0% Skyr & Whey Fruit Bowl', cookingMethod: 'Chilled skyr with whey isolate & fruit', seasoningTwist: 'Cinnamon & vanilla', swappable: false }
           ];
         }
         customMeals.forEach(function (cm) {
@@ -717,7 +731,9 @@
       householdLine = '\nHousehold Members eating these meals (portions scale automatically per person): ' + memberSummaries.join(', ') + '.';
     }
 
-    var isCustomMode = appState.geminiPromptMode === 'allow_custom';
+    var mode = appState.geminiPromptMode || 'browser_hunt';
+    var isBrowserHunt = mode === 'browser_hunt';
+    var isCustomMode = mode === 'allow_custom' || isBrowserHunt;
 
     var basePlanForPrompt = currentDailyPlan;
     if (!basePlanForPrompt && getEngine()) {
@@ -778,6 +794,52 @@
         '    { "id": "step_2", "order": 2, "title": "Step 2 Title", "station": "Air Fryer / Oven", "startMinute": 5, "durationMinutes": 20, "timerSeconds": 1200, "parallelNote": "What to do in parallel" },',
         '    { "id": "step_3", "order": 3, "title": "Step 3 Title", "station": "Skillet", "startMinute": 10, "durationMinutes": 12, "timerSeconds": 720, "parallelNote": "What to do in parallel" },',
         '    { "id": "step_4", "order": 4, "title": "Step 4 Title", "station": "Prep Board", "startMinute": 15, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Chop the exact produce from the meal slots" },',
+        '    { "id": "step_5", "order": 5, "title": "Step 5 Title", "station": "Counter", "startMinute": 30, "durationMinutes": 10, "timerSeconds": 600, "parallelNote": "Portion into Fridge (Days 1-4) & Freezer (Day 5+)" }',
+        '  ]',
+        '}'
+      ].join('\n');
+    }
+
+    if (isBrowserHunt) {
+      return [
+        'Act as my Montreal (' + appState.postalCode + ') Full-Store Grocery & Macro Meal Planner using your browser.',
+        'Target Store Scope: Browse Super C (superc.ca), Maxi (maxi.ca), and Walmart Canada (walmart.ca) for postal code ' + appState.postalCode + '.',
+        'Active Macro Targets: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.' + householdLine + feedbackLine,
+        '',
+        'FULL-STORE BROWSER HUNT RULES (DO NOT LIMIT TO FLYERS):',
+        '1. Check BOTH regular everyday shelf/value-pack prices AND weekly flyers on superc.ca, maxi.ca, and walmart.ca. Everyday staples (dry beans, rice, oats, frozen veg, value-pack meats, bananas, carrots) are often cheaper than featured flyer items—pick whichever is genuinely lowest cost in $/100g of protein and $/100g.',
+        '2. Design 4 cohesive, delicious, ZERO-ADDED-OIL recipes (Breakfast, Lunch, Dinner, Snack) built around the cheapest real items you found.',
+        '3. Every ingredient you use MUST either match a built-in ID below OR be defined in "customIngredients" with its real store ("Super C", "Maxi", or "Walmart"), aisle ("Produce", "Meat", "Dairy/Eggs", "Pantry/Canned", or "Frozen"), exact per100g nutrition, cookedYield, packageGrams, unitLabel, and exact cadPerPackage you observed:',
+        allDbLines.join('\n'),
+        '4. To replace Lunch/Dinner main meat, set "primaryProteinId" on that meal. To replace a default side/veggie, map it in "ingredientSwaps". To add extra ingredients, list them in "customAddons" ([{"id": "...", "grams": 100}]).',
+        '5. NEVER write hardcoded weights or volumes (like "6 oz", "200g", or "1/2 cup") inside "cookingMethod" or "seasoningTwist"—my app scales exact gram/cup portions dynamically per person.',
+        '',
+        'Return ONLY a valid JSON object (no markdown commentary) with this exact structure:',
+        '{',
+        '  "weeklyTheme": "Short catchy weekly culinary theme",',
+        '  "customIngredients": {',
+        '    "custom_id_example": {',
+        '      "name": "Display Name (e.g. Selection Lean Pork Loin or Great Value Frozen Broccoli)",',
+        '      "store": "Super C",',
+        '      "aisle": "Meat",',
+        '      "per100g": { "calories": 135, "protein": 22.0, "fat": 4.5, "carbs": 0.0 },',
+        '      "cookedYield": 0.75,',
+        '      "packageGrams": 500,',
+        '      "unitLabel": "pack (500g)",',
+        '      "cadPerPackage": 5.99',
+        '    }',
+        '  },',
+        '  "meals": [',
+        '    { "id": "breakfast", "title": "Breakfast Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "ingredientSwaps": {}, "customAddons": [] },',
+        '    { "id": "lunch", "title": "Lunch Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "primaryProteinId": null, "ingredientSwaps": {}, "customAddons": [] },',
+        '    { "id": "dinner", "title": "Dinner Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "primaryProteinId": null, "ingredientSwaps": {}, "customAddons": [] },',
+        '    { "id": "snack", "title": "Snack Name", "cookingMethod": "Zero-oil method (no hardcoded weights)", "seasoningTwist": "Cinnamon, vanilla, or citrus zest", "ingredientSwaps": {}, "customAddons": [] }',
+        '  ],',
+        '  "prepTimeline": [',
+        '    { "id": "step_1", "order": 1, "title": "Step 1 Title", "station": "Dutch Oven / Rice Cooker", "startMinute": 0, "durationMinutes": 35, "timerSeconds": 2100, "parallelNote": "What to do while cooking" },',
+        '    { "id": "step_2", "order": 2, "title": "Step 2 Title", "station": "Air Fryer / Oven", "startMinute": 5, "durationMinutes": 20, "timerSeconds": 1200, "parallelNote": "What to do in parallel" },',
+        '    { "id": "step_3", "order": 3, "title": "Step 3 Title", "station": "Skillet", "startMinute": 10, "durationMinutes": 12, "timerSeconds": 720, "parallelNote": "What to do in parallel" },',
+        '    { "id": "step_4", "order": 4, "title": "Step 4 Title", "station": "Prep Board", "startMinute": 15, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Chop produce & prep dressings/sauces" },',
         '    { "id": "step_5", "order": 5, "title": "Step 5 Title", "station": "Counter", "startMinute": 30, "durationMinutes": 10, "timerSeconds": 600, "parallelNote": "Portion into Fridge (Days 1-4) & Freezer (Day 5+)" }',
         '  ]',
         '}'
@@ -919,10 +981,46 @@
     return appState.eatenByDay[key];
   }
 
+  function getEffectiveAppData() {
+    var swaps = appState.grocerySwaps || {};
+    var swapKeys = Object.keys(swaps);
+    if (swapKeys.length === 0) return appData;
+
+    var cloned = Object.assign({}, appData);
+    var srcMeals = (appData.mealTemplates && Array.isArray(appData.mealTemplates.meals))
+      ? appData.mealTemplates.meals
+      : [
+          { id: 'breakfast', slot: 'Breakfast', title: 'Eggs & Crispy Grelot Potatoes', cookingMethod: 'Skillet scramble + crispy air-fried potatoes', seasoningTwist: 'Oregano, lemon zest & green onion', swappable: false },
+          { id: 'lunch', slot: 'Lunch', title: 'Seared Protein & Jasmine Rice Bowl', cookingMethod: 'Seared over steamed jasmine rice with slaw', seasoningTwist: 'Smoked paprika, cumin & garlic', swappable: true },
+          { id: 'dinner', slot: 'Dinner', title: 'Braised Protein & White Beans', cookingMethod: 'Slow-braised with white beans, diced tomatoes & ginger', seasoningTwist: 'Fresh ginger, garlic & thyme', swappable: true },
+          { id: 'snack', slot: 'Snack', title: '0% Skyr & Whey Fruit Bowl', cookingMethod: 'Chilled skyr with whey isolate & fruit', seasoningTwist: 'Cinnamon & vanilla', swappable: false }
+        ];
+
+    cloned.mealTemplates = Object.assign({}, appData.mealTemplates, {
+      meals: srcMeals.map(function (m) {
+        var copy = Object.assign({}, m);
+        var mergedSwaps = Object.assign({}, m.ingredientSwaps || {});
+        swapKeys.forEach(function (fromId) {
+          var toId = swaps[fromId];
+          if (toId && fromId !== toId) {
+            mergedSwaps[fromId] = toId;
+            if (copy.primaryProteinId === fromId) {
+              copy.primaryProteinId = toId;
+            }
+          }
+        });
+        copy.ingredientSwaps = mergedSwaps;
+        return copy;
+      })
+    });
+    return cloned;
+  }
+
   function recomputePlan() {
     var engine = getEngine();
     if (!engine) return;
     getActiveMember();
+    var effectiveData = getEffectiveAppData();
     var day = clampInt(appState.selectedDay, 1, appState.horizonDays, 1);
     var isAltDay = Boolean(appState.splitWeekVariety && appState.horizonDays > 1 && day % 2 === 0);
 
@@ -935,7 +1033,7 @@
       : [{ id: 'p1', name: 'Me', preset: appState.preset, targets: appState.targets }];
 
     members.forEach(function (member) {
-      var mPrimary = engine.solveDailyPortions(appData, {
+      var mPrimary = engine.solveDailyPortions(effectiveData, {
         preset: member.preset === 'custom' ? 'cut' : member.preset,
         targets: member.targets,
         lunchSwap: appState.lunchSwap,
@@ -943,7 +1041,7 @@
       });
       var mAlt = null;
       if (appState.splitWeekVariety && appState.horizonDays > 1) {
-        mAlt = engine.solveDailyPortions(appData, {
+        mAlt = engine.solveDailyPortions(effectiveData, {
           preset: member.preset === 'custom' ? 'cut' : member.preset,
           targets: member.targets,
           lunchSwap: appState.lunchSwapAlt,
@@ -963,7 +1061,7 @@
 
     currentDailyPlan = (isAltDay && activeAltPlan) ? activeAltPlan : activePrimaryPlan;
 
-    currentScaledPlan = engine.scaleToHorizon(activePrimaryPlan, appData, {
+    currentScaledPlan = engine.scaleToHorizon(activePrimaryPlan, effectiveData, {
       days: appState.horizonDays,
       secondaryDailyPlan: activeAltPlan,
       secondaryDays: activeAltPlan ? Math.floor(appState.horizonDays / 2) : 0,
@@ -1941,6 +2039,19 @@
       });
       aisleCtrlRow.appendChild(clearCartBtn);
     }
+    if (appState.grocerySwaps && Object.keys(appState.grocerySwaps).length > 0) {
+      var resetSwapsBtn = el('button', 'btn-secondary text-xs', 'Reset Ingredient Swaps');
+      resetSwapsBtn.type = 'button';
+      resetSwapsBtn.addEventListener('click', function () {
+        appState.grocerySwaps = {};
+        saveState();
+        recomputePlan();
+        renderMealsTab();
+        renderPrepTab();
+        renderGroceriesTab();
+      });
+      aisleCtrlRow.appendChild(resetSwapsBtn);
+    }
     summaryCard.appendChild(aisleCtrlRow);
     frag.appendChild(summaryCard);
 
@@ -2128,6 +2239,48 @@
 
         checkRow.appendChild(homeLabel);
         checkRow.appendChild(cartLabel);
+
+        // 1-Tap Out-of-Stock Ingredient Swap
+        var dbKeys = Object.keys((appData && appData.nutritionDb) || {});
+        if (dbKeys.length > 1 && !isCollapsed) {
+          var swapSel = document.createElement('select');
+          swapSel.className = 'text-xs';
+          swapSel.setAttribute('aria-label', 'Swap ' + item.name + ' if out of stock');
+          var origIdForSwap = item.id;
+          Object.keys(appState.grocerySwaps || {}).forEach(function (k) {
+            if (appState.grocerySwaps[k] === item.id) origIdForSwap = k;
+          });
+          var defaultOpt = document.createElement('option');
+          defaultOpt.value = '';
+          defaultOpt.textContent = origIdForSwap !== item.id ? 'Reset to Original' : 'Swap (No Stock)';
+          swapSel.appendChild(defaultOpt);
+          dbKeys.forEach(function (kid) {
+            if (kid === item.id) return;
+            var kEntry = appData.nutritionDb[kid];
+            if (!kEntry || !kEntry.name) return;
+            var opt = document.createElement('option');
+            opt.value = kid;
+            var kPrice = kEntry.price && Number.isFinite(kEntry.price.cadPerPackage) ? (' (' + formatCad(kEntry.price.cadPerPackage) + ')') : '';
+            opt.textContent = kEntry.name + kPrice;
+            swapSel.appendChild(opt);
+          });
+          swapSel.addEventListener('change', function () {
+            var nextId = swapSel.value;
+            if (!appState.grocerySwaps) appState.grocerySwaps = {};
+            if (!nextId) {
+              delete appState.grocerySwaps[origIdForSwap];
+            } else {
+              appState.grocerySwaps[origIdForSwap] = nextId;
+            }
+            saveState();
+            recomputePlan();
+            renderMealsTab();
+            renderPrepTab();
+            renderGroceriesTab();
+          });
+          checkRow.appendChild(swapSel);
+        }
+
         li.appendChild(checkRow);
 
         ul.appendChild(li);
@@ -2640,31 +2793,46 @@
     // 6. 1-Tap Gemini JSON Paste Sync Card (Change Meals Anytime)
     var aiCard = el('div', 'card space-stack');
     aiCard.appendChild(el('h2', 'text-base font-bold text-slate-100', '1-Tap Gemini Meal Customizer (JSON Sync)'));
-    aiCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Choose whether Gemini should build recipes strictly from your weekly flyer basket (cheapest) or introduce new custom ingredients that automatically update your Grocery List & Macro Engine.'));
+    aiCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Use Full-Store Browser Hunt so a browser-capable Gemini checks everyday shelf prices AND flyers across Super C, Maxi & Walmart—or keep the local flyer fallback.'));
 
     var modeRow = el('div', 'flex-wrap-row');
-    var lockedModeBtn = el('button', 'pill-btn text-xs flex-1', 'Use Flyer Basket Only (Cheapest)');
-    lockedModeBtn.type = 'button';
-    lockedModeBtn.setAttribute('aria-pressed', appState.geminiPromptMode !== 'allow_custom' ? 'true' : 'false');
+    var huntModeBtn = el('button', 'pill-btn text-xs flex-1', 'Full-Store Browser Hunt (Best)');
+    huntModeBtn.type = 'button';
+    huntModeBtn.setAttribute('aria-pressed', (!appState.geminiPromptMode || appState.geminiPromptMode === 'browser_hunt') ? 'true' : 'false');
 
-    var customModeBtn = el('button', 'pill-btn text-xs flex-1', 'Allow New Ingredients (Updates Grocery List)');
+    var lockedModeBtn = el('button', 'pill-btn text-xs flex-1', 'Use Flyer Basket Only (Fallback)');
+    lockedModeBtn.type = 'button';
+    lockedModeBtn.setAttribute('aria-pressed', appState.geminiPromptMode === 'flyer_locked' ? 'true' : 'false');
+
+    var customModeBtn = el('button', 'pill-btn text-xs flex-1', 'Allow New Ingredients');
     customModeBtn.type = 'button';
     customModeBtn.setAttribute('aria-pressed', appState.geminiPromptMode === 'allow_custom' ? 'true' : 'false');
 
+    function syncPromptModeButtons() {
+      huntModeBtn.setAttribute('aria-pressed', (!appState.geminiPromptMode || appState.geminiPromptMode === 'browser_hunt') ? 'true' : 'false');
+      lockedModeBtn.setAttribute('aria-pressed', appState.geminiPromptMode === 'flyer_locked' ? 'true' : 'false');
+      customModeBtn.setAttribute('aria-pressed', appState.geminiPromptMode === 'allow_custom' ? 'true' : 'false');
+    }
+
+    huntModeBtn.addEventListener('click', function () {
+      appState.geminiPromptMode = 'browser_hunt';
+      syncPromptModeButtons();
+      saveState();
+    });
+
     lockedModeBtn.addEventListener('click', function () {
       appState.geminiPromptMode = 'flyer_locked';
-      lockedModeBtn.setAttribute('aria-pressed', 'true');
-      customModeBtn.setAttribute('aria-pressed', 'false');
+      syncPromptModeButtons();
       saveState();
     });
 
     customModeBtn.addEventListener('click', function () {
       appState.geminiPromptMode = 'allow_custom';
-      lockedModeBtn.setAttribute('aria-pressed', 'false');
-      customModeBtn.setAttribute('aria-pressed', 'true');
+      syncPromptModeButtons();
       saveState();
     });
 
+    modeRow.appendChild(huntModeBtn);
     modeRow.appendChild(lockedModeBtn);
     modeRow.appendChild(customModeBtn);
     aiCard.appendChild(modeRow);
@@ -2675,7 +2843,9 @@
     copyPromptBtn.id = 'copy-gemini-prompt-btn';
     copyPromptBtn.addEventListener('click', function () {
       var promptText = buildGeminiMealPrompt();
-      var modeLabel = appState.geminiPromptMode === 'allow_custom' ? 'Dynamic Grocery Sync' : 'Flyer-Locked';
+      var modeLabel = appState.geminiPromptMode === 'allow_custom'
+        ? 'Dynamic Grocery Sync'
+        : (appState.geminiPromptMode === 'flyer_locked' ? 'Flyer-Locked Fallback' : 'Full-Store Browser Hunt');
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(promptText).then(function () {
           customJsonStatusText = modeLabel + ' prompt copied! Paste it into Gemini, then paste the JSON output below.';

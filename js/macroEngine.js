@@ -292,7 +292,7 @@
     ground_chicken: {
       id: 'ground_chicken',
       label: 'Extra-Lean Ground Chicken',
-      style: 'Poulet Rouge / Boustan Bowl'
+      style: 'Seared Chicken & Rice Bowl'
     },
     tuna_patties: {
       id: 'tuna_patties',
@@ -310,17 +310,17 @@
     pork_loin_lean: {
       id: 'pork_loin_lean',
       label: 'Lean Pork Loin',
-      style: 'Malagasy Henakisoa sy Tsaramaso'
+      style: 'Braised Pork & White Beans'
     },
     pork_shoulder: {
       id: 'pork_shoulder',
       label: 'Trimmed Pork Shoulder',
-      style: 'Malagasy Henakisoa sy Tsaramaso'
+      style: 'Slow-Braised Pork & Beans'
     },
     chicken_breast: {
       id: 'chicken_breast',
       label: 'Chicken Breast',
-      style: 'Malagasy Akoho sy Tsaramaso'
+      style: 'Braised Chicken & White Beans'
     }
   });
 
@@ -328,7 +328,7 @@
     breakfast: {
       id: 'breakfast',
       slot: 'Breakfast',
-      title: 'Greek Scramble & Crispy Grelot Potatoes',
+      title: 'Eggs & Crispy Grelot Potatoes',
       cookingMethod: 'Dry non-stick skillet scramble + air-fried or dry-roasted grelot potatoes in water/spices (0g oil)',
       seasoningTwist: 'Oregano, lemon zest, smoked paprika & fresh green onion',
       swappable: false
@@ -336,23 +336,23 @@
     lunch: {
       id: 'lunch',
       slot: 'Lunch',
-      title: 'Poulet Rouge / Boustan / Tuna Bowl',
+      title: 'Seared Protein & Jasmine Rice Bowl',
       cookingMethod: 'Dry non-stick sear in natural rendered juices, broth, or water (0g oil)',
-      seasoningTwist: '7-spice, sumac, garlic & 0% tzatziki',
+      seasoningTwist: 'Smoked paprika, cumin, garlic & lemon',
       swappable: true
     },
     dinner: {
       id: 'dinner',
       slot: 'Dinner',
-      title: 'Malagasy Chili-Style Henakisoa sy Tsaramaso',
+      title: 'Braised Protein & White Beans',
       cookingMethod: 'Braised slow-simmer in natural juices, diced tomatoes, ginger & broth (0g oil)',
-      seasoningTwist: 'Fresh ginger, garlic, Malagasy chili & 0% skyr dollop',
+      seasoningTwist: 'Fresh ginger, garlic, herbs & 0% skyr dollop',
       swappable: true
     },
     snack: {
       id: 'snack',
       slot: 'Snack',
-      title: "0% Siggi's Skyr Protein Bowl",
+      title: "0% Skyr Protein Bowl",
       cookingMethod: 'No-cook chilled bowl with whey isolate & fruit (0g oil)',
       seasoningTwist: 'Vanilla/cinnamon whisked into 0% skyr',
       swappable: false
@@ -1016,12 +1016,12 @@
     // Step 1: Fixed Savory Produce & Beans
     var g = {
       green_onion: 30,
-      pico: 120,
+      pico: 0,
       diced_tomatoes: 200,
       cabbage: 100,
       cucumber: 100,
       carrots: 60,
-      tzatziki_0: 60,
+      tzatziki_0: 0,
       white_beans_cnd: targets.carbs < 90 ? 60 : 120,
       aromatics_zero: 20,
       whole_egg: 0,

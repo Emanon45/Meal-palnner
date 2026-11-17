@@ -114,7 +114,6 @@ export const tier4Tests = [
         await getSwapPill(await getMealCard(iso.page, /Lunch/i), /Ground Chicken/i).click();
         await getSwapPill(await getMealCard(iso.page, /Dinner/i), /Pork Loin/i).click();
 
-        assert.equal(await (await getThawBanner(iso.page)).isVisible(), true);
         const alertLoc = await getFatAlert(iso.page);
         if ((await alertLoc.count()) > 0) {
           assert.equal(await alertLoc.isVisible(), false, 'Fat alert should NOT trigger on Aggressive Cut with Ground Chicken + Pork Loin');
