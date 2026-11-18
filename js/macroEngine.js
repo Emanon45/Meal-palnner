@@ -700,13 +700,29 @@
         for (var caIdx = 0; caIdx < m.customAddons.length; caIdx++) {
           var ca = m.customAddons[caIdx];
           if (ca && typeof ca === 'object' && typeof ca.id === 'string' && ca.id.trim() && ca.id !== '__proto__') {
-            var caGrams = sanitizeNonNegNumber(ca.grams, 0);
+            var caGrams = sanitizeNonNegNumber(ca.grams !== undefined ? ca.grams : (ca.rawGrams !== undefined ? ca.rawGrams : ca.weightGrams), 0);
             if (caGrams > 0) {
               customAddons.push({ id: ca.id.trim(), grams: Math.round(caGrams) });
             }
           }
         }
       }
+      var customIngredients = [];
+      if (Array.isArray(m.ingredients)) {
+        for (var ciIdx = 0; ciIdx < m.ingredients.length; ciIdx++) {
+          var ci = m.ingredients[ciIdx];
+          if (ci && typeof ci === 'object' && typeof ci.id === 'string' && ci.id.trim() && ci.id !== '__proto__') {
+            var ciGrams = sanitizeNonNegNumber(ci.grams !== undefined ? ci.grams : (ci.rawGrams !== undefined ? ci.rawGrams : ci.weightGrams), 0);
+            if (ciGrams > 0) {
+              customIngredients.push({ id: ci.id.trim(), grams: Math.round(ciGrams) });
+            }
+          }
+        }
+      }
+      var customTargetCalories = sanitizeNonNegNumber(
+        m.targetCalories !== undefined ? m.targetCalories : (data && data.mealTemplates && data.mealTemplates.targetCalories),
+        0
+      );
       var customSwaps = (m.ingredientSwaps && typeof m.ingredientSwaps === 'object' && !Array.isArray(m.ingredientSwaps))
         ? m.ingredientSwaps
         : null;
@@ -720,7 +736,9 @@
         title: sanitizeInstruction(m.title, baseT.title),
         cookingMethod: sanitizeInstruction(m.cookingMethod, baseT.cookingMethod),
         seasoningTwist: sanitizeInstruction(m.seasoningTwist, baseT.seasoningTwist),
-        swappable: m.swappable !== undefined ? Boolean(m.swappable) : baseT.swappable,
+        swappable: customIngredients.length > 0 ? false : (m.swappable !== undefined ? Boolean(m.swappable) : baseT.swappable),
+        ingredients: customIngredients,
+        targetCalories: customTargetCalories,
         customAddons: customAddons,
         ingredientSwaps: customSwaps,
         primaryProteinId: customPrimaryProtein
@@ -845,7 +863,7 @@
     return 'produce';
   }
 
-  function buildMealsAndTotals(g, db, templates, lunchSwapInfo, dinnerSwapInfo) {
+  function buildMealsAndTotals(g, db, templates, lunchSwapInfo, dinnerSwapInfo, targets) {
     var lunchSwap = lunchSwapInfo.id;
     var dinnerSwap = dinnerSwapInfo.id;
 
@@ -935,6 +953,14 @@
             : ci.id;
           if (hasOwn(db, resolvedId)) {
             mapped.push([resolvedId, scaleSwappedGrams(ci.id, resolvedId, baseIngGrams)]);
+          }
+        }
+        if (template && Array.isArray(template.customAddons)) {
+          for (var caIdx = 0; caIdx < template.customAddons.length; caIdx++) {
+            var cAddon = template.customAddons[caIdx];
+            if (cAddon && hasOwn(db, cAddon.id) && cAddon.grams > 0) {
+              mapped.push([cAddon.id, cAddon.grams]);
+            }
           }
         }
         return mapped;
@@ -1284,7 +1310,7 @@
       { id: 'corn', minG: 0, step: 5 }
     ];
 
-    var assembled = buildMealsAndTotals(g, db, templates, lunchSwapInfo, dinnerSwapInfo);
+    var assembled = buildMealsAndTotals(g, db, templates, lunchSwapInfo, dinnerSwapInfo, targets);
     var iter = 0;
     while (assembled.totals.fat > targets.fat && iter < 400) {
       iter++;
@@ -1313,7 +1339,7 @@
       if (!trimmed) {
         break;
       }
-      assembled = buildMealsAndTotals(g, db, templates, lunchSwapInfo, dinnerSwapInfo);
+      assembled = buildMealsAndTotals(g, db, templates, lunchSwapInfo, dinnerSwapInfo, targets);
     }
 
     var hasCustomRecipeArray = (
@@ -1785,15 +1811,20 @@
       }
     }
 
-    if (hasOwn(dailyGramsMap, 'potatoes_raw') && dailyGramsMap.potatoes_raw > 0 && hasOwn(db, 'potatoes_raw')) {
-      var potItem = db.potatoes_raw;
-      var potTotalRaw = round1(dailyGramsMap.potatoes_raw * days);
-      if (!hasOwn(byIngredient, 'potatoes_raw')) {
-        byIngredient.potatoes_raw = {
-          id: 'potatoes_raw',
+    var allDailyIds = Object.keys(dailyGramsMap);
+    for (var dIdx = 0; dIdx < allDailyIds.length; dIdx++) {
+      var potId = allDailyIds[dIdx];
+      if (!hasOwn(db, potId) || !(dailyGramsMap[potId] > 0)) continue;
+      var potItem = db[potId];
+      var isPotatoItem = potId === 'potatoes_raw' || /\b(potato|potatoes|papa|papas|grelot|russet)\b/i.test(potId + ' ' + (potItem.name || ''));
+      if (!isPotatoItem) continue;
+      var potTotalRaw = round1(dailyGramsMap[potId] * days);
+      if (!hasOwn(byIngredient, potId)) {
+        byIngredient[potId] = {
+          id: potId,
           name: potItem.name,
           aisle: potItem.aisle,
-          category: classifyIngredientCategory('potatoes_raw', potItem),
+          category: classifyIngredientCategory(potId, potItem),
           usedInSlots: ['Breakfast'],
           rawGrams: potTotalRaw,
           cookedGrams: round1(potTotalRaw * potItem.cookedYield),
@@ -1803,13 +1834,13 @@
           unitLabel: potItem.unitLabel,
           householdMeasure: ''
         };
-        combinedOrderAll.push('potatoes_raw');
-      } else if (potTotalRaw > byIngredient.potatoes_raw.rawGrams + 0.05) {
-        if (byIngredient.potatoes_raw.usedInSlots.indexOf('Breakfast') === -1) {
-          byIngredient.potatoes_raw.usedInSlots.unshift('Breakfast');
+        combinedOrderAll.push(potId);
+      } else if (potTotalRaw > byIngredient[potId].rawGrams + 0.05) {
+        if (byIngredient[potId].usedInSlots.indexOf('Breakfast') === -1) {
+          byIngredient[potId].usedInSlots.unshift('Breakfast');
         }
-        byIngredient.potatoes_raw.rawGrams = potTotalRaw;
-        byIngredient.potatoes_raw.cookedGrams = round1(potTotalRaw * potItem.cookedYield);
+        byIngredient[potId].rawGrams = potTotalRaw;
+        byIngredient[potId].cookedGrams = round1(potTotalRaw * potItem.cookedYield);
       }
     }
 

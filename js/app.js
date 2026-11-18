@@ -595,7 +595,18 @@
         .replace(/^```(?:json)?\s*/i, '')
         .replace(/\s*```$/i, '')
         .trim();
-      var parsed = JSON.parse(cleaned);
+      var parsed = null;
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch (_parseErr) {
+        var firstBrace = cleaned.indexOf('{');
+        var lastBrace = cleaned.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+          parsed = JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
+        } else {
+          return false;
+        }
+      }
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
 
       if (!targetData.nutritionDb || typeof targetData.nutritionDb !== 'object') {
@@ -604,43 +615,54 @@
         targetData.nutritionDb = Object.assign({}, targetData.nutritionDb);
       }
 
+      function registerCustomDbEntry(cid, ci) {
+        if (!cid || cid === '__proto__' || cid === 'constructor' || cid === 'prototype') return;
+        if (!ci || typeof ci !== 'object') return;
+        var per = (ci.per100g && typeof ci.per100g === 'object') ? ci.per100g : ci;
+        var pkgG = clampNum(ci.packageGrams, 20, 20000, 500);
+        var cadPkg = clampNum(ci.cadPerPackage !== undefined ? ci.cadPerPackage : (ci.price && ci.price.cadPerPackage), 0.25, 250, 4.99);
+        var cad100 = clampNum(ci.cadPer100g !== undefined ? ci.cadPer100g : (ci.price && ci.price.cadPer100g), 0.05, 50, Math.round((cadPkg / (pkgG / 100)) * 100) / 100);
+        var storeName = typeof ci.store === 'string' && ci.store.trim() ? ci.store.trim() : '';
+        targetData.nutritionDb[cid] = {
+          name: typeof ci.name === 'string' && ci.name.trim() ? ci.name.trim() : cid,
+          aisle: typeof ci.aisle === 'string' ? ci.aisle : 'Produce',
+          per100g: {
+            calories: clampNum(per.calories, 0, 900, 100),
+            protein: clampNum(per.protein, 0, 100, 5),
+            fat: clampNum(per.fat, 0, 100, 2),
+            carbs: clampNum(per.carbs, 0, 100, 10)
+          },
+          cookedYield: clampNum(ci.cookedYield, 0.2, 4.0, 1.0),
+          packageGrams: pkgG,
+          unitLabel: typeof ci.unitLabel === 'string' && ci.unitLabel.trim() ? ci.unitLabel.trim() : ('pack (' + pkgG + 'g)'),
+          requiresThaw: Boolean(ci.requiresThaw),
+          pantryDefault: Boolean(ci.pantryDefault),
+          price: {
+            cadPer100g: cad100,
+            cadPerPackage: cadPkg,
+            regularCadPer100g: cad100,
+            historicalLowCadPer100g: cad100,
+            savingsPct: 0,
+            radarTag: storeName ? storeName.toUpperCase().slice(0, 14) : 'CUSTOM',
+            flyerItemName: storeName ? (storeName + ' — Full-Store Hunt') : 'Custom Recipe Ingredient',
+            onFlyer: false
+          }
+        };
+      }
+
       // 1. Merge any customIngredients into targetData.nutritionDb so Groceries & MacroEngine include them!
-      if (parsed.customIngredients && typeof parsed.customIngredients === 'object' && !Array.isArray(parsed.customIngredients)) {
-        Object.keys(parsed.customIngredients).forEach(function (cid) {
-          if (cid === '__proto__' || cid === 'constructor' || cid === 'prototype') return;
-          var ci = parsed.customIngredients[cid];
-          if (!ci || typeof ci !== 'object') return;
-          var per = (ci.per100g && typeof ci.per100g === 'object') ? ci.per100g : ci;
-          var pkgG = clampNum(ci.packageGrams, 50, 10000, 500);
-          var cadPkg = clampNum(ci.cadPerPackage !== undefined ? ci.cadPerPackage : (ci.price && ci.price.cadPerPackage), 0.5, 200, 4.99);
-          var cad100 = clampNum(ci.cadPer100g !== undefined ? ci.cadPer100g : (ci.price && ci.price.cadPer100g), 0.05, 50, Math.round((cadPkg / (pkgG / 100)) * 100) / 100);
-          var storeName = typeof ci.store === 'string' && ci.store.trim() ? ci.store.trim() : '';
-          targetData.nutritionDb[cid] = {
-            name: typeof ci.name === 'string' && ci.name.trim() ? ci.name.trim() : cid,
-            aisle: typeof ci.aisle === 'string' ? ci.aisle : 'Produce',
-            per100g: {
-              calories: clampNum(per.calories, 0, 900, 100),
-              protein: clampNum(per.protein, 0, 100, 5),
-              fat: clampNum(per.fat, 0, 100, 2),
-              carbs: clampNum(per.carbs, 0, 100, 10)
-            },
-            cookedYield: clampNum(ci.cookedYield, 0.2, 4.0, 1.0),
-            packageGrams: pkgG,
-            unitLabel: typeof ci.unitLabel === 'string' && ci.unitLabel.trim() ? ci.unitLabel.trim() : ('pack (' + pkgG + 'g)'),
-            requiresThaw: false,
-            pantryDefault: Boolean(ci.pantryDefault),
-            price: {
-              cadPer100g: cad100,
-              cadPerPackage: cadPkg,
-              regularCadPer100g: cad100,
-              historicalLowCadPer100g: cad100,
-              savingsPct: 0,
-              radarTag: storeName ? storeName.toUpperCase().slice(0, 14) : 'CUSTOM',
-              flyerItemName: storeName ? (storeName + ' — Full-Store Hunt') : 'Custom Recipe Ingredient',
-              onFlyer: false
+      if (parsed.customIngredients && typeof parsed.customIngredients === 'object') {
+        if (Array.isArray(parsed.customIngredients)) {
+          parsed.customIngredients.forEach(function (ciObj) {
+            if (ciObj && typeof ciObj === 'object' && typeof ciObj.id === 'string' && ciObj.id.trim()) {
+              registerCustomDbEntry(ciObj.id.trim(), ciObj);
             }
-          };
-        });
+          });
+        } else {
+          Object.keys(parsed.customIngredients).forEach(function (cid) {
+            registerCustomDbEntry(cid, parsed.customIngredients[cid]);
+          });
+        }
       }
 
       var srcTemplates = (parsed.mealTemplates && typeof parsed.mealTemplates === 'object') ? parsed.mealTemplates : parsed;
@@ -671,16 +693,37 @@
           ];
         }
         customMeals.forEach(function (cm) {
-          if (!cm || typeof cm !== 'object' || !cm.id) return;
+          if (!cm || typeof cm !== 'object') return;
+          var cmSlotId = String(cm.id || cm.slot || '').trim().toLowerCase();
+          if (!cmSlotId) return;
+          var defDb = (getEngine() && getEngine().DEFAULT_NUTRITION_DB) || {};
+          var ensureIngInDb = function (ingObj) {
+            if (!ingObj || typeof ingObj !== 'object' || typeof ingObj.id !== 'string') return;
+            var iid = ingObj.id.trim();
+            if (!iid || targetData.nutritionDb[iid] || defDb[iid]) return;
+            var fallbackName = (typeof ingObj.name === 'string' && ingObj.name.trim())
+              ? ingObj.name.trim()
+              : iid.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+            registerCustomDbEntry(iid, Object.assign({ name: fallbackName }, ingObj));
+          };
+          if (Array.isArray(cm.ingredients)) cm.ingredients.forEach(ensureIngInDb);
+          if (Array.isArray(cm.customAddons)) cm.customAddons.forEach(ensureIngInDb);
+
           targetData.mealTemplates.meals.forEach(function (tm) {
-            if (tm.id === cm.id) {
+            if (String(tm.id || '').toLowerCase() === cmSlotId) {
               if (typeof cm.title === 'string' && cm.title.trim()) tm.title = cm.title.trim();
               if (typeof cm.cookingMethod === 'string' && cm.cookingMethod.trim()) tm.cookingMethod = cm.cookingMethod.trim();
               if (typeof cm.seasoningTwist === 'string' && cm.seasoningTwist.trim()) tm.seasoningTwist = cm.seasoningTwist.trim();
               if (Array.isArray(cm.customAddons)) tm.customAddons = cm.customAddons;
               if (Array.isArray(cm.ingredients) && cm.ingredients.length > 0) {
-                tm.ingredients = cm.ingredients;
-                tm.targetCalories = clampNum(parsed.targetCalories, 500, 5000, appState.targets.calories);
+                tm.ingredients = cm.ingredients.map(function (ingItem) {
+                  if (!ingItem || typeof ingItem !== 'object') return ingItem;
+                  var gVal = ingItem.grams !== undefined ? ingItem.grams : (ingItem.rawGrams !== undefined ? ingItem.rawGrams : ingItem.weightGrams);
+                  return { id: String(ingItem.id || '').trim(), grams: Number(gVal) || 0 };
+                }).filter(function (ingItem) {
+                  return ingItem && ingItem.id && ingItem.grams > 0;
+                });
+                tm.targetCalories = clampNum(parsed.targetCalories !== undefined ? parsed.targetCalories : srcTemplates.targetCalories, 500, 5000, appState.targets.calories);
                 tm.swappable = false;
               }
               if (cm.ingredientSwaps && typeof cm.ingredientSwaps === 'object') tm.ingredientSwaps = cm.ingredientSwaps;
