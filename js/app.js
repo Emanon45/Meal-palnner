@@ -1745,37 +1745,65 @@
 
     var byIng = batchPrep.byIngredient || {};
     var preps = Array.isArray(batchPrep.preparations) ? batchPrep.preparations : [];
+    var combinedList = Array.isArray(batchPrep.combinedIngredients) ? batchPrep.combinedIngredients : [];
+    var isRiceStep = /\brice\b|rice cooker/.test(txt);
+    var isPotatoStep = /\bpotato|grelot|russet/.test(txt);
 
-    if ((/\brice\b|rice cooker/.test(txt)) && byIng.rice_dry) {
+    if (isRiceStep && byIng.rice_dry) {
       var rice = byIng.rice_dry;
       pushLine('Rice Cooker Total (' + rice.usedInSlots.join(' + ') + '): ' + rice.rawGrams + 'g dry (~' + rice.cookedGrams + 'g cooked) — ' + rice.householdMeasure);
     }
 
-    if (/\bdinner\b|braise|dutch oven|simmer|beans|stew/.test(txt)) {
-      preps.forEach(function (prep) {
-        if (prep.slotId !== 'dinner') return;
-        var rotPrefix = prep.rotation ? ('[' + prep.rotation + ' • ' + prep.days + 'd] ') : '';
-        (prep.batchIngredients || []).forEach(function (ing) {
-          if (ing.id === 'rice_dry') return;
-          pushLine(rotPrefix + formatBatchIngredientLine(ing));
-        });
-      });
-    }
-
-    if ((/\bpotato|grelot|russet/.test(txt)) && byIng.potatoes_raw) {
+    if (isPotatoStep && byIng.potatoes_raw) {
       var pot = byIng.potatoes_raw;
       pushLine(pot.name + ' (' + pot.usedInSlots.join(' + ') + '): ' + pot.rawGrams + 'g raw (~' + pot.cookedGrams + 'g cooked) — ' + pot.householdMeasure);
     }
 
-    if (/\blunch\b|patty|patties|ground chicken|\btuna\b|sardine/.test(txt)) {
-      preps.forEach(function (prep) {
-        if (prep.slotId !== 'lunch') return;
-        var rotPrefix = prep.rotation ? ('[' + prep.rotation + ' • ' + prep.days + 'd] ') : '';
-        (prep.batchIngredients || []).forEach(function (ing) {
-          if (ing.id === 'rice_dry' || ing.id === 'potatoes_raw') return;
-          pushLine(rotPrefix + formatBatchIngredientLine(ing));
-        });
+    // Direct ingredient matching (works for custom Gemini ingredients like Ground Beef, Edamame, Corn, etc.)
+    var matchedAnyDirect = false;
+    combinedList.forEach(function (cIng) {
+      if (cIng.id === 'rice_dry' || cIng.id === 'potatoes_raw') return;
+      var idWords = String(cIng.id || '').toLowerCase().split('_').filter(function (w) { return w.length >= 4; });
+      var nameClean = String(cIng.name || '').toLowerCase().replace(/\([^)]*\)/g, ' ');
+      var nameWords = nameClean.split(/[^a-z0-9]+/).filter(function (w) {
+        return w.length >= 4 && !/^(raw|dry|drained|frozen|fresh|canned|lean|extra|boneless|skinless|value|pack|great|walmart|super|maxi|no|oil)$/.test(w);
       });
+      var matched = nameWords.some(function (w) {
+        return new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + 's?\\b', 'i').test(txt);
+      }) || (idWords.length > 0 && idWords.every(function (w) { return txt.indexOf(w) !== -1; }));
+
+      if (matched) {
+        matchedAnyDirect = true;
+        pushLine(formatBatchIngredientLine(Object.assign({}, cIng, {
+          dailyRawGrams: cIng.dailyRawGrams,
+          dailyCookedGrams: cIng.dailyCookedGrams
+        })));
+      }
+    });
+
+    if (!matchedAnyDirect) {
+      var isCookAction = /\b(braise|dutch oven|sear|brown|skillet|air[- ]?fry|patty|patties|roast|simmer)\b/.test(txt);
+      if (/\bdinner\b|braise|dutch oven|beans|stew/.test(txt) && (!isRiceStep || isCookAction)) {
+        preps.forEach(function (prep) {
+          if (prep.slotId !== 'dinner') return;
+          var rotPrefix = prep.rotation ? ('[' + prep.rotation + ' • ' + prep.days + 'd] ') : '';
+          (prep.batchIngredients || []).forEach(function (ing) {
+            if (ing.id === 'rice_dry') return;
+            pushLine(rotPrefix + formatBatchIngredientLine(ing));
+          });
+        });
+      }
+
+      if (/\blunch\b|patty|patties|ground chicken|\btuna\b|sardine/.test(txt) && (!isRiceStep || isCookAction)) {
+        preps.forEach(function (prep) {
+          if (prep.slotId !== 'lunch') return;
+          var rotPrefix = prep.rotation ? ('[' + prep.rotation + ' • ' + prep.days + 'd] ') : '';
+          (prep.batchIngredients || []).forEach(function (ing) {
+            if (ing.id === 'rice_dry' || ing.id === 'potatoes_raw') return;
+            pushLine(rotPrefix + formatBatchIngredientLine(ing));
+          });
+        });
+      }
     }
 
     return lines;

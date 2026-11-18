@@ -1,7 +1,7 @@
 'use strict';
 
 const CACHE_PREFIX = 'meal-plan-';
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 
 const CORE_ASSETS = [
