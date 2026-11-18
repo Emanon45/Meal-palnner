@@ -1707,6 +1707,80 @@
     return list;
   }
 
+  function formatBatchIngredientLine(ing) {
+    if (ing.id === 'rice_dry') {
+      return ing.name + ': ' + ing.rawGrams + 'g dry (~' + ing.cookedGrams + 'g cooked) — ' + ing.householdMeasure + ' • ' + ing.dailyRawGrams + 'g dry/day';
+    }
+    if (ing.category === 'protein' || ing.id === 'potatoes_raw') {
+      return ing.name + ': ' + ing.rawGrams + 'g raw (~' + ing.cookedGrams + 'g cooked) • ' + ing.dailyRawGrams + 'g raw / ~' + ing.dailyCookedGrams + 'g cooked per day';
+    }
+    return ing.name + ': ' + ing.rawGrams + 'g (~' + ing.cookedGrams + 'g cooked) — ' + ing.householdMeasure + ' • ' + ing.dailyRawGrams + 'g/day';
+  }
+
+  function buildStepQuantitiesLines(step, batchPrep, storageSplit) {
+    if (!batchPrep) return [];
+    var txt = ((step.title || '') + ' ' + (step.station || '') + ' ' + (step.parallelNote || '')).toLowerCase();
+    var lines = [];
+    var seen = Object.create(null);
+    function pushLine(line) {
+      if (line && !seen[line]) {
+        seen[line] = true;
+        lines.push(line);
+      }
+    }
+
+    if (/\b(cool|weigh|split|portion|container|fridge|freezer)\b/.test(txt)) {
+      if (storageSplit && storageSplit.fridge && storageSplit.fridge.batchWeights) {
+        var fTot = storageSplit.fridge.batchWeights.totals;
+        var fCooked = Math.round((fTot.proteinCookedGrams || 0) + (fTot.carbCookedGrams || 0));
+        pushLine('Fridge (' + storageSplit.fridge.dayRange + '): ~' + fCooked + 'g total cooked (' + Math.round(fTot.proteinCookedGrams || 0) + 'g protein + ' + Math.round(fTot.carbCookedGrams || 0) + 'g carbs)');
+      }
+      if (storageSplit && storageSplit.freezer && storageSplit.freezer.days > 0 && storageSplit.freezer.batchWeights) {
+        var zTot = storageSplit.freezer.batchWeights.totals;
+        var zCooked = Math.round((zTot.proteinCookedGrams || 0) + (zTot.carbCookedGrams || 0));
+        pushLine('Freezer (' + storageSplit.freezer.dayRange + '): ~' + zCooked + 'g total cooked (' + Math.round(zTot.proteinCookedGrams || 0) + 'g protein + ' + Math.round(zTot.carbCookedGrams || 0) + 'g carbs)');
+      }
+      return lines;
+    }
+
+    var byIng = batchPrep.byIngredient || {};
+    var preps = Array.isArray(batchPrep.preparations) ? batchPrep.preparations : [];
+
+    if ((/\brice\b|rice cooker/.test(txt)) && byIng.rice_dry) {
+      var rice = byIng.rice_dry;
+      pushLine('Rice Cooker Total (' + rice.usedInSlots.join(' + ') + '): ' + rice.rawGrams + 'g dry (~' + rice.cookedGrams + 'g cooked) — ' + rice.householdMeasure);
+    }
+
+    if (/\bdinner\b|braise|dutch oven|simmer|beans|stew/.test(txt)) {
+      preps.forEach(function (prep) {
+        if (prep.slotId !== 'dinner') return;
+        var rotPrefix = prep.rotation ? ('[' + prep.rotation + ' • ' + prep.days + 'd] ') : '';
+        (prep.batchIngredients || []).forEach(function (ing) {
+          if (ing.id === 'rice_dry') return;
+          pushLine(rotPrefix + formatBatchIngredientLine(ing));
+        });
+      });
+    }
+
+    if ((/\bpotato|grelot|russet/.test(txt)) && byIng.potatoes_raw) {
+      var pot = byIng.potatoes_raw;
+      pushLine(pot.name + ' (' + pot.usedInSlots.join(' + ') + '): ' + pot.rawGrams + 'g raw (~' + pot.cookedGrams + 'g cooked) — ' + pot.householdMeasure);
+    }
+
+    if (/\blunch\b|patty|patties|ground chicken|\btuna\b|sardine/.test(txt)) {
+      preps.forEach(function (prep) {
+        if (prep.slotId !== 'lunch') return;
+        var rotPrefix = prep.rotation ? ('[' + prep.rotation + ' • ' + prep.days + 'd] ') : '';
+        (prep.batchIngredients || []).forEach(function (ing) {
+          if (ing.id === 'rice_dry' || ing.id === 'potatoes_raw') return;
+          pushLine(rotPrefix + formatBatchIngredientLine(ing));
+        });
+      });
+    }
+
+    return lines;
+  }
+
   function renderPrepTab() {
     var root = document.getElementById('prep-root');
     if (!root || !currentScaledPlan) return;
@@ -1741,6 +1815,52 @@
         ));
       });
       splitCard.appendChild(perPersonCard);
+    }
+
+    var batchPrep = currentScaledPlan.batchPrep;
+    if (batchPrep && Array.isArray(batchPrep.preparations) && batchPrep.preparations.length > 0) {
+      var batchCard = el('div', 'subcard space-y-2');
+      batchCard.id = 'batch-prep-totals';
+      batchCard.appendChild(el('h3', 'text-sm font-bold text-emerald-300', 'Total Batch Cooking Quantities (All ' + currentScaledPlan.days + ' Days)'));
+
+      batchPrep.preparations.forEach(function (prep) {
+        if (!prep.batchIngredients || prep.batchIngredients.length === 0) return;
+        var prepBlock = el('div', 'space-y-1');
+        var rotText = prep.rotation ? (prep.rotation + ' • ' + prep.days + 'd') : (prep.days + 'd');
+        prepBlock.appendChild(el('p', 'text-xs font-bold text-slate-100 wrap-anywhere',
+          prep.slot + ' Batch (' + rotText + '): ' + prep.title
+        ));
+        prepBlock.appendChild(el('p', 'text-xs text-slate-300',
+          'Total cooked batch: ~' + Math.round(prep.totals.cookedGrams) + 'g (~' + Math.round(prep.totals.dailyCookedGrams) + 'g/day)'
+        ));
+        var prepUl = el('ul', 'text-xs text-slate-200 space-y-1 pl-4 list-disc');
+        prep.batchIngredients.forEach(function (ing) {
+          prepUl.appendChild(el('li', 'wrap-anywhere', formatBatchIngredientLine(ing)));
+        });
+        prepBlock.appendChild(prepUl);
+        batchCard.appendChild(prepBlock);
+      });
+
+      var combined = Array.isArray(batchPrep.combinedIngredients) ? batchPrep.combinedIngredients : [];
+      var hasSharedOrPotatoes = combined.some(function (c) {
+        return (c.usedInSlots && c.usedInSlots.length > 1) || c.id === 'potatoes_raw';
+      });
+      if (combined.length > 0 && hasSharedOrPotatoes) {
+        var combinedBlock = el('div', 'pt-2 border-t border-slate-700 space-y-1');
+        combinedBlock.appendChild(el('p', 'text-xs font-bold text-emerald-300', 'Combined Pot / Rice Cooker Totals'));
+        var combinedUl = el('ul', 'text-xs text-slate-200 space-y-1 pl-4 list-disc');
+        combined.forEach(function (c) {
+          var unitSuffix = c.id === 'rice_dry' ? 'g dry' : ((c.category === 'protein' || c.id === 'potatoes_raw') ? 'g raw' : 'g');
+          var measureSuffix = (c.id === 'rice_dry' || c.id === 'potatoes_raw') ? (' — ' + c.householdMeasure) : '';
+          combinedUl.appendChild(el('li', 'wrap-anywhere',
+            c.name + ' [' + c.usedInSlots.join(' + ') + ']: ' + c.rawGrams + unitSuffix + ' (~' + c.cookedGrams + 'g cooked)' + measureSuffix
+          ));
+        });
+        combinedBlock.appendChild(combinedUl);
+        batchCard.appendChild(combinedBlock);
+      }
+
+      splitCard.appendChild(batchCard);
     }
 
     var fridge = currentScaledPlan.storageSplit.fridge;
@@ -1850,6 +1970,20 @@
       stepEl.appendChild(metaRow);
 
       stepEl.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', step.parallelNote));
+
+      if (!inferredFresh && batchPrep) {
+        var stepQtyLines = buildStepQuantitiesLines(step, batchPrep, currentScaledPlan.storageSplit);
+        if (stepQtyLines.length > 0) {
+          var stepQtyWrap = el('div', 'pt-1 space-y-1');
+          stepQtyWrap.appendChild(el('p', 'text-xs font-bold text-emerald-300', 'Step Total Quantities'));
+          var stepQtyUl = el('ul', 'text-xs text-slate-200 space-y-1 pl-4 list-disc');
+          stepQtyLines.forEach(function (qLine) {
+            stepQtyUl.appendChild(el('li', 'wrap-anywhere', qLine));
+          });
+          stepQtyWrap.appendChild(stepQtyUl);
+          stepEl.appendChild(stepQtyWrap);
+        }
+      }
 
       // Direct-sibling timer container: readout + Start/Pause + Reset inside immediate parent div
       var timerRow = el('div', 'flex-wrap-row prep-timer-row');

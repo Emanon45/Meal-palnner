@@ -698,3 +698,112 @@ test('Suite 7: Regression tests for underscored oils, poisoned core DB keys, pro
     assert.ok(pork.costCad > 0);
   });
 });
+
+// ============================================================================
+// Suite 8: Batch Prep Totals (scaleToHorizon.batchPrep)
+// ============================================================================
+test('Suite 8: scaleToHorizon computes batchPrep preparations, combined pot totals, household sums, and split-week rotations', async (t) => {
+  await t.test('7-day single-person plan computes lunch & dinner batch quantities and combined rice/potato totals', () => {
+    const daily = solveDailyPortions(null, {
+      preset: 'recomp',
+      lunchSwap: 'ground_chicken',
+      dinnerSwap: 'pork_loin_lean'
+    });
+    const scaled = scaleToHorizon(daily, null, { days: 7 });
+    const bp = scaled.batchPrep;
+
+    assert.ok(bp && typeof bp === 'object');
+    assert.equal(bp.days, 7);
+    assert.equal(bp.preparations.length, 2);
+
+    const lunchPrep = bp.preparations.find((p) => p.slotId === 'lunch');
+    const dinnerPrep = bp.preparations.find((p) => p.slotId === 'dinner');
+    assert.ok(lunchPrep && dinnerPrep);
+    assert.equal(lunchPrep.days, 7);
+    assert.equal(lunchPrep.rotation, null);
+    assert.equal(dinnerPrep.days, 7);
+    assert.equal(dinnerPrep.rotation, null);
+
+    // Fresh toppings excluded from batchIngredients
+    const lunchBatchIds = lunchPrep.batchIngredients.map((i) => i.id);
+    assert.ok(lunchBatchIds.includes('ground_chicken'));
+    assert.ok(lunchBatchIds.includes('rice_dry'));
+    assert.equal(lunchBatchIds.includes('cabbage'), false);
+    assert.equal(lunchBatchIds.includes('cucumber'), false);
+    assert.equal(lunchBatchIds.includes('carrots'), false);
+    assert.equal(lunchBatchIds.includes('tzatziki_0'), false);
+
+    // Lunch chicken matches 7x daily grams & cooked yield
+    const chickenIng = lunchPrep.batchIngredients.find((i) => i.id === 'ground_chicken');
+    assert.equal(chickenIng.rawGrams, daily.ingredientGrams.ground_chicken * 7);
+    assert.equal(chickenIng.cookedGrams, Math.round(chickenIng.rawGrams * 0.75 * 10) / 10);
+    assert.ok(typeof chickenIng.householdMeasure === 'string' && chickenIng.householdMeasure.length > 0);
+
+    // Combined rice_dry sums Lunch + Dinner across 7 days
+    const riceCombined = bp.byIngredient.rice_dry;
+    assert.ok(riceCombined);
+    assert.deepEqual(riceCombined.usedInSlots, ['Lunch', 'Dinner']);
+    assert.equal(riceCombined.rawGrams, daily.ingredientGrams.rice_dry * 7);
+    assert.equal(riceCombined.cookedGrams, Math.round(riceCombined.rawGrams * 2.8 * 10) / 10);
+
+    // Combined potatoes_raw includes Breakfast potatoes
+    const potCombined = bp.byIngredient.potatoes_raw;
+    assert.ok(potCombined);
+    assert.deepEqual(potCombined.usedInSlots, ['Breakfast']);
+    assert.equal(potCombined.rawGrams, daily.ingredientGrams.potatoes_raw * 7);
+
+    // Prep totals equal sum of batchIngredients
+    const sumDinnerRaw = Math.round(dinnerPrep.batchIngredients.reduce((acc, i) => acc + i.rawGrams, 0) * 10) / 10;
+    assert.equal(dinnerPrep.totals.rawGrams, sumDinnerRaw);
+  });
+
+  await t.test('Multi-person householdPlans sums batchPrep totals across members accurately', () => {
+    const p1 = solveDailyPortions(null, { preset: 'cut', lunchSwap: 'ground_chicken', dinnerSwap: 'pork_loin_lean' });
+    const p2 = solveDailyPortions(null, { preset: 'recomp', lunchSwap: 'ground_chicken', dinnerSwap: 'pork_loin_lean' });
+    const scaled = scaleToHorizon(p1, null, {
+      days: 7,
+      householdPlans: [
+        { primaryPlan: p1, altPlan: null },
+        { primaryPlan: p2, altPlan: null }
+      ]
+    });
+
+    const bp = scaled.batchPrep;
+    assert.equal(bp.preparations.length, 2);
+    assert.equal(bp.byIngredient.ground_chicken.rawGrams, (p1.ingredientGrams.ground_chicken + p2.ingredientGrams.ground_chicken) * 7);
+    assert.equal(bp.byIngredient.pork_loin_lean.rawGrams, (p1.ingredientGrams.pork_loin_lean + p2.ingredientGrams.pork_loin_lean) * 7);
+    assert.equal(bp.byIngredient.rice_dry.rawGrams, (p1.ingredientGrams.rice_dry + p2.ingredientGrams.rice_dry) * 7);
+  });
+
+  await t.test('Split-week secondaryDailyPlan separates differing rotations and preserves exact combined rice/meat totals', () => {
+    const planA = solveDailyPortions(null, { preset: 'cut', lunchSwap: 'ground_chicken', dinnerSwap: 'pork_loin_lean' });
+    const planB = solveDailyPortions(null, { preset: 'cut', lunchSwap: 'tuna_patties', dinnerSwap: 'chicken_breast' });
+    const scaled = scaleToHorizon(planA, null, {
+      days: 7,
+      secondaryDailyPlan: planB,
+      secondaryDays: 3
+    });
+
+    const bp = scaled.batchPrep;
+    const lunchPreps = bp.preparations.filter((p) => p.slotId === 'lunch');
+    const dinnerPreps = bp.preparations.filter((p) => p.slotId === 'dinner');
+    assert.equal(lunchPreps.length, 2);
+    assert.equal(dinnerPreps.length, 2);
+    assert.deepEqual(lunchPreps.map((p) => [p.rotation, p.days]), [['Rotation A', 4], ['Rotation B', 3]]);
+    assert.deepEqual(dinnerPreps.map((p) => [p.rotation, p.days]), [['Rotation A', 4], ['Rotation B', 3]]);
+
+    assert.equal(bp.byIngredient.ground_chicken.rawGrams, planA.ingredientGrams.ground_chicken * 4);
+    assert.equal(bp.byIngredient.tuna_water.rawGrams, planB.ingredientGrams.tuna_water * 3);
+    assert.equal(bp.byIngredient.pork_loin_lean.rawGrams, planA.ingredientGrams.pork_loin_lean * 4);
+    assert.equal(bp.byIngredient.chicken_breast.rawGrams, planB.ingredientGrams.chicken_breast * 3);
+
+    const expectedRice = Math.round((planA.ingredientGrams.rice_dry * 4 + planB.ingredientGrams.rice_dry * 3) * 10) / 10;
+    assert.ok(Math.abs(bp.byIngredient.rice_dry.rawGrams - expectedRice) <= 0.11);
+
+    // Combined potatoes_raw includes Breakfast (4d+3d) + Lunch (3d from tuna_patties)
+    const expectedPot = Math.round((planA.ingredientGrams.potatoes_raw * 4 + planB.ingredientGrams.potatoes_raw * 3) * 10) / 10;
+    assert.ok(Math.abs(bp.byIngredient.potatoes_raw.rawGrams - expectedPot) <= 0.11);
+    assert.ok(bp.byIngredient.potatoes_raw.usedInSlots.includes('Breakfast'));
+    assert.ok(bp.byIngredient.potatoes_raw.usedInSlots.includes('Lunch'));
+  });
+});

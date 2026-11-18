@@ -390,6 +390,30 @@
     corn: true
   };
 
+  var COLD_FRESH_IDS = {
+    cabbage: true,
+    cucumber: true,
+    carrots: true,
+    pico: true,
+    tzatziki_0: true,
+    skyr_0: true,
+    berries: true,
+    banana: true,
+    whey_isolate: true,
+    green_onion: true,
+    whole_egg: true,
+    egg_whites: true,
+    aromatics_zero: true
+  };
+
+  function isFreshPrepIngredient(id, item) {
+    if (hasOwn(COLD_FRESH_IDS, id)) return true;
+    if (!hasOwn(DEFAULT_NUTRITION_DB, id) && item && typeof item.name === 'string') {
+      return /\b(yogurt|skyr|tzatziki|whey|berries|berry|banana|lettuce|arugula|cucumber)\b/i.test(item.name);
+    }
+    return false;
+  }
+
   // Safe negation phrases stripped before checking for added cooking oils/fats
   var ZERO_OIL_SAFE_PHRASES = /\b(0\s*g?\s*(added\s*)?(cooking\s*)?(oil|oils|huile|butter|beurre|fat)|zero[\s-]*(added[\s-]*)?(cooking[\s-]*)?(oil|oils|huile|butter|beurre)|no[\s-]*(added[\s-]*)?(cooking[\s-]*)?(oil|oils|huile|butter|beurre)|without[\s-]*(added[\s-]*)?(cooking[\s-]*)?(oil|oils|huile|butter|beurre)|oil[\s-]*free|sans[\s-]*(huile|beurre)|non[\s-]*stick)\b/gi;
 
@@ -1550,6 +1574,271 @@
     return 0;
   }
 
+  function buildBatchPrep(days, dailyPlan, dailyGramsMap, db, safeOpts) {
+    var householdList = (Array.isArray(safeOpts.householdPlans) && safeOpts.householdPlans.length > 0)
+      ? safeOpts.householdPlans
+      : [{
+          primaryPlan: dailyPlan,
+          altPlan: (safeOpts.secondaryDailyPlan && typeof safeOpts.secondaryDailyPlan === 'object')
+            ? safeOpts.secondaryDailyPlan
+            : null
+        }];
+
+    var hasAlt = false;
+    for (var hIdx = 0; hIdx < householdList.length; hIdx++) {
+      var hpCheck = householdList[hIdx];
+      if (hpCheck && hpCheck.altPlan && Array.isArray(hpCheck.altPlan.meals)) {
+        hasAlt = true;
+        break;
+      }
+    }
+
+    var altDays = hasAlt
+      ? Math.min(days, Math.max(0, Math.floor(Number(safeOpts.secondaryDays) || Math.floor(days / 2))))
+      : 0;
+    var priDays = days - altDays;
+
+    function findSlotMeta(planProp, slotId) {
+      for (var i = 0; i < householdList.length; i++) {
+        var hp = householdList[i];
+        var p = hp && hp[planProp];
+        if (!p || !Array.isArray(p.meals)) continue;
+        for (var j = 0; j < p.meals.length; j++) {
+          var ml = p.meals[j];
+          if (ml && ml.id === slotId) {
+            return {
+              title: ml.title || (slotId === 'lunch' ? 'Lunch' : 'Dinner'),
+              activeSwap: ml.activeSwap || null
+            };
+          }
+        }
+      }
+      return null;
+    }
+
+    function collectSlotTotals(planProp, slotId, multiplierDays, mapOut, orderOut) {
+      var meta = null;
+      for (var i = 0; i < householdList.length; i++) {
+        var hp = householdList[i];
+        var p = hp && hp[planProp];
+        if (!p || !Array.isArray(p.meals)) continue;
+        for (var j = 0; j < p.meals.length; j++) {
+          var ml = p.meals[j];
+          if (!ml || ml.id !== slotId || !Array.isArray(ml.ingredients)) continue;
+          if (!meta) {
+            meta = {
+              slot: ml.slot || (slotId === 'lunch' ? 'Lunch' : 'Dinner'),
+              title: ml.title || (slotId === 'lunch' ? 'Lunch' : 'Dinner'),
+              activeSwap: ml.activeSwap || null
+            };
+          }
+          for (var k = 0; k < ml.ingredients.length; k++) {
+            var ing = ml.ingredients[k];
+            if (!ing || typeof ing.id !== 'string' || ing.id === '__proto__' || ing.id === 'aromatics_zero') continue;
+            var mg = Number(ing.grams);
+            if (!Number.isFinite(mg) || mg <= 0) continue;
+            if (!hasOwn(db, ing.id) || isOilIngredient(ing.id, db[ing.id].name)) continue;
+            if (!hasOwn(mapOut, ing.id)) {
+              mapOut[ing.id] = 0;
+              orderOut.push(ing.id);
+            }
+            mapOut[ing.id] += mg * multiplierDays;
+          }
+        }
+      }
+      return meta;
+    }
+
+    function buildPreparationFromTotals(slotId, meta, totalMap, orderList, prepDays, rotationLabel) {
+      if (!meta || prepDays <= 0) return null;
+      var batchIngredients = [];
+      var freshToppings = [];
+      var rawTotal = 0;
+      var cookedTotal = 0;
+      var dailyRawTotal = 0;
+      var dailyCookedTotal = 0;
+
+      for (var i = 0; i < orderList.length; i++) {
+        var id = orderList[i];
+        var totalGramsExact = totalMap[id] || 0;
+        if (totalGramsExact <= 0 || !hasOwn(db, id)) continue;
+        var item = db[id];
+        var dailyRawExact = totalGramsExact / prepDays;
+        var rawGrams = round1(totalGramsExact);
+        var cookedGrams = round1(rawGrams * item.cookedYield);
+        var dailyRawGrams = round1(dailyRawExact);
+        var dailyCookedGrams = round1(dailyRawExact * item.cookedYield);
+        var fresh = isFreshPrepIngredient(id, item);
+
+        var record = {
+          id: id,
+          name: item.name,
+          aisle: item.aisle,
+          category: classifyIngredientCategory(id, item),
+          dailyRawGrams: dailyRawGrams,
+          dailyCookedGrams: dailyCookedGrams,
+          rawGrams: rawGrams,
+          cookedGrams: cookedGrams,
+          cookedYield: item.cookedYield,
+          unitLabel: item.unitLabel,
+          householdMeasure: formatHouseholdMeasure(id, Math.round(rawGrams), Math.round(rawGrams * item.cookedYield)),
+          dailyHouseholdMeasure: formatHouseholdMeasure(id, Math.round(dailyRawExact), Math.round(dailyRawExact * item.cookedYield)),
+          isFreshTopping: fresh
+        };
+
+        if (fresh) {
+          freshToppings.push(record);
+        } else {
+          batchIngredients.push(record);
+          rawTotal += rawGrams;
+          cookedTotal += cookedGrams;
+          dailyRawTotal += dailyRawGrams;
+          dailyCookedTotal += dailyCookedGrams;
+        }
+      }
+
+      return {
+        slotId: slotId,
+        slot: meta.slot,
+        title: meta.title,
+        activeSwap: meta.activeSwap,
+        rotation: rotationLabel,
+        days: prepDays,
+        batchIngredients: batchIngredients,
+        freshToppings: freshToppings,
+        totals: {
+          rawGrams: round1(rawTotal),
+          cookedGrams: round1(cookedTotal),
+          dailyRawGrams: round1(dailyRawTotal),
+          dailyCookedGrams: round1(dailyCookedTotal)
+        }
+      };
+    }
+
+    function collectPreparation(slotId, planProp, prepDays, rotationLabel) {
+      if (prepDays <= 0) return null;
+      var totalMap = {};
+      var orderList = [];
+      var meta = collectSlotTotals(planProp, slotId, prepDays, totalMap, orderList);
+      return buildPreparationFromTotals(slotId, meta, totalMap, orderList, prepDays, rotationLabel);
+    }
+
+    var preparations = [];
+    var batchSlots = ['lunch', 'dinner'];
+    for (var sIdx = 0; sIdx < batchSlots.length; sIdx++) {
+      var sid = batchSlots[sIdx];
+      if (altDays > 0) {
+        var priMeta = findSlotMeta('primaryPlan', sid);
+        var altMeta = findSlotMeta('altPlan', sid);
+        var isSamePrep = priMeta && altMeta &&
+          priMeta.activeSwap === altMeta.activeSwap &&
+          priMeta.title === altMeta.title;
+        if (isSamePrep) {
+          var combinedMap = {};
+          var combinedOrder = [];
+          var slotMeta = collectSlotTotals('primaryPlan', sid, priDays, combinedMap, combinedOrder);
+          collectSlotTotals('altPlan', sid, altDays, combinedMap, combinedOrder);
+          var mergedPrep = buildPreparationFromTotals(sid, slotMeta, combinedMap, combinedOrder, days, null);
+          if (mergedPrep) preparations.push(mergedPrep);
+        } else {
+          var prepA = collectPreparation(sid, 'primaryPlan', priDays, 'Rotation A');
+          var prepB = collectPreparation(sid, 'altPlan', altDays, 'Rotation B');
+          if (prepA) preparations.push(prepA);
+          if (prepB) preparations.push(prepB);
+        }
+      } else {
+        var singlePrep = collectPreparation(sid, 'primaryPlan', days, null);
+        if (singlePrep) preparations.push(singlePrep);
+      }
+    }
+
+    var byIngredient = {};
+    var combinedOrderAll = [];
+    for (var pIdx = 0; pIdx < preparations.length; pIdx++) {
+      var prep = preparations[pIdx];
+      for (var bIdx = 0; bIdx < prep.batchIngredients.length; bIdx++) {
+        var bIng = prep.batchIngredients[bIdx];
+        if (!hasOwn(byIngredient, bIng.id)) {
+          byIngredient[bIng.id] = {
+            id: bIng.id,
+            name: bIng.name,
+            aisle: bIng.aisle,
+            category: bIng.category,
+            usedInSlots: [prep.slot],
+            rawGrams: bIng.rawGrams,
+            cookedGrams: bIng.cookedGrams,
+            dailyRawGrams: 0,
+            dailyCookedGrams: 0,
+            cookedYield: bIng.cookedYield,
+            unitLabel: bIng.unitLabel,
+            householdMeasure: ''
+          };
+          combinedOrderAll.push(bIng.id);
+        } else {
+          var existing = byIngredient[bIng.id];
+          if (existing.usedInSlots.indexOf(prep.slot) === -1) {
+            existing.usedInSlots.push(prep.slot);
+          }
+          existing.rawGrams = round1(existing.rawGrams + bIng.rawGrams);
+          existing.cookedGrams = round1(existing.rawGrams * existing.cookedYield);
+        }
+      }
+    }
+
+    if (hasOwn(dailyGramsMap, 'potatoes_raw') && dailyGramsMap.potatoes_raw > 0 && hasOwn(db, 'potatoes_raw')) {
+      var potItem = db.potatoes_raw;
+      var potTotalRaw = round1(dailyGramsMap.potatoes_raw * days);
+      if (!hasOwn(byIngredient, 'potatoes_raw')) {
+        byIngredient.potatoes_raw = {
+          id: 'potatoes_raw',
+          name: potItem.name,
+          aisle: potItem.aisle,
+          category: classifyIngredientCategory('potatoes_raw', potItem),
+          usedInSlots: ['Breakfast'],
+          rawGrams: potTotalRaw,
+          cookedGrams: round1(potTotalRaw * potItem.cookedYield),
+          dailyRawGrams: 0,
+          dailyCookedGrams: 0,
+          cookedYield: potItem.cookedYield,
+          unitLabel: potItem.unitLabel,
+          householdMeasure: ''
+        };
+        combinedOrderAll.push('potatoes_raw');
+      } else if (potTotalRaw > byIngredient.potatoes_raw.rawGrams + 0.05) {
+        if (byIngredient.potatoes_raw.usedInSlots.indexOf('Breakfast') === -1) {
+          byIngredient.potatoes_raw.usedInSlots.unshift('Breakfast');
+        }
+        byIngredient.potatoes_raw.rawGrams = potTotalRaw;
+        byIngredient.potatoes_raw.cookedGrams = round1(potTotalRaw * potItem.cookedYield);
+      }
+    }
+
+    var combinedIngredients = [];
+    var combinedRawSum = 0;
+    var combinedCookedSum = 0;
+    for (var cIdx = 0; cIdx < combinedOrderAll.length; cIdx++) {
+      var cid = combinedOrderAll[cIdx];
+      var rec = byIngredient[cid];
+      rec.dailyRawGrams = round1(rec.rawGrams / days);
+      rec.dailyCookedGrams = round1(rec.cookedGrams / days);
+      rec.householdMeasure = formatHouseholdMeasure(cid, Math.round(rec.rawGrams), Math.round(rec.cookedGrams));
+      combinedIngredients.push(rec);
+      combinedRawSum += rec.rawGrams;
+      combinedCookedSum += rec.cookedGrams;
+    }
+
+    return {
+      days: days,
+      preparations: preparations,
+      combinedIngredients: combinedIngredients,
+      byIngredient: byIngredient,
+      totals: {
+        rawGrams: round1(combinedRawSum),
+        cookedGrams: round1(combinedCookedSum)
+      }
+    };
+  }
+
   function scaleToHorizon(dailyPlan, data, options) {
     if (!dailyPlan || typeof dailyPlan !== 'object') {
       throw new TypeError('scaleToHorizon requires a valid dailyPlan object');
@@ -1765,12 +2054,14 @@
     }
 
     var savedCents = totalCents - remainingCents;
+    var batchPrep = buildBatchPrep(days, dailyPlan, dailyGramsMap, db, safeOpts);
 
     return {
       days: days,
       fridgeDays: fridgeDays,
       freezerDays: freezerDays,
       storageSplit: storageSplit,
+      batchPrep: batchPrep,
       thawAlerts: thawAlerts,
       groceryListByAisle: groceryListByAisle,
       summary: {
