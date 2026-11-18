@@ -1619,54 +1619,6 @@
       card.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Method: ' + meal.cookingMethod));
       card.appendChild(el('p', 'text-xs text-emerald-200 wrap-anywhere', 'Seasoning: ' + meal.seasoningTwist));
 
-      // 1-Tap Protein Swap Pills (Lunch / Dinner)
-      if (meal.swappable && appData.proteinSwaps && Array.isArray(appData.proteinSwaps[meal.id])) {
-        var swapWrap = el('div', 'space-y-1');
-        var swapLabelText = (appState.splitWeekVariety && appState.horizonDays > 1)
-          ? ('1-Tap Protein Swap (' + (isAltDay ? 'Rotation B — Even Days' : 'Rotation A — Odd Days') + '):')
-          : '1-Tap Protein Swap:';
-        swapWrap.appendChild(el('div', 'text-xs font-semibold text-slate-300', swapLabelText));
-        var swapRow = el('div', 'flex-wrap-row');
-        var swapDeltas = computeSwapDeltaMap(meal.id);
-        appData.proteinSwaps[meal.id].forEach(function (swap) {
-          var isActive = meal.activeSwap === swap.id;
-          var primaryDb = appData.nutritionDb && swap.primaryIngredient ? appData.nutritionDb[swap.primaryIngredient] : null;
-          var priceInfo = swapDeltas[swap.id];
-          var tags = [];
-          if (primaryDb && primaryDb.price && primaryDb.price.onFlyer && primaryDb.price.radarTag && primaryDb.price.radarTag !== 'REGULAR') {
-            tags.push(primaryDb.price.radarTag);
-          }
-          if (priceInfo) {
-            if (priceInfo.isCheapest) {
-              tags.push('Best Price');
-            } else if (priceInfo.diff >= 0.5) {
-              tags.push('+$' + priceInfo.diff.toFixed(2));
-            }
-          }
-          var dealSuffix = tags.length > 0 ? (' (' + tags.join(' • ') + ')') : '';
-          var pill = el('button', 'pill-btn', (swap.shortLabel || swap.label) + dealSuffix);
-          pill.type = 'button';
-          pill.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-          pill.addEventListener('click', function () {
-            if (isAltDay) {
-              if (meal.id === 'lunch') appState.lunchSwapAlt = swap.id;
-              if (meal.id === 'dinner') appState.dinnerSwapAlt = swap.id;
-            } else {
-              if (meal.id === 'lunch') appState.lunchSwap = swap.id;
-              if (meal.id === 'dinner') appState.dinnerSwap = swap.id;
-            }
-            saveState();
-            recomputePlan();
-            renderMealsTab();
-            renderPrepTab();
-            renderGroceriesTab();
-          });
-          swapRow.appendChild(pill);
-        });
-        swapWrap.appendChild(swapRow);
-        card.appendChild(swapWrap);
-      }
-
       // Ingredients List
       var ingList = el('ul', 'text-sm text-slate-200 space-y-1 pl-4 list-disc');
       meal.ingredients.forEach(function (ing) {

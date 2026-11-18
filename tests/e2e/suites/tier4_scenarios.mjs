@@ -111,8 +111,6 @@ export const tier4Tests = [
         await getHorizonButton(iso.page, 7).click();
 
         await switchTab(iso.page, /Meals/i);
-        await getSwapPill(await getMealCard(iso.page, /Lunch/i), /Ground Chicken/i).click();
-        await getSwapPill(await getMealCard(iso.page, /Dinner/i), /Pork Loin/i).click();
 
         const alertLoc = await getFatAlert(iso.page);
         if ((await alertLoc.count()) > 0) {
@@ -187,7 +185,6 @@ export const tier4Tests = [
         await switchTab(iso.page, /Settings|Targets/i);
         await getHorizonButton(iso.page, 7).click();
         await switchTab(iso.page, /Meals/i);
-        await getSwapPill(await getMealCard(iso.page, /Dinner/i), /Pork Shoulder/i).click();
 
         await switchTab(iso.page, /Groceries/i);
         const readRemaining = async () =>
@@ -267,8 +264,6 @@ export const tier4Tests = [
         const alertLoc = await getFatAlert(iso.page);
         assert.equal(await alertLoc.isVisible(), true);
 
-        await getSwapPill(await getMealCard(iso.page, /Dinner/i), /Chicken Breast/i).click();
-        await getSwapPill(await getMealCard(iso.page, /Lunch/i), /Tuna Patties/i).click();
         await switchTab(iso.page, /Settings|Targets/i);
         await setInputOrSliderValue(await getNumericInput(iso.page, /Fat/i), 50);
         await switchTab(iso.page, /Meals/i);
@@ -333,12 +328,10 @@ export const tier4Tests = [
         await (await getFeedbackControls(bCard)).thumbsUp.click();
 
         const lCard = await getMealCard(iso.page, /Lunch/i);
-        await getSwapPill(lCard, /Sardine/i).click();
         const lFb = await getFeedbackControls(lCard);
         await lFb.thumbsDown.click();
         await lFb.noteInput.fill('Too fishy, swap to Tuna Patties');
         await lFb.noteInput.dispatchEvent('change');
-        await getSwapPill(lCard, /Tuna Patties/i).click();
 
         await switchTab(iso.page, /Groceries/i);
         const rows = await getGroceryRows(iso.page);
