@@ -2609,19 +2609,9 @@
       shareBtn.type = 'button';
       shareBtn.addEventListener('click', function () {
         var shareUrl = encodeSharePayload(m.id);
-        var shareTitle = 'Meal Plan — ' + m.name + '\'s Portions (' + m.targets.calories + ' kcal)';
-        if (navigator.share) {
-          navigator.share({
-            title: shareTitle,
-            text: 'Here is our weekly Meal Plan pre-set to ' + m.name + '\'s exact portions (' + m.targets.calories + ' kcal):',
-            url: shareUrl
-          }).then(function () {
-            shareStatusText = 'Shared link for ' + m.name + '!';
-            updateSettingsControlsInPlace();
-          }).catch(function () {});
-        } else if (navigator.clipboard && navigator.clipboard.writeText) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText(shareUrl).then(function () {
-            shareStatusText = 'Copied ' + m.name + '\'s link! Send it via WhatsApp/SMS — opening it loads this exact meal plan & ' + m.name + '\'s quantities.';
+            shareStatusText = 'Link copied to clipboard for ' + m.name + '!';
             updateSettingsControlsInPlace();
             announcePolite(shareStatusText);
           }).catch(function () {
