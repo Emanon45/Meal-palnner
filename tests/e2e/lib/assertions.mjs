@@ -177,7 +177,10 @@ export function assertAtwaterConsistency(per100g, id) {
   );
 }
 
-export function assertDataJsonSchema(data) {
+export function assertDataJsonSchema(
+  data,
+  { expectedPostalDisplay = 'H1W', expectedPostalQuery = 'H1W1A1' } = {}
+) {
   assert.ok(data && typeof data === 'object', 'data.json must be an object');
   const requiredRoot = [
     'schemaVersion',
@@ -203,8 +206,16 @@ export function assertDataJsonSchema(data) {
     ['gemini+flipp', 'gemini+baseline', 'fallback+flipp', 'fallback+baseline'].includes(data.source),
     `Unexpected source: ${data.source}`
   );
-  assert.equal(data.location.postalCodeDisplay, 'H1W');
-  assert.equal(data.location.postalCodeQuery, 'H1W1A1');
+  if (expectedPostalDisplay !== null && expectedPostalDisplay !== undefined) {
+    assert.equal(data.location.postalCodeDisplay, expectedPostalDisplay);
+  } else {
+    assert.match(String(data.location.postalCodeDisplay), /^[A-Z]\d[A-Z]$/);
+  }
+  if (expectedPostalQuery !== null && expectedPostalQuery !== undefined) {
+    assert.equal(data.location.postalCodeQuery, expectedPostalQuery);
+  } else {
+    assert.match(String(data.location.postalCodeQuery), /^[A-Z]\d[A-Z]\d[A-Z]\d$/);
+  }
   assert.equal(data.location.currency, 'CAD');
   assert.equal(data.location.groceryTaxRate, 0);
   assert.ok(['Maxi', 'Super C'].includes(data.winningStore), `Invalid winningStore: ${data.winningStore}`);
@@ -221,7 +232,11 @@ export function assertDataJsonSchema(data) {
   }
 
   assert.equal(typeof data.userProfile.description, 'string');
-  assert.equal(data.userProfile.postalCode, 'H1W');
+  if (expectedPostalDisplay !== null && expectedPostalDisplay !== undefined) {
+    assert.equal(data.userProfile.postalCode, expectedPostalDisplay);
+  } else {
+    assert.match(String(data.userProfile.postalCode), /^[A-Z]\d[A-Z]$/);
+  }
   assert.equal(data.userProfile.zeroAddedOil, true);
 
   for (const [presetId, expected] of Object.entries(EXPECTED_GOAL_PRESETS)) {
@@ -270,4 +285,147 @@ export function assertDataJsonSchema(data) {
   assert.ok(Array.isArray(data.prepTimeline) && data.prepTimeline.length >= 3);
   assertZeroAddedOil(data.mealTemplates, 'mealTemplates');
   assertZeroAddedOil(data.prepTimeline, 'prepTimeline');
+}
+
+const REQUIRED_CATEGORY_BASELINES = [
+  'pork',
+  'chicken',
+  'canned_fish',
+  'eggs',
+  'potatoes',
+  'rice',
+  'cabbage',
+  'cucumbers',
+  'tomatoes',
+  'carrots',
+  'white_beans',
+];
+
+export function assertNutritionBaselineSchema(schemaObj) {
+  assert.ok(schemaObj && typeof schemaObj === 'object', 'nutrition_baseline.json must be an object');
+  assert.equal(schemaObj.schemaVersion, '1.0.0');
+  assert.deepEqual(schemaObj.aisleOrder, AISLE_ORDER);
+  for (const [presetId, expected] of Object.entries(EXPECTED_GOAL_PRESETS)) {
+    const actual = schemaObj.goalPresets?.[presetId];
+    assert.ok(actual, `Missing goalPresets.${presetId} in nutrition_baseline.json`);
+    assert.equal(actual.calories, expected.calories);
+    assert.equal(actual.protein, expected.protein);
+    assert.equal(actual.fat, expected.fat);
+    assert.equal(actual.carbs, expected.carbs);
+  }
+  assert.ok(
+    schemaObj.categoryBaselines && typeof schemaObj.categoryBaselines === 'object',
+    'Missing categoryBaselines in nutrition_baseline.json'
+  );
+  for (const field of ['baselinePrices', 'historicalLows', 'defaultUnitWeights']) {
+    const map = schemaObj.categoryBaselines[field];
+    assert.ok(map && typeof map === 'object', `Missing categoryBaselines.${field}`);
+    for (const cat of REQUIRED_CATEGORY_BASELINES) {
+      assert.equal(typeof map[cat], 'number', `categoryBaselines.${field}.${cat} must be a number`);
+      assert.ok(Number.isFinite(map[cat]) && map[cat] > 0, `categoryBaselines.${field}.${cat} must be > 0`);
+    }
+  }
+  assert.ok(schemaObj.nutritionDb && typeof schemaObj.nutritionDb === 'object', 'Missing nutritionDb');
+  assert.equal(Object.keys(schemaObj.nutritionDb).length, 25, 'Expected exactly 25 entries in nutritionDb');
+  for (const id of REQUIRED_NUTRITION_IDS) {
+    const item = schemaObj.nutritionDb[id];
+    assert.ok(item, `Missing nutritionDb.${id} in nutrition_baseline.json`);
+    assert.ok(AISLE_ORDER.includes(item.aisle), `Invalid aisle "${item.aisle}" on ${id}`);
+    assertAtwaterConsistency(item.per100g, id);
+    assert.ok(item.cookedYield > 0, `${id}.cookedYield must be > 0`);
+    assert.ok(item.packageGrams > 0, `${id}.packageGrams must be > 0`);
+    assert.equal(typeof item.unitLabel, 'string', `${id}.unitLabel must be string`);
+    assert.ok(item.price && typeof item.price === 'object', `${id}.price missing`);
+    for (const pf of ['cadPer100g', 'cadPerPackage', 'regularCadPer100g', 'historicalLowCadPer100g']) {
+      assert.equal(typeof item.price[pf], 'number', `${id}.price.${pf} must be number`);
+      assert.ok(Number.isFinite(item.price[pf]) && item.price[pf] >= 0, `${id}.price.${pf} must be >= 0`);
+    }
+  }
+  assert.deepEqual(schemaObj.nutritionDb.ground_chicken.per100g, {
+    calories: 140,
+    protein: 17.0,
+    fat: 9.0,
+    carbs: 0.0,
+  });
+}
+
+export function assertPriceHistorySchema(
+  historyObj,
+  { expectedPostalKeys = [], maxAgeDays = 364, nowIso = null } = {}
+) {
+  assert.ok(historyObj && typeof historyObj === 'object', 'price_history.json must be an object');
+  assert.equal(historyObj.schemaVersion, '1.0.0');
+  assert.equal(historyObj.windowWeeks, 52);
+  assert.ok(!Number.isNaN(Date.parse(historyObj.updatedAt)), `Invalid updatedAt: ${historyObj.updatedAt}`);
+  assert.ok(
+    historyObj.byPostalCode && typeof historyObj.byPostalCode === 'object',
+    'Missing byPostalCode in price_history.json'
+  );
+  for (const postalKey of expectedPostalKeys) {
+    assert.ok(
+      postalKey in historyObj.byPostalCode,
+      `Expected postal FSA "${postalKey}" in price_history.byPostalCode`
+    );
+  }
+  const nowDayMs = nowIso ? Date.parse(String(nowIso).slice(0, 10)) : null;
+  for (const [postalKey, byIngredient] of Object.entries(historyObj.byPostalCode)) {
+    assert.match(postalKey, /^[A-Z]\d[A-Z]$/, `Invalid postal FSA key "${postalKey}"`);
+    assert.ok(byIngredient && typeof byIngredient === 'object', `Invalid entries map for ${postalKey}`);
+    for (const [ingId, entries] of Object.entries(byIngredient)) {
+      assert.ok(Array.isArray(entries), `Expected array for ${postalKey}.${ingId}`);
+      for (const entry of entries) {
+        assert.match(entry.observedAt, /^\d{4}-\d{2}-\d{2}$/, `Invalid observedAt on ${postalKey}.${ingId}`);
+        assert.equal(typeof entry.store, 'string', `Missing store on ${postalKey}.${ingId}`);
+        assert.equal(typeof entry.cadPer100g, 'number', `Missing cadPer100g on ${postalKey}.${ingId}`);
+        assert.ok(
+          Number.isFinite(entry.cadPer100g) && entry.cadPer100g >= 0,
+          `Invalid cadPer100g on ${postalKey}.${ingId}: ${entry.cadPer100g}`
+        );
+        assert.equal(typeof entry.itemName, 'string');
+        assert.equal(typeof entry.subcategory, 'string');
+        if (nowDayMs !== null && Number.isFinite(nowDayMs)) {
+          const obsMs = Date.parse(entry.observedAt);
+          const ageDays = Math.round((nowDayMs - obsMs) / 86400000);
+          assert.ok(
+            ageDays <= maxAgeDays,
+            `Unpruned stale price_history entry on ${postalKey}.${ingId}: ${entry.observedAt} (${ageDays}d > ${maxAgeDays}d)`
+          );
+        }
+      }
+    }
+  }
+}
+
+const FORBIDDEN_ROLLOVER_KEY_RE =
+  /leftover|roll[_\s-]*over|partial[_\s-]*package|pantry[_\s-]*credit|carry[_\s-]*over|surplus[_\s-]*grams/i;
+const FORBIDDEN_ROLLOVER_TEXT_RE =
+  /\b(?:leftover\s*(?:roll[\s-]*over|pantry|credit|surplus)|partial[\s-]*package\s*(?:roll[\s-]*over|carry[\s-]*over|credit|deduct)|pantry\s*roll[\s-]*over|carry[\s-]*over\s*(?:pantry|package|surplus))\b/i;
+
+export function assertNoLeftoverRollover(value, label = 'payload') {
+  const hits = [];
+  function scan(v, p) {
+    if (typeof v === 'string') {
+      const m = v.match(FORBIDDEN_ROLLOVER_TEXT_RE);
+      if (m) hits.push({ path: p, match: m[0] });
+      return;
+    }
+    if (Array.isArray(v)) {
+      v.forEach((item, idx) => scan(item, `${p}[${idx}]`));
+      return;
+    }
+    if (v && typeof v === 'object') {
+      for (const [k, val] of Object.entries(v)) {
+        if (FORBIDDEN_ROLLOVER_KEY_RE.test(k)) {
+          hits.push({ path: `${p}.${k}`, match: k });
+        }
+        scan(val, `${p}.${k}`);
+      }
+    }
+  }
+  scan(value, label);
+  assert.equal(
+    hits.length,
+    0,
+    `R4 excluded leftover/partial-package roll-over detected in ${label}: ${JSON.stringify(hits)}`
+  );
 }

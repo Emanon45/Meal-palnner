@@ -1,285 +1,30 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { EXPECTED_GOAL_PRESETS } from './assertions.mjs';
 
-export function makeDefaultNutritionDb() {
-  return {
-    whole_egg: {
-      name: 'Large Whole Eggs',
-      aisle: 'Dairy/Eggs',
-      per100g: { calories: 143, protein: 12.6, fat: 9.5, carbs: 0.7 },
-      cookedYield: 1.0,
-      packageGrams: 600,
-      unitLabel: '12 eggs',
-      requiresThaw: false,
-      pantryDefault: false,
-      price: { cadPer100g: 0.65, cadPerPackage: 3.9, regularCadPer100g: 0.75, historicalLowCadPer100g: 0.55, savingsPct: 13, radarTag: 'FLYER DEAL', flyerItemName: 'Oeufs gros 12 un.', onFlyer: true },
-    },
-    egg_whites: {
-      name: 'Liquid Egg Whites',
-      aisle: 'Dairy/Eggs',
-      per100g: { calories: 52, protein: 10.9, fat: 0.2, carbs: 0.7 },
-      cookedYield: 1.0,
-      packageGrams: 500,
-      unitLabel: '500g carton',
-      requiresThaw: false,
-      pantryDefault: false,
-      price: { cadPer100g: 0.85, cadPerPackage: 4.25, regularCadPer100g: 0.85, historicalLowCadPer100g: 0.7, savingsPct: 0, radarTag: 'REGULAR', flyerItemName: null, onFlyer: false },
-    },
-    potatoes_raw: {
-      name: 'Grelot / Yellow Potatoes (Raw)',
-      aisle: 'Produce',
-      per100g: { calories: 77, protein: 2.0, fat: 0.1, carbs: 17.5 },
-      cookedYield: 0.85,
-      packageGrams: 1360,
-      unitLabel: '3 lb bag',
-      requiresThaw: false,
-      pantryDefault: false,
-      price: { cadPer100g: 0.22, cadPerPackage: 2.99, regularCadPer100g: 0.35, historicalLowCadPer100g: 0.22, savingsPct: 37, radarTag: 'HISTORIC LOW', flyerItemName: 'Pommes de terre grelot', onFlyer: true },
-    },
-    green_onion: {
-      name: 'Green Onions',
-      aisle: 'Produce',
-      per100g: { calories: 32, protein: 1.8, fat: 0.2, carbs: 7.3 },
-      cookedYield: 1.0,
-      packageGrams: 100,
-      unitLabel: '1 bunch',
-      requiresThaw: false,
-      pantryDefault: false,
-      price: { cadPer100g: 0.99, cadPerPackage: 0.99, regularCadPer100g: 1.29, historicalLowCadPer100g: 0.79, savingsPct: 23, radarTag: 'FLYER DEAL', flyerItemName: 'Oignons verts', onFlyer: true },
-    },
-    pico: {
-      name: 'Fresh Pico de Gallo',
-      aisle: 'Produce',
-      per100g: { calories: 22, protein: 1.0, fat: 0.2, carbs: 4.8 },
-      cookedYield: 1.0,
-      packageGrams: 400,
-      unitLabel: '400g tub',
-      requiresThaw: false,
-      pantryDefault: false,
-      price: { cadPer100g: 0.95, cadPerPackage: 3.8, regularCadPer100g: 0.95, historicalLowCadPer100g: 0.8, savingsPct: 0, radarTag: 'REGULAR', flyerItemName: null, onFlyer: false },
-    },
-    berries: {
-      name: 'Mixed Berries',
-      aisle: 'Frozen',
-      per100g: { calories: 57, protein: 0.7, fat: 0.3, carbs: 14.4 },
-      cookedYield: 1.0,
-      packageGrams: 600,
-      unitLabel: '600g bag',
-      requiresThaw: false,
-      pantryDefault: false,
-      price: { cadPer100g: 0.83, cadPerPackage: 4.98, regularCadPer100g: 1.15, historicalLowCadPer100g: 0.75, savingsPct: 28, radarTag: 'HOT DEAL', flyerItemName: 'Petits fruits surgelés', onFlyer: true },
-    },
-    banana: {
-      name: 'Bananas',
-      aisle: 'Produce',
-      per100g: { calories: 89, protein: 1.1, fat: 0.3, carbs: 22.8 },
-      cookedYield: 1.0,
-      packageGrams: 1000,
-      unitLabel: '1 kg bunch',
-      requiresThaw: false,
-      pantryDefault: false,
-      price: { cadPer100g: 0.17, cadPerPackage: 1.7, regularCadPer100g: 0.19, historicalLowCadPer100g: 0.15, savingsPct: 11, radarTag: 'FLYER DEAL', flyerItemName: 'Bananes', onFlyer: true },
-    },
-    ground_chicken: {
-      name: 'Walmart Extra-Lean Ground Chicken',
-      aisle: 'Meat',
-      per100g: { calories: 140, protein: 17.0, fat: 9.0, carbs: 0.0 },
-      cookedYield: 0.75,
-      packageGrams: 454,
-      unitLabel: '454g pack',
-      requiresThaw: true,
-      pantryDefault: false,
-      price: { cadPer100g: 1.1, cadPerPackage: 5.0, regularCadPer100g: 1.1, historicalLowCadPer100g: 0.99, savingsPct: 0, radarTag: 'REGULAR', flyerItemName: null, onFlyer: false },
-    },
-    tuna_water: {
-      name: 'Canned Light Tuna in Water',
-      aisle: 'Pantry/Canned',
-      per100g: { calories: 116, protein: 25.5, fat: 0.8, carbs: 0.0 },
-      cookedYield: 1.0,
-      packageGrams: 170,
-      unitLabel: '170g can',
-      requiresThaw: false,
-      pantryDefault: true,
-      price: { cadPer100g: 0.76, cadPerPackage: 1.29, regularCadPer100g: 1.12, historicalLowCadPer100g: 0.76, savingsPct: 32, radarTag: 'HISTORIC LOW', flyerItemName: 'Thon pâle dans eau', onFlyer: true },
-    },
-    sardines_water: {
-      name: 'Canned Sardines in Water',
-      aisle: 'Pantry/Canned',
-      per100g: { calories: 185, protein: 24.6, fat: 9.6, carbs: 0.0 },
-      cookedYield: 1.0,
-      packageGrams: 106,
-      unitLabel: '106g tin',
-      requiresThaw: false,
-      pantryDefault: true,
-      price: { cadPer100g: 1.4, cadPerPackage: 1.48, regularCadPer100g: 1.79, historicalLowCadPer100g: 1.25, savingsPct: 22, radarTag: 'FLYER DEAL', flyerItemName: 'Sardines', onFlyer: true },
-    },
-    pork_loin_lean: {
-      name: 'Trimmed Lean Pork Loin',
-      aisle: 'Meat',
-      per100g: { calories: 143, protein: 21.4, fat: 5.7, carbs: 0.0 },
-      cookedYield: 0.75,
-      packageGrams: 1000,
-      unitLabel: '1 kg roast',
-      requiresThaw: true,
-      pantryDefault: false,
-      price: { cadPer100g: 0.66, cadPerPackage: 6.6, regularCadPer100g: 1.1, historicalLowCadPer100g: 0.66, savingsPct: 40, radarTag: 'HISTORIC LOW', flyerItemName: 'Longe de porc', onFlyer: true },
-    },
-    pork_shoulder: {
-      name: 'Trimmed Pork Shoulder',
-      aisle: 'Meat',
-      per100g: { calories: 195, protein: 17.5, fat: 13.5, carbs: 0.0 },
-      cookedYield: 0.72,
-      packageGrams: 1200,
-      unitLabel: '1.2 kg roast',
-      requiresThaw: true,
-      pantryDefault: false,
-      price: { cadPer100g: 0.55, cadPerPackage: 6.6, regularCadPer100g: 0.88, historicalLowCadPer100g: 0.5, savingsPct: 38, radarTag: 'HOT DEAL', flyerItemName: 'Épaule de porc', onFlyer: true },
-    },
-    chicken_breast: {
-      name: 'Boneless Skinless Chicken Breast',
-      aisle: 'Meat',
-      per100g: { calories: 120, protein: 22.5, fat: 2.6, carbs: 0.0 },
-      cookedYield: 0.75,
-      packageGrams: 1000,
-      unitLabel: '1 kg pack',
-      requiresThaw: true,
-      pantryDefault: false,
-      price: { cadPer100g: 1.1, cadPerPackage: 11.0, regularCadPer100g: 1.49, historicalLowCadPer100g: 0.99, savingsPct: 26, radarTag: 'HOT DEAL', flyerItemName: 'Poitrines de poulet', onFlyer: true },
-    },
-    white_beans_cnd: {
-      name: 'Canned White Beans (Drained)',
-      aisle: 'Pantry/Canned',
-      per100g: { calories: 114, protein: 7.4, fat: 0.4, carbs: 20.4 },
-      cookedYield: 1.0,
-      packageGrams: 540,
-      unitLabel: '540mL can',
-      requiresThaw: false,
-      pantryDefault: true,
-      price: { cadPer100g: 0.28, cadPerPackage: 1.5, regularCadPer100g: 0.37, historicalLowCadPer100g: 0.24, savingsPct: 24, radarTag: 'FLYER DEAL', flyerItemName: 'Haricots blancs', onFlyer: true },
-    },
-    diced_tomatoes: {
-      name: 'Canned Diced Tomatoes',
-      aisle: 'Pantry/Canned',
-      per100g: { calories: 22, protein: 1.0, fat: 0.1, carbs: 4.9 },
-      cookedYield: 1.0,
-      packageGrams: 796,
-      unitLabel: '796mL can',
-      requiresThaw: false,
-      pantryDefault: true,
-      price: { cadPer100g: 0.2, cadPerPackage: 1.59, regularCadPer100g: 0.28, historicalLowCadPer100g: 0.18, savingsPct: 29, radarTag: 'HOT DEAL', flyerItemName: 'Tomates en dés', onFlyer: true },
-    },
-    rice_dry: {
-      name: 'White Rice (Dry)',
-      aisle: 'Pantry/Canned',
-      per100g: { calories: 365, protein: 7.1, fat: 0.7, carbs: 80.0 },
-      cookedYield: 2.9,
-      packageGrams: 2000,
-      unitLabel: '2 kg bag',
-      requiresThaw: false,
-      pantryDefault: true,
-      price: { cadPer100g: 0.25, cadPerPackage: 5.0, regularCadPer100g: 0.3, historicalLowCadPer100g: 0.2, savingsPct: 17, radarTag: 'FLYER DEAL', flyerItemName: 'Riz blanc', onFlyer: true },
-    },
-    cabbage: {
-      name: 'Green Cabbage',
-      aisle: 'Produce',
-      per100g: { calories: 25, protein: 1.3, fat: 0.1, carbs: 5.8 },
-      cookedYield: 1.0,
-      packageGrams: 900,
-      unitLabel: '1 head',
-      requiresThaw: false,
-      pantryDefault: false,
-      price: { cadPer100g: 0.18, cadPerPackage: 1.62, regularCadPer100g: 0.25, historicalLowCadPer100g: 0.15, savingsPct: 28, radarTag: 'HOT DEAL', flyerItemName: 'Chou vert', onFlyer: true },
-    },
-    cucumber: {
-      name: 'English Cucumber',
-      aisle: 'Produce',
-      per100g: { calories: 15, protein: 0.7, fat: 0.1, carbs: 3.6 },
-      cookedYield: 1.0,
-      packageGrams: 350,
-      unitLabel: '1 cucumber',
-      requiresThaw: false,
-      pantryDefault: false,
-      price: { cadPer100g: 0.37, cadPerPackage: 1.29, regularCadPer100g: 0.5, historicalLowCadPer100g: 0.28, savingsPct: 26, radarTag: 'HOT DEAL', flyerItemName: 'Concombre anglais', onFlyer: true },
-    },
-    carrots: {
-      name: 'Carrots',
-      aisle: 'Produce',
-      per100g: { calories: 41, protein: 0.9, fat: 0.2, carbs: 9.6 },
-      cookedYield: 1.0,
-      packageGrams: 1360,
-      unitLabel: '3 lb bag',
-      requiresThaw: false,
-      pantryDefault: false,
-      price: { cadPer100g: 0.18, cadPerPackage: 2.45, regularCadPer100g: 0.24, historicalLowCadPer100g: 0.15, savingsPct: 25, radarTag: 'HOT DEAL', flyerItemName: 'Carottes 3 lb', onFlyer: true },
-    },
-    edamame: {
-      name: 'Frozen Shelled Edamame',
-      aisle: 'Frozen',
-      per100g: { calories: 121, protein: 11.9, fat: 5.2, carbs: 8.9 },
-      cookedYield: 1.0,
-      packageGrams: 400,
-      unitLabel: '400g bag',
-      requiresThaw: false,
-      pantryDefault: false,
-      price: { cadPer100g: 0.88, cadPerPackage: 3.5, regularCadPer100g: 0.99, historicalLowCadPer100g: 0.75, savingsPct: 11, radarTag: 'FLYER DEAL', flyerItemName: 'Edamame', onFlyer: true },
-    },
-    corn: {
-      name: 'Frozen Kernel Corn',
-      aisle: 'Frozen',
-      per100g: { calories: 86, protein: 3.2, fat: 1.2, carbs: 19.0 },
-      cookedYield: 1.0,
-      packageGrams: 750,
-      unitLabel: '750g bag',
-      requiresThaw: false,
-      pantryDefault: false,
-      price: { cadPer100g: 0.35, cadPerPackage: 2.63, regularCadPer100g: 0.45, historicalLowCadPer100g: 0.3, savingsPct: 22, radarTag: 'FLYER DEAL', flyerItemName: 'Maïs en grains', onFlyer: true },
-    },
-    tzatziki_0: {
-      name: '0% Greek Yogurt Tzatziki',
-      aisle: 'Dairy/Eggs',
-      per100g: { calories: 58, protein: 7.0, fat: 0.5, carbs: 5.5 },
-      cookedYield: 1.0,
-      packageGrams: 227,
-      unitLabel: '227g tub',
-      requiresThaw: false,
-      pantryDefault: false,
-      price: { cadPer100g: 1.32, cadPerPackage: 3.0, regularCadPer100g: 1.5, historicalLowCadPer100g: 1.1, savingsPct: 12, radarTag: 'FLYER DEAL', flyerItemName: 'Tzatziki 0%', onFlyer: true },
-    },
-    skyr_0: {
-      name: "Siggi's 0% Plain Skyr",
-      aisle: 'Dairy/Eggs',
-      per100g: { calories: 63, protein: 11.0, fat: 0.2, carbs: 4.0 },
-      cookedYield: 1.0,
-      packageGrams: 750,
-      unitLabel: '750g tub',
-      requiresThaw: false,
-      pantryDefault: false,
-      price: { cadPer100g: 0.8, cadPerPackage: 5.99, regularCadPer100g: 0.93, historicalLowCadPer100g: 0.67, savingsPct: 14, radarTag: 'FLYER DEAL', flyerItemName: "Skyr 0%", onFlyer: true },
-    },
-    whey_isolate: {
-      name: 'Whey Protein Isolate',
-      aisle: 'Pantry/Canned',
-      per100g: { calories: 370, protein: 86.0, fat: 1.0, carbs: 3.0 },
-      cookedYield: 1.0,
-      packageGrams: 907,
-      unitLabel: '2 lb tub',
-      requiresThaw: false,
-      pantryDefault: true,
-      price: { cadPer100g: 3.3, cadPerPackage: 29.99, regularCadPer100g: 3.3, historicalLowCadPer100g: 2.8, savingsPct: 0, radarTag: 'REGULAR', flyerItemName: null, onFlyer: false },
-    },
-    aromatics_zero: {
-      name: 'Ginger, Garlic, Onion & Spices (Broth Simmer)',
-      aisle: 'Produce',
-      per100g: { calories: 0, protein: 0.0, fat: 0.0, carbs: 0.0 },
-      cookedYield: 1.0,
-      packageGrams: 250,
-      unitLabel: 'bunch/bulb',
-      requiresThaw: false,
-      pantryDefault: true,
-      price: { cadPer100g: 0.4, cadPerPackage: 1.0, regularCadPer100g: 0.4, historicalLowCadPer100g: 0.3, savingsPct: 0, radarTag: 'REGULAR', flyerItemName: null, onFlyer: false },
-    },
-  };
+const DEFAULT_SCHEMA_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../schema/nutrition_baseline.json'
+);
+
+const SAMPLE_FLYER_PRICE_PATCHES = {
+  whole_egg: { cadPer100g: 0.59, savingsPct: 12, radarTag: 'FLYER DEAL', flyerItemName: 'Oeufs gros 12 un.', onFlyer: true },
+  potatoes_raw: { cadPer100g: 0.15, savingsPct: 48, radarTag: 'HISTORIC LOW', flyerItemName: 'Pommes de terre grelot', onFlyer: true },
+  tuna_water: { cadPer100g: 0.83, savingsPct: 33, radarTag: 'HISTORIC LOW', flyerItemName: 'Thon pâle dans eau', onFlyer: true },
+  pork_loin_lean: { cadPer100g: 0.66, savingsPct: 40, radarTag: 'HISTORIC LOW', flyerItemName: 'Longe de porc', onFlyer: true },
+  pork_shoulder: { cadPer100g: 0.55, savingsPct: 29, radarTag: 'HOT DEAL', flyerItemName: 'Épaule de porc', onFlyer: true },
+  chicken_breast: { cadPer100g: 1.05, savingsPct: 27, radarTag: 'HOT DEAL', flyerItemName: 'Poitrines de poulet', onFlyer: true },
+  cabbage: { cadPer100g: 0.2, savingsPct: 29, radarTag: 'HOT DEAL', flyerItemName: 'Chou vert', onFlyer: true },
+  berries: { cadPer100g: 0.69, savingsPct: 17, radarTag: 'FLYER DEAL', flyerItemName: 'Petits fruits surgelés', onFlyer: true },
+};
+
+export function makeDefaultNutritionDb(rootDir = null) {
+  const schemaPath = rootDir
+    ? path.join(rootDir, 'schema', 'nutrition_baseline.json')
+    : DEFAULT_SCHEMA_PATH;
+  const raw = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
+  return structuredClone(raw.nutritionDb);
 }
 
 export function makeSampleDataJson({
@@ -289,6 +34,21 @@ export function makeSampleDataJson({
   customNutritionPatch = {},
 } = {}) {
   const nutritionDb = makeDefaultNutritionDb();
+  for (const [id, pPatch] of Object.entries(SAMPLE_FLYER_PRICE_PATCHES)) {
+    const item = nutritionDb[id];
+    const regularCadPer100g = item.price.regularCadPer100g;
+    const historicalLowCadPer100g = item.price.historicalLowCadPer100g;
+    nutritionDb[id] = {
+      ...item,
+      price: {
+        ...item.price,
+        ...pPatch,
+        cadPerPackage: Number((pPatch.cadPer100g * (item.packageGrams / 100)).toFixed(2)),
+        regularCadPer100g,
+        historicalLowCadPer100g,
+      },
+    };
+  }
   for (const [id, patch] of Object.entries(customNutritionPatch)) {
     nutritionDb[id] = { ...nutritionDb[id], ...patch };
   }
@@ -349,7 +109,7 @@ export function makeSampleDataJson({
         {
           id: 'breakfast',
           slot: 'Breakfast',
-          title: 'Greek Scramble & Air-Fried Grelot Potatoes',
+          title: 'Eggs & Crispy Grelot Potatoes',
           cookingMethod: 'Nonstick pan + air fryer with zero added cooking oil',
           seasoningTwist: 'Oregano, lemon zest, cracked black pepper',
           swappable: false,
@@ -503,4 +263,47 @@ export function makeFlippCatalog({
   }
 
   return { flyers, items };
+}
+
+export function shiftIsoDate(baseIso, deltaDays) {
+  const str = String(baseIso || '2026-11-12').slice(0, 10);
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) {
+    throw new Error(`Invalid ISO date "${baseIso}" passed to shiftIsoDate`);
+  }
+  const ms = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) + Number(deltaDays) * 86400000;
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+export function makePriceHistoryJson({
+  byPostalCode = {},
+  windowWeeks = 52,
+  updatedAt = '2026-11-18T00:00:00Z',
+} = {}) {
+  return {
+    schemaVersion: '1.0.0',
+    windowWeeks,
+    updatedAt,
+    byPostalCode,
+  };
+}
+
+export function makeDatedFlippCatalog({
+  maxiDeals = [],
+  superCDeals = [],
+  extraFlyers = [],
+  extraItems = [],
+  validFromDate = '2026-11-12',
+  validToDate = null,
+} = {}) {
+  const from = String(validFromDate).slice(0, 10);
+  const to = validToDate ? String(validToDate).slice(0, 10) : shiftIsoDate(from, 6);
+  return makeFlippCatalog({
+    maxiDeals,
+    superCDeals,
+    extraFlyers,
+    extraItems,
+    validFrom: from,
+    validTo: to,
+  });
 }

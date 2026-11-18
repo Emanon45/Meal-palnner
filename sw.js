@@ -1,14 +1,22 @@
 'use strict';
 
 const CACHE_PREFIX = 'meal-plan-';
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v7';
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 
 const CORE_ASSETS = [
   './',
   './index.html',
   './manifest.json',
+  './css/styles.css',
+  './schema/nutrition_baseline.json',
   './js/macroEngine.js',
+  './js/state.js',
+  './js/geminiPrompts.js',
+  './js/views/mealsView.js',
+  './js/views/prepView.js',
+  './js/views/groceriesView.js',
+  './js/views/settingsView.js',
   './js/app.js',
   './data.json',
   './icons/icon-192.svg',
@@ -18,7 +26,6 @@ const CORE_ASSETS = [
 ];
 
 const OPTIONAL_LOCAL_ASSETS = ['./public/data.json'];
-const TAILWIND_CDN_URL = 'https://cdn.tailwindcss.com/';
 
 const SCOPE_URL = new URL('./', self.location.href).href;
 const INDEX_URL = new URL('./index.html', self.location.href).href;
@@ -30,39 +37,14 @@ self.addEventListener('install', (event) => {
     const cache = await caches.open(CACHE_NAME);
     await cache.addAll(CORE_ASSETS);
 
-    await Promise.allSettled([
-      ...OPTIONAL_LOCAL_ASSETS.map(async (assetPath) => {
+    await Promise.allSettled(
+      OPTIONAL_LOCAL_ASSETS.map(async (assetPath) => {
         const resp = await fetch(new Request(assetPath, { cache: 'reload' }));
         if (resp && resp.ok) {
           await cache.put(assetPath, resp);
         }
       }),
-      (async () => {
-        try {
-          const corsResp = await fetch(TAILWIND_CDN_URL, {
-            mode: 'cors',
-            redirect: 'follow',
-          });
-          if (corsResp && corsResp.ok) {
-            await cache.put(TAILWIND_CDN_URL, corsResp);
-            return;
-          }
-        } catch (_) {
-          // cdn.tailwindcss.com omits CORS headers; fall back to no-cors opaque caching
-        }
-        try {
-          const opaqueResp = await fetch(TAILWIND_CDN_URL, {
-            mode: 'no-cors',
-            redirect: 'follow',
-          });
-          if (opaqueResp && (opaqueResp.ok || opaqueResp.type === 'opaque')) {
-            await cache.put(TAILWIND_CDN_URL, opaqueResp);
-          }
-        } catch (_) {
-          // Never abort SW install if offline or CDN unreachable
-        }
-      })(),
-    ]);
+    );
 
     await self.skipWaiting();
   })());
@@ -93,13 +75,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2. Tailwind CDN -> Cache-First + background revalidate (CORS/opaque safe)
-  if (url.origin === 'https://cdn.tailwindcss.com') {
-    event.respondWith(handleTailwindCdn(event, url));
-    return;
-  }
-
-  // 3. Same-origin app shell & normal data.json -> Stale-While-Revalidate
+  // 2. Same-origin app shell & normal data.json -> Stale-While-Revalidate
   if (url.origin === self.location.origin && url.href.startsWith(SCOPE_URL)) {
     event.respondWith(handleSameOriginSwr(event));
   }
@@ -131,37 +107,6 @@ async function handleCacheBustedData(request, baseUrl) {
       headers: { 'Content-Type': 'application/json' },
     });
   }
-}
-
-async function handleTailwindCdn(event, url) {
-  const cache = await caches.open(CACHE_NAME);
-  const cacheKey = url.pathname === '/' ? TAILWIND_CDN_URL : event.request;
-  const cached =
-    (await cache.match(event.request)) ||
-    (url.pathname === '/' ? await cache.match(TAILWIND_CDN_URL) : undefined);
-  const canServeCached = cached && (event.request.mode !== 'cors' || cached.type !== 'opaque');
-
-  const revalidate = fetch(event.request)
-    .then(async (resp) => {
-      if (resp && (resp.ok || resp.type === 'opaque')) {
-        await cache.put(cacheKey, resp.clone());
-      }
-      return resp;
-    })
-    .catch(() => undefined);
-
-  if (canServeCached) {
-    event.waitUntil(revalidate);
-    return cached;
-  }
-
-  const netResp = await revalidate;
-  if (netResp) return netResp;
-  return new Response('/* Tailwind CDN offline */', {
-    status: 503,
-    statusText: 'Service Unavailable',
-    headers: { 'Content-Type': 'application/javascript' },
-  });
 }
 
 async function handleSameOriginSwr(event) {
@@ -205,3 +150,56 @@ async function handleSameOriginSwr(event) {
 
   return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
 }
+
+self.addEventListener('message', (event) => {
+  const data = event && event.data;
+  if (!data || typeof data !== 'object') return;
+
+  if (data.type === 'TIMER_COMPLETE') {
+    const title = typeof data.title === 'string' && data.title.trim()
+      ? data.title.trim()
+      : 'Prep Timer Complete';
+    const body = typeof data.body === 'string' && data.body.trim()
+      ? data.body.trim()
+      : 'Your batch cooking step timer has finished.';
+    const tag = typeof data.tag === 'string' && data.tag.trim()
+      ? data.tag.trim()
+      : `prep-timer-${data.stepId || 'step'}`;
+
+    if (self.registration && typeof self.registration.showNotification === 'function') {
+      event.waitUntil(
+        self.registration
+          .showNotification(title, {
+            body,
+            tag,
+            icon: './icons/icon-192.png',
+            badge: './icons/icon-192.png',
+            data: { stepId: data.stepId || null, url: './' },
+          })
+          .catch(() => {})
+      );
+    }
+  }
+});
+
+self.addEventListener('notificationclick', (event) => {
+  if (event.notification && typeof event.notification.close === 'function') {
+    event.notification.close();
+  }
+
+  event.waitUntil((async () => {
+    const allClients = await self.clients.matchAll({
+      type: 'window',
+      includeUncontrolled: true,
+    });
+    for (const client of allClients) {
+      if (client && typeof client.focus === 'function') {
+        await client.focus();
+        return;
+      }
+    }
+    if (self.clients && typeof self.clients.openWindow === 'function') {
+      await self.clients.openWindow('./');
+    }
+  })());
+});

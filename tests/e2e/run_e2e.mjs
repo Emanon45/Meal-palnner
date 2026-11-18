@@ -10,8 +10,16 @@ import { resolvePythonExecutable } from './lib/python.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(__dirname, '..', '..');
 const VALID_FEATURES = new Set(
-  Array.from({ length: 15 }, (_, i) => `F${i + 1}`)
+  Array.from({ length: 21 }, (_, i) => `F${i + 1}`)
 );
+const FEATURE_ALIASES = {
+  R1: 'F16',
+  R2: 'F17',
+  R3: 'F18',
+  R4: 'F19',
+  R5: 'F20',
+  R6: 'F21',
+};
 
 function parseArgs(argv) {
   const opts = {
@@ -44,10 +52,13 @@ function parseArgs(argv) {
     } else if (arg.startsWith('--feature=')) {
       const raw = arg.slice('--feature='.length).trim();
       if (!raw) throw new UsageError('Empty --feature value');
-      const parts = raw.split(',').map((s) => s.trim().toUpperCase().replace(/^F0(\d)$/, 'F$1'));
+      const parts = raw.split(',').map((s) => {
+        const up = s.trim().toUpperCase().replace(/^F0(\d)$/, 'F$1');
+        return FEATURE_ALIASES[up] || up;
+      });
       for (const f of parts) {
         if (!VALID_FEATURES.has(f)) {
-          throw new UsageError(`Invalid --feature="${f}". Expected F1..F15.`);
+          throw new UsageError(`Invalid --feature="${f}". Expected F1..F21 or R1..R6.`);
         }
       }
       opts.features = new Set(parts);
@@ -87,7 +98,7 @@ class UsageError extends Error {
 function printUsage() {
   console.log(`Usage: node tests/e2e/run_e2e.mjs [options]
   --tier=<1,2,3,4>             Filter by tier(s) (default: 1,2,3,4)
-  --feature=<F1..F15>          Filter by feature(s) (default: all)
+  --feature=<F1..F21|R1..R6>   Filter by feature(s) (default: all; R1..R6 -> F16..F21)
   --root=<dir>                 Target workspace root (default: ${DEFAULT_ROOT})
   --discover                   List matching tests and counts, exit 0
   --dry-run                    Validate configuration & list matched tests, exit 0

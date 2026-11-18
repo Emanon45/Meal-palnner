@@ -1,6 +1,8 @@
 name: Weekly Flyer Sync
 
 on:
+  schedule:
+    - cron: '0 13 * * 4'
   workflow_dispatch:
     inputs:
       postal_code:
@@ -43,19 +45,21 @@ jobs:
           POSTAL_CODE: ${{ inputs.postal_code || vars.POSTAL_CODE || 'H1W' }}
         run: python scripts/update_plan.py
 
-      - name: Verify dual data.json outputs are identical
+      - name: Verify dual data.json outputs and price_history.json
         run: |
           test -f public/data.json
           test -f data.json
           cmp -s public/data.json data.json
+          test -f price_history.json
+          python -c "import json; json.load(open('price_history.json', encoding='utf-8'))"
 
-      - name: Commit and push updated data.json
+      - name: Commit and push updated data.json and price_history.json
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add public/data.json data.json
-          if git diff --cached --quiet && [ -z "$(git status --porcelain -- public/data.json data.json)" ]; then
+          git add public/data.json data.json price_history.json
+          if git diff --cached --quiet && [ -z "$(git status --porcelain -- public/data.json data.json price_history.json)" ]; then
             echo "No flyer or meal plan changes to commit."
             exit 0
           fi

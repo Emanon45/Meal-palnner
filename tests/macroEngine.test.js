@@ -7,12 +7,15 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const ENGINE_PATH = path.resolve(__dirname, '..', 'js', 'macroEngine.js');
+const SCHEMA_PATH = path.resolve(__dirname, '..', 'schema', 'nutrition_baseline.json');
+const BASELINE_SCHEMA = JSON.parse(fs.readFileSync(SCHEMA_PATH, 'utf8'));
 const MacroEngine = require(ENGINE_PATH);
 
 const {
   AISLE_ORDER,
   GOAL_PRESETS,
   DEFAULT_NUTRITION_DB,
+  setBaselineData,
   solveDailyPortions,
   scaleToHorizon
 } = MacroEngine;
@@ -30,6 +33,7 @@ const EXPECTED_INGREDIENT_IDS = [
 // ============================================================================
 test('Suite 1: UMD exports, browser VM isolation, and contract constants', async (t) => {
   await t.test('CommonJS exports all required public symbols', () => {
+    assert.equal(typeof setBaselineData, 'function');
     assert.equal(typeof solveDailyPortions, 'function');
     assert.equal(typeof scaleToHorizon, 'function');
     assert.ok(Array.isArray(AISLE_ORDER));
@@ -37,33 +41,64 @@ test('Suite 1: UMD exports, browser VM isolation, and contract constants', async
     assert.equal(typeof DEFAULT_NUTRITION_DB, 'object');
   });
 
-  await t.test('Browser <script> execution via node:vm exposes globalThis.MacroEngine without leaking internals', () => {
+  await t.test('Browser <script> execution via node:vm supports both __NUTRITION_BASELINE__ pre-hydration and unhydrated setBaselineData without leaking internals', () => {
     const code = fs.readFileSync(ENGINE_PATH, 'utf8');
-    const ctx = vm.createContext({
+
+    // (a) Pre-hydrated via ctx.__NUTRITION_BASELINE__ (no require/fs/XMLHttpRequest)
+    const ctxPre = vm.createContext({
       Object, Array, Math, Number, String, Boolean, RegExp, TypeError, Error
     });
-    ctx.globalThis = ctx;
-    ctx.self = ctx;
+    ctxPre.globalThis = ctxPre;
+    ctxPre.self = ctxPre;
+    ctxPre.__NUTRITION_BASELINE__ = JSON.parse(JSON.stringify(BASELINE_SCHEMA));
 
-    vm.runInContext(code, ctx);
+    vm.runInContext(code, ctxPre);
 
-    assert.equal(typeof ctx.MacroEngine, 'object');
-    assert.equal(typeof ctx.MacroEngine.solveDailyPortions, 'function');
-    assert.equal(typeof ctx.MacroEngine.scaleToHorizon, 'function');
-    assert.deepEqual(Array.from(ctx.MacroEngine.AISLE_ORDER), Array.from(AISLE_ORDER));
-    assert.equal(ctx.MacroEngine.GOAL_PRESETS.cut.calories, 1900);
+    assert.equal(typeof ctxPre.MacroEngine, 'object');
+    assert.equal(typeof ctxPre.MacroEngine.setBaselineData, 'function');
+    assert.equal(typeof ctxPre.MacroEngine.solveDailyPortions, 'function');
+    assert.equal(typeof ctxPre.MacroEngine.scaleToHorizon, 'function');
+    assert.deepEqual(Array.from(ctxPre.MacroEngine.AISLE_ORDER), Array.from(AISLE_ORDER));
+    assert.equal(ctxPre.MacroEngine.GOAL_PRESETS.cut.calories, 1900);
 
     // Zero internal helper/regex leakage onto global scope
-    assert.equal(ctx.buildMergedDb, undefined);
-    assert.equal(ctx.ADDED_OIL_REGEX, undefined);
-    assert.equal(ctx.ZERO_OIL_SAFE_PHRASES, undefined);
-    assert.equal(ctx.buildMealsAndTotals, undefined);
+    assert.equal(ctxPre.buildMergedDb, undefined);
+    assert.equal(ctxPre.ADDED_OIL_REGEX, undefined);
+    assert.equal(ctxPre.ZERO_OIL_SAFE_PHRASES, undefined);
+    assert.equal(ctxPre.buildMealsAndTotals, undefined);
 
-    // Works identically inside VM
-    const vmPlan = ctx.MacroEngine.solveDailyPortions(null, { preset: 'cut' });
-    const vmScaled = ctx.MacroEngine.scaleToHorizon(vmPlan, null, { days: 7 });
-    assert.equal(vmPlan.zeroAddedOil, true);
-    assert.equal(vmScaled.days, 7);
+    const vmPlanPre = ctxPre.MacroEngine.solveDailyPortions(null, { preset: 'cut' });
+    const vmScaledPre = ctxPre.MacroEngine.scaleToHorizon(vmPlanPre, null, { days: 7 });
+    assert.equal(vmPlanPre.zeroAddedOil, true);
+    assert.equal(vmScaledPre.days, 7);
+
+    // (b) Unhydrated VM + explicit ctx.MacroEngine.setBaselineData(schema)
+    const ctxLate = vm.createContext({
+      Object, Array, Math, Number, String, Boolean, RegExp, TypeError, Error
+    });
+    ctxLate.globalThis = ctxLate;
+    ctxLate.self = ctxLate;
+
+    vm.runInContext(code, ctxLate);
+
+    assert.equal(Array.from(ctxLate.MacroEngine.AISLE_ORDER).length, 0);
+    assert.equal(Object.keys(ctxLate.MacroEngine.DEFAULT_NUTRITION_DB).length, 0);
+    assert.throws(() => ctxLate.MacroEngine.solveDailyPortions(null, { preset: 'cut' }), /setBaselineData/);
+
+    ctxLate.MacroEngine.setBaselineData(JSON.parse(JSON.stringify(BASELINE_SCHEMA)));
+
+    assert.deepEqual(Array.from(ctxLate.MacroEngine.AISLE_ORDER), Array.from(AISLE_ORDER));
+    assert.equal(ctxLate.MacroEngine.GOAL_PRESETS.cut.calories, 1900);
+    assert.equal(Object.keys(ctxLate.MacroEngine.DEFAULT_NUTRITION_DB).length, 25);
+
+    const vmPlanLate = ctxLate.MacroEngine.solveDailyPortions(null, { preset: 'cut' });
+    const vmScaledLate = ctxLate.MacroEngine.scaleToHorizon(vmPlanLate, null, { days: 7 });
+    assert.equal(vmPlanLate.zeroAddedOil, true);
+    assert.equal(vmScaledLate.days, 7);
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(vmPlanLate.totals)),
+      JSON.parse(JSON.stringify(vmPlanPre.totals))
+    );
   });
 
   await t.test('AISLE_ORDER and GOAL_PRESETS match PROJECT.md contracts exactly', () => {
@@ -106,6 +141,128 @@ test('Suite 1: UMD exports, browser VM isolation, and contract constants', async
     });
     assert.equal(DEFAULT_NUTRITION_DB.ground_chicken.requiresThaw, true);
     assert.equal(DEFAULT_NUTRITION_DB.ground_chicken.packageGrams, 454);
+  });
+
+  await t.test('MacroEngine exports match schema/nutrition_baseline.json 1:1 with zero hardcoded DB duplication', () => {
+    assert.deepEqual(Array.from(AISLE_ORDER), BASELINE_SCHEMA.aisleOrder);
+    assert.deepEqual(GOAL_PRESETS, BASELINE_SCHEMA.goalPresets);
+    assert.deepEqual(Object.keys(DEFAULT_NUTRITION_DB).sort(), Object.keys(BASELINE_SCHEMA.nutritionDb).sort());
+
+    for (const id of EXPECTED_INGREDIENT_IDS) {
+      assert.deepEqual(DEFAULT_NUTRITION_DB[id], BASELINE_SCHEMA.nutritionDb[id], `Mismatch for ${id}`);
+    }
+
+    // Reconciled schema invariants
+    assert.equal(DEFAULT_NUTRITION_DB.tuna_water.cookedYield, 1.0);
+    assert.equal(DEFAULT_NUTRITION_DB.aromatics_zero.unitLabel, 'pantry');
+    assert.equal(DEFAULT_NUTRITION_DB.aromatics_zero.price.cadPer100g, 0.0);
+    assert.equal(DEFAULT_NUTRITION_DB.ground_chicken.price.cadPerPackage, 5.0);
+    assert.equal(DEFAULT_NUTRITION_DB.cucumber.price.cadPerPackage, 2.0);
+    assert.equal(DEFAULT_NUTRITION_DB.cabbage.price.regularCadPer100g, 0.28);
+    for (const bulkId of ['banana', 'pork_loin_lean', 'pork_shoulder', 'chicken_breast', 'cabbage']) {
+      assert.equal(DEFAULT_NUTRITION_DB[bulkId].unitLabel, 'kg', `${bulkId} should use bulk kg label`);
+    }
+
+    // Verify scaleToHorizon honors bulk 'kg' and 'pantry' labels via isBulkUnitLabel
+    const plan = solveDailyPortions(null, { preset: 'cut', dinnerSwap: 'pork_loin_lean' });
+    const scaled = scaleToHorizon(plan, null, { days: 7 });
+    const allRows = scaled.groceryListByAisle.flatMap((b) => b.items);
+    const porkRow = allRows.find((r) => r.id === 'pork_loin_lean');
+    const aromRow = allRows.find((r) => r.id === 'aromatics_zero');
+    assert.equal(porkRow.isBulk, true);
+    assert.equal(porkRow.packageGrams, null);
+    assert.equal(aromRow.isBulk, true);
+    assert.equal(aromRow.costCad, 0);
+
+    // Zero hardcoded 25-entry DB or preset duplication in js/macroEngine.js source
+    const engineSource = fs.readFileSync(ENGINE_PATH, 'utf8');
+    assert.equal(engineSource.includes('whole_egg: makeDbEntry'), false);
+    assert.equal(engineSource.includes('pork_loin_lean: makeDbEntry'), false);
+    assert.equal(engineSource.includes('Aggressive Cut'), false);
+  });
+
+  await t.test('setBaselineData validates schema inputs and rejects oil entries', () => {
+    assert.throws(() => setBaselineData(null), TypeError);
+    assert.throws(() => setBaselineData([]), TypeError);
+    assert.throws(() => setBaselineData({}), TypeError);
+    assert.throws(() => setBaselineData({ aisleOrder: [], goalPresets: BASELINE_SCHEMA.goalPresets, nutritionDb: BASELINE_SCHEMA.nutritionDb }), TypeError);
+    assert.throws(() => setBaselineData({ aisleOrder: ['Produce'], goalPresets: {}, nutritionDb: BASELINE_SCHEMA.nutritionDb }), TypeError);
+    assert.throws(() => setBaselineData({ aisleOrder: ['Produce'], goalPresets: BASELINE_SCHEMA.goalPresets, nutritionDb: {} }), TypeError);
+
+    // Reject oil ingredients cleanly in an isolated VM context
+    const code = fs.readFileSync(ENGINE_PATH, 'utf8');
+    const ctx = vm.createContext({
+      Object, Array, Math, Number, String, Boolean, RegExp, TypeError, Error
+    });
+    ctx.globalThis = ctx;
+    ctx.self = ctx;
+    vm.runInContext(code, ctx);
+
+    const schemaWithOil = JSON.parse(JSON.stringify(BASELINE_SCHEMA));
+    schemaWithOil.nutritionDb.olive_oil = {
+      name: 'Extra Virgin Olive Oil',
+      aisle: 'Pantry/Canned',
+      per100g: { calories: 884, protein: 0, fat: 100, carbs: 0 },
+      cookedYield: 1.0,
+      packageGrams: 500,
+      unitLabel: 'bottle',
+      requiresThaw: false,
+      pantryDefault: true,
+      price: { cadPer100g: 1.5, regularCadPer100g: 1.5, historicalLowCadPer100g: 1.0 }
+    };
+    ctx.MacroEngine.setBaselineData(schemaWithOil);
+    assert.equal(Object.prototype.hasOwnProperty.call(ctx.MacroEngine.DEFAULT_NUTRITION_DB, 'olive_oil'), false);
+    assert.equal(Object.keys(ctx.MacroEngine.DEFAULT_NUTRITION_DB).length, 25);
+
+    // Reject prototype-pollution keys and empty/non-string entries in aisleOrder
+    for (const badAisle of ['__proto__', 'constructor', 'toString', 'valueOf', '', '   ', 123]) {
+      const badSchema = JSON.parse(JSON.stringify(BASELINE_SCHEMA));
+      badSchema.aisleOrder = [badAisle, 'Produce', 'Meat'];
+      assert.throws(() => ctx.MacroEngine.setBaselineData(badSchema), ctx.TypeError);
+    }
+    const ret = ctx.MacroEngine.setBaselineData(JSON.parse(JSON.stringify(BASELINE_SCHEMA)));
+    assert.deepEqual(Array.from(ret.aisleOrder), BASELINE_SCHEMA.aisleOrder);
+  });
+
+  await t.test('Unhydrated node:vm with data.goalPresets + data.nutritionDb succeeds in both solveDailyPortions and scaleToHorizon (with or without data.aisleOrder)', () => {
+    const code = fs.readFileSync(ENGINE_PATH, 'utf8');
+    const ctx = vm.createContext({
+      Object, Array, Math, Number, String, Boolean, RegExp, TypeError, Error, JSON
+    });
+    ctx.globalThis = ctx;
+    ctx.self = ctx;
+    vm.runInContext(code, ctx);
+
+    assert.equal(Array.from(ctx.MacroEngine.AISLE_ORDER).length, 0);
+    assert.equal(Object.keys(ctx.MacroEngine.DEFAULT_NUTRITION_DB).length, 0);
+
+    // (a) With data.aisleOrder supplied
+    const dataWithAisles = JSON.parse(JSON.stringify({
+      aisleOrder: BASELINE_SCHEMA.aisleOrder,
+      goalPresets: BASELINE_SCHEMA.goalPresets,
+      nutritionDb: BASELINE_SCHEMA.nutritionDb
+    }));
+    const planWithAisles = ctx.MacroEngine.solveDailyPortions(dataWithAisles, { preset: 'cut' });
+    const scaledWithAisles = ctx.MacroEngine.scaleToHorizon(planWithAisles, dataWithAisles, { days: 7 });
+    assert.equal(planWithAisles.zeroAddedOil, true);
+    assert.equal(scaledWithAisles.days, 7);
+    assert.deepEqual(
+      Array.from(scaledWithAisles.groceryListByAisle.map((g) => g.aisle)),
+      BASELINE_SCHEMA.aisleOrder
+    );
+    assert.ok(scaledWithAisles.summary.totalCostCad > 0);
+
+    // (b) Without data.aisleOrder supplied (only goalPresets + nutritionDb)
+    const dataWithoutAisles = JSON.parse(JSON.stringify({
+      goalPresets: BASELINE_SCHEMA.goalPresets,
+      nutritionDb: BASELINE_SCHEMA.nutritionDb
+    }));
+    const planWithoutAisles = ctx.MacroEngine.solveDailyPortions(dataWithoutAisles, { preset: 'cut' });
+    const scaledWithoutAisles = ctx.MacroEngine.scaleToHorizon(planWithoutAisles, dataWithoutAisles, { days: 7 });
+    assert.equal(planWithoutAisles.zeroAddedOil, true);
+    assert.equal(scaledWithoutAisles.days, 7);
+    assert.equal(scaledWithoutAisles.summary.totalCostCad, scaledWithAisles.summary.totalCostCad);
+    assert.ok(scaledWithoutAisles.groceryListByAisle.length >= 4);
   });
 });
 
@@ -805,5 +962,433 @@ test('Suite 8: scaleToHorizon computes batchPrep preparations, combined pot tota
     assert.ok(Math.abs(bp.byIngredient.potatoes_raw.rawGrams - expectedPot) <= 0.11);
     assert.ok(bp.byIngredient.potatoes_raw.usedInSlots.includes('Breakfast'));
     assert.ok(bp.byIngredient.potatoes_raw.usedInSlots.includes('Lunch'));
+  });
+});
+
+// ============================================================================
+// Suite 9: Per-Slot Macro Solver Weighting (options.slotSplits, M3)
+// ============================================================================
+test('Suite 9: Per-slot macro solver weighting (options.slotSplits) invariants, edge cases, and R4 exclusion', async (t) => {
+  const FORBIDDEN_R4_KEY_RE = /leftover|roll[_\s-]*over|partial[_\s-]*package|pantry[_\s-]*credit|carry[_\s-]*over|surplus[_\s-]*grams/i;
+
+  function assertNoNegativeZero(val, label) {
+    if (typeof val === 'number') {
+      assert.equal(Object.is(val, -0), false, `${label}: unexpected -0`);
+    } else if (Array.isArray(val)) {
+      val.forEach((v, idx) => assertNoNegativeZero(v, `${label}[${idx}]`));
+    } else if (val && typeof val === 'object') {
+      for (const k of Object.keys(val)) {
+        assertNoNegativeZero(val[k], `${label}.${k}`);
+      }
+    }
+  }
+
+  function assertNoRolloverKeys(val, label) {
+    if (Array.isArray(val)) {
+      val.forEach((v, idx) => assertNoRolloverKeys(v, `${label}[${idx}]`));
+      return;
+    }
+    if (val && typeof val === 'object') {
+      for (const k of Object.keys(val)) {
+        assert.equal(FORBIDDEN_R4_KEY_RE.test(k), false, `${label}: forbidden R4 key "${k}"`);
+        assertNoRolloverKeys(val[k], `${label}.${k}`);
+      }
+    }
+  }
+
+  function assertPlanInvariants(plan, label, { proteinTol = 8, carbTol = 10, checkTargets = true } = {}) {
+    assert.equal(plan.zeroAddedOil, true, `${label}: zeroAddedOil`);
+    assert.equal(plan.fatCeilingExceeded, false, `${label}: fatCeilingExceeded (${plan.totals.fat} > ${plan.targets.fat})`);
+    assert.ok(plan.totals.fat <= plan.targets.fat, `${label}: fat ${plan.totals.fat} > ${plan.targets.fat}`);
+    assertNoNegativeZero(plan, label);
+
+    for (const k of ['calories', 'protein', 'fat', 'carbs']) {
+      assert.ok(Number.isFinite(plan.totals[k]) && plan.totals[k] >= 0, `${label}: invalid totals.${k}=${plan.totals[k]}`);
+    }
+
+    if (checkTargets) {
+      assert.ok(
+        Math.abs(plan.totals.protein - plan.targets.protein) <= proteinTol,
+        `${label}: protein ${plan.totals.protein} vs ${plan.targets.protein} (tol ${proteinTol})`
+      );
+      assert.ok(
+        Math.abs(plan.totals.carbs - plan.targets.carbs) <= carbTol,
+        `${label}: carbs ${plan.totals.carbs} vs ${plan.targets.carbs} (tol ${carbTol})`
+      );
+    }
+
+    const atwater = 4 * plan.totals.protein + 9 * plan.totals.fat + 4 * plan.totals.carbs;
+    assert.ok(Math.abs(plan.totals.calories - atwater) <= Math.max(60, plan.totals.calories * 0.06), `${label}: Atwater mismatch ${plan.totals.calories} vs ${atwater}`);
+    assert.ok(plan.totals.calories <= plan.targets.calories + 60, `${label}: calories ${plan.totals.calories} far above ${plan.targets.calories}`);
+
+    assert.equal(plan.meals.length, 4, `${label}: 4 meals`);
+    assert.deepEqual(plan.meals.map((m) => m.id), ['breakfast', 'lunch', 'dinner', 'snack']);
+
+    const summedGrams = {};
+    const summedMacros = { calories: 0, protein: 0, fat: 0, carbs: 0 };
+    for (const meal of plan.meals) {
+      const mealSum = { calories: 0, protein: 0, fat: 0, carbs: 0 };
+      for (const ing of meal.ingredients) {
+        assert.ok(Number.isFinite(ing.grams) && ing.grams > 0, `${label}/${meal.id}/${ing.id}: invalid grams ${ing.grams}`);
+        assert.ok(Number.isFinite(ing.cookedGrams) && ing.cookedGrams >= 0, `${label}/${meal.id}/${ing.id}: invalid cookedGrams`);
+        summedGrams[ing.id] = (summedGrams[ing.id] || 0) + ing.grams;
+        mealSum.calories += ing.macros.calories;
+        mealSum.protein += ing.macros.protein;
+        mealSum.fat += ing.macros.fat;
+        mealSum.carbs += ing.macros.carbs;
+      }
+      assert.ok(Math.abs(Math.round(mealSum.calories * 10) / 10 - meal.totals.calories) < 1e-9, `${label}/${meal.id}: meal calories conservation`);
+      assert.ok(Math.abs(Math.round(mealSum.protein * 10) / 10 - meal.totals.protein) < 1e-9, `${label}/${meal.id}: meal protein conservation`);
+      assert.ok(Math.abs(Math.round(mealSum.fat * 10) / 10 - meal.totals.fat) < 1e-9, `${label}/${meal.id}: meal fat conservation`);
+      assert.ok(Math.abs(Math.round(mealSum.carbs * 10) / 10 - meal.totals.carbs) < 1e-9, `${label}/${meal.id}: meal carbs conservation`);
+
+      summedMacros.calories += meal.totals.calories;
+      summedMacros.protein += meal.totals.protein;
+      summedMacros.fat += meal.totals.fat;
+      summedMacros.carbs += meal.totals.carbs;
+    }
+
+    assert.deepEqual(summedGrams, plan.ingredientGrams, `${label}: ingredientGrams conservation`);
+    assert.ok(Math.abs(Math.round(summedMacros.calories * 10) / 10 - plan.totals.calories) < 1e-9, `${label}: daily calories conservation`);
+    assert.ok(Math.abs(Math.round(summedMacros.protein * 10) / 10 - plan.totals.protein) < 1e-9, `${label}: daily protein conservation`);
+    assert.ok(Math.abs(Math.round(summedMacros.fat * 10) / 10 - plan.totals.fat) < 1e-9, `${label}: daily fat conservation`);
+    assert.ok(Math.abs(Math.round(summedMacros.carbs * 10) / 10 - plan.totals.carbs) < 1e-9, `${label}: daily carbs conservation`);
+  }
+
+  function assertCoreParity(actual, baseline, label) {
+    assert.deepEqual(actual.meals, baseline.meals, `${label}: meals parity`);
+    assert.deepEqual(actual.ingredientGrams, baseline.ingredientGrams, `${label}: ingredientGrams parity`);
+    assert.deepEqual(actual.totals, baseline.totals, `${label}: totals parity`);
+    assert.deepEqual(actual.targets, baseline.targets, `${label}: targets parity`);
+    assert.equal(actual.fatCeilingExceeded, baseline.fatCeilingExceeded, `${label}: fatCeilingExceeded parity`);
+    assert.equal(actual.zeroAddedOil, baseline.zeroAddedOil, `${label}: zeroAddedOil parity`);
+  }
+
+  function mealById(plan, id) {
+    return plan.meals.find((m) => m.id === id);
+  }
+
+  await t.test('9.1 Omitted, null, empty, non-object, all-zero, all-negative, and all-non-finite slotSplits preserve exact baseline parity', () => {
+    const invalidInputs = [
+      { label: 'undefined', slotSplits: undefined },
+      { label: 'null', slotSplits: null },
+      { label: 'empty_obj', slotSplits: {} },
+      { label: 'array', slotSplits: [] },
+      { label: 'string', slotSplits: '25/25/25/25' },
+      { label: 'number', slotSplits: 42 },
+      { label: 'all_zero', slotSplits: { breakfast: 0, lunch: 0, dinner: 0, snack: 0 } },
+      { label: 'all_negative', slotSplits: { breakfast: -10, lunch: -20, dinner: 0, snack: -5 } },
+      { label: 'all_non_finite', slotSplits: { breakfast: Number.NaN, lunch: Number.POSITIVE_INFINITY, dinner: Number.NEGATIVE_INFINITY, snack: 'abc' } },
+      { label: 'booleans_and_whitespace', slotSplits: { breakfast: true, lunch: false, dinner: '   ', snack: null } }
+    ];
+
+    for (const preset of ['cut', 'recomp', 'maintenance']) {
+      const baseline = solveDailyPortions(null, { preset });
+      for (const item of invalidInputs) {
+        const opts = { preset, slotSplits: item.slotSplits };
+        const snap = JSON.stringify(opts);
+        const plan = solveDailyPortions(null, opts);
+        assert.equal(JSON.stringify(opts), snap, `${preset}/${item.label}: options mutated`);
+        assertCoreParity(plan, baseline, `${preset}/${item.label}`);
+        assertPlanInvariants(plan, `${preset}/${item.label}`, { proteinTol: 5, carbTol: 6 });
+      }
+    }
+  });
+
+  await t.test('9.2 Valid slotSplits produce distinct per-slot allocations and bit-for-bit scale invariance (including 1e308 overflow safety)', () => {
+    const splits = {
+      balanced: { breakfast: 20, lunch: 35, dinner: 35, snack: 10 },
+      equal: { breakfast: 25, lunch: 25, dinner: 25, snack: 25 },
+      bHeavy: { breakfast: 50, lunch: 20, dinner: 20, snack: 10 },
+      sHeavy: { breakfast: 10, lunch: 20, dinner: 20, snack: 50 }
+    };
+
+    for (const preset of ['recomp', 'cut']) {
+      const plans = {};
+      for (const [name, slotSplits] of Object.entries(splits)) {
+        const opts = { preset, slotSplits };
+        const snap = JSON.stringify(opts);
+        const plan = solveDailyPortions(null, opts);
+        assert.equal(JSON.stringify(opts), snap);
+        assertPlanInvariants(plan, `${preset}/${name}`, { proteinTol: 5, carbTol: 6 });
+        plans[name] = plan;
+      }
+
+      const totalsSignatures = Object.values(plans).map((p) => JSON.stringify(p.meals.map((m) => m.totals)));
+      assert.equal(new Set(totalsSignatures).size, 4, `${preset}: expected 4 distinct meal totals signatures`);
+
+      const gramSignatures = Object.values(plans).map((p) => JSON.stringify(p.meals.map((m) => m.ingredients.map((i) => [i.id, i.grams]))));
+      assert.equal(new Set(gramSignatures).size, 4, `${preset}: expected 4 distinct ingredient gram signatures`);
+
+      // Directional dominance
+      assert.ok(mealById(plans.bHeavy, 'breakfast').totals.calories > mealById(plans.sHeavy, 'breakfast').totals.calories);
+      assert.ok(mealById(plans.bHeavy, 'breakfast').totals.protein > mealById(plans.sHeavy, 'breakfast').totals.protein);
+      assert.ok(mealById(plans.bHeavy, 'breakfast').totals.carbs > mealById(plans.sHeavy, 'breakfast').totals.carbs);
+      assert.ok(mealById(plans.bHeavy, 'breakfast').totals.calories > mealById(plans.equal, 'breakfast').totals.calories);
+      assert.ok(mealById(plans.bHeavy, 'breakfast').totals.protein > mealById(plans.bHeavy, 'snack').totals.protein);
+
+      assert.ok(mealById(plans.sHeavy, 'snack').totals.calories > mealById(plans.bHeavy, 'snack').totals.calories);
+      assert.ok(mealById(plans.sHeavy, 'snack').totals.protein > mealById(plans.bHeavy, 'snack').totals.protein);
+      assert.ok(mealById(plans.sHeavy, 'snack').totals.carbs > mealById(plans.bHeavy, 'snack').totals.carbs);
+      assert.ok(mealById(plans.sHeavy, 'snack').totals.calories > mealById(plans.balanced, 'snack').totals.calories);
+      assert.ok(mealById(plans.sHeavy, 'snack').totals.calories > mealById(plans.equal, 'snack').totals.calories);
+
+      assert.ok(mealById(plans.balanced, 'lunch').totals.calories > mealById(plans.balanced, 'snack').totals.calories);
+      assert.ok(mealById(plans.balanced, 'lunch').totals.protein > mealById(plans.balanced, 'snack').totals.protein);
+      assert.ok(mealById(plans.balanced, 'dinner').totals.calories > mealById(plans.balanced, 'snack').totals.calories);
+      assert.ok(mealById(plans.balanced, 'dinner').totals.protein > mealById(plans.balanced, 'snack').totals.protein);
+    }
+
+    // Bit-for-bit scale invariance
+    const eq25 = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: 25, lunch: 25, dinner: 25, snack: 25 } });
+    const eq40 = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: 40, lunch: 40, dinner: 40, snack: 40 } });
+    const eqMax = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: 1e308, lunch: 1e308, dinner: 1e308, snack: 1e308 } });
+    assert.deepEqual(eq25.meals, eq40.meals);
+    assert.deepEqual(eq25.meals, eqMax.meals);
+
+    const ratioA = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: 20, lunch: 30, dinner: 30, snack: 20 } });
+    const ratioB = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: 2, lunch: 3, dinner: 3, snack: 2 } });
+    assert.deepEqual(ratioA.meals, ratioB.meals);
+
+    const dec = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: 0.2, lunch: 0.35, dinner: 0.35, snack: 0.1 } });
+    const pct = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: 20, lunch: 35, dinner: 35, snack: 10 } });
+    const dbl = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: 40, lunch: 70, dinner: 70, snack: 20 } });
+    assert.deepEqual(dec.meals, pct.meals);
+    assert.deepEqual(dbl.meals, pct.meals);
+
+    // Overflow-safe large asymmetric weights
+    const huge = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: 1e308, lunch: 5e307, dinner: 5e307, snack: 0 } });
+    assertPlanInvariants(huge, 'huge_1e308', { proteinTol: 6, carbTol: 8 });
+    assert.equal(mealById(huge, 'snack').ingredients.length, 0);
+    assert.equal(mealById(huge, 'snack').totals.calories, 0);
+  });
+
+  await t.test('9.3 Extreme ratios (70/10/10/10, 10/10/70/10, 90/5/3/2, 1/1/1/97), zero-weight slots (50/50/0/0, 0/50/50/0), and tiny weights', () => {
+    const eq25 = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: 25, lunch: 25, dinner: 25, snack: 25 } });
+    const eqTiny = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: 0.001, lunch: 0.001, dinner: 0.001, snack: 0.001 } });
+    assert.deepEqual(eqTiny.meals, eq25.meals);
+
+    for (const preset of ['recomp', 'cut']) {
+      const b70 = solveDailyPortions(null, { preset, slotSplits: { breakfast: 70, lunch: 10, dinner: 10, snack: 10 } });
+      const d70 = solveDailyPortions(null, { preset, slotSplits: { breakfast: 10, lunch: 10, dinner: 70, snack: 10 } });
+      const b90 = solveDailyPortions(null, { preset, slotSplits: { breakfast: 90, lunch: 5, dinner: 3, snack: 2 } });
+      const s97 = solveDailyPortions(null, { preset, slotSplits: { breakfast: 1, lunch: 1, dinner: 1, snack: 97 } });
+      const bl50 = solveDailyPortions(null, { preset, slotSplits: { breakfast: 50, lunch: 50, dinner: 0, snack: 0 } });
+      const ld50 = solveDailyPortions(null, { preset, slotSplits: { breakfast: 0, lunch: 50, dinner: 50, snack: 0 } });
+
+      for (const [name, p] of Object.entries({ b70, d70, b90, s97, bl50, ld50 })) {
+        assertPlanInvariants(p, `${preset}/${name}`, { proteinTol: 6, carbTol: 8 });
+      }
+
+      assert.ok(mealById(b70, 'breakfast').totals.calories > mealById(d70, 'breakfast').totals.calories);
+      assert.ok(mealById(d70, 'dinner').totals.calories > mealById(b70, 'dinner').totals.calories);
+
+      assert.ok(mealById(b90, 'breakfast').totals.calories > mealById(s97, 'breakfast').totals.calories);
+      assert.ok(mealById(b90, 'breakfast').totals.protein > mealById(s97, 'breakfast').totals.protein);
+      assert.ok(mealById(s97, 'snack').totals.calories > mealById(b90, 'snack').totals.calories);
+      assert.ok(mealById(s97, 'snack').totals.protein > mealById(b90, 'snack').totals.protein);
+
+      // Zero-weight slots strictly receive 0 ingredients and 0 calories
+      assert.equal(mealById(bl50, 'dinner').ingredients.length, 0);
+      assert.equal(mealById(bl50, 'dinner').totals.calories, 0);
+      assert.equal(mealById(bl50, 'snack').ingredients.length, 0);
+      assert.equal(mealById(bl50, 'snack').totals.calories, 0);
+
+      assert.equal(mealById(ld50, 'breakfast').ingredients.length, 0);
+      assert.equal(mealById(ld50, 'breakfast').totals.calories, 0);
+      assert.equal(mealById(ld50, 'snack').ingredients.length, 0);
+      assert.equal(mealById(ld50, 'snack').totals.calories, 0);
+    }
+  });
+
+  await t.test('9.4 Partial keys, mixed negative/NaN, numeric strings, and prototype-pollution keys normalize safely', () => {
+    const partialBD = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: 40, dinner: 60 } });
+    assertPlanInvariants(partialBD, 'partial_40_60', { proteinTol: 6, carbTol: 8 });
+    assert.equal(mealById(partialBD, 'lunch').ingredients.length, 0);
+    assert.equal(mealById(partialBD, 'lunch').totals.calories, 0);
+    assert.equal(mealById(partialBD, 'snack').ingredients.length, 0);
+    assert.equal(mealById(partialBD, 'snack').totals.calories, 0);
+    assert.ok(mealById(partialBD, 'dinner').totals.calories > mealById(partialBD, 'breakfast').totals.calories);
+
+    const mixedBad = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: -10, lunch: 40, dinner: Number.NaN, snack: 20 } });
+    const cleanRef = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: 0, lunch: 40, dinner: 0, snack: 20 } });
+    assertPlanInvariants(mixedBad, 'mixed_bad', { proteinTol: 6, carbTol: 8 });
+    assert.deepEqual(mixedBad.meals, cleanRef.meals);
+    assert.ok(mealById(mixedBad, 'lunch').totals.calories > mealById(mixedBad, 'snack').totals.calories);
+    assert.ok(mealById(mixedBad, 'lunch').totals.protein > mealById(mixedBad, 'snack').totals.protein);
+
+    const strSplits = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: '20', lunch: '35', dinner: '35', snack: '10' } });
+    const numSplits = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: 20, lunch: 35, dinner: 35, snack: 10 } });
+    assert.deepEqual(strSplits.meals, numSplits.meals);
+
+    const wsBoolNull = solveDailyPortions(null, { preset: 'recomp', slotSplits: { breakfast: '  ', lunch: 50, dinner: 50, snack: false } });
+    assertPlanInvariants(wsBoolNull, 'ws_bool_null', { proteinTol: 6, carbTol: 8 });
+    assert.equal(mealById(wsBoolNull, 'breakfast').totals.calories, 0);
+    assert.equal(mealById(wsBoolNull, 'snack').totals.calories, 0);
+
+    const protoPayload = JSON.parse('{"breakfast":20,"lunch":35,"dinner":35,"snack":10,"__proto__":999,"toString":999,"constructor":999}');
+    const protoPlan = solveDailyPortions(null, { preset: 'recomp', slotSplits: protoPayload });
+    assert.deepEqual(protoPlan.meals, numSplits.meals);
+    assert.equal(({}).toString, Object.prototype.toString);
+  });
+
+  await t.test('9.5 Cross-product 108 combos (4 splits x 27 swap/preset) + custom mealTemplates + node:vm parity', () => {
+    const splitCases = [
+      { name: '20/35/35/10', val: { breakfast: 20, lunch: 35, dinner: 35, snack: 10 } },
+      { name: '25/25/25/25', val: { breakfast: 25, lunch: 25, dinner: 25, snack: 25 } },
+      { name: '50/20/20/10', val: { breakfast: 50, lunch: 20, dinner: 20, snack: 10 } },
+      { name: '10/20/20/50', val: { breakfast: 10, lunch: 20, dinner: 20, snack: 50 } }
+    ];
+    const presets = ['cut', 'recomp', 'maintenance'];
+    const lunchSwaps = ['ground_chicken', 'tuna_patties', 'sardine_tuna'];
+    const dinnerSwaps = ['pork_loin_lean', 'pork_shoulder', 'chicken_breast'];
+
+    for (const sc of splitCases) {
+      for (const preset of presets) {
+        for (const lunchSwap of lunchSwaps) {
+          for (const dinnerSwap of dinnerSwaps) {
+            const opts = { preset, lunchSwap, dinnerSwap, slotSplits: sc.val };
+            const snap = JSON.stringify(opts);
+            const plan = solveDailyPortions(null, opts);
+            assert.equal(JSON.stringify(opts), snap);
+            assertPlanInvariants(plan, `${sc.name}/${preset}/${lunchSwap}/${dinnerSwap}`, { proteinTol: 5, carbTol: 6 });
+            assert.equal(plan.meals[1].activeSwap, lunchSwap);
+            assert.equal(plan.meals[2].activeSwap, dinnerSwap);
+            const repeat = solveDailyPortions(null, opts);
+            assert.deepEqual(plan, repeat);
+          }
+        }
+      }
+    }
+
+    // Custom mealTemplates (seasoningTwist, ingredientSwaps, customAddons, primaryProteinId, oil sanitization)
+    const customData = {
+      mealTemplates: {
+        meals: [
+          {
+            id: 'lunch',
+            title: 'Herb Chicken Bowl',
+            cookingMethod: 'Dry sear in 0g oil',
+            seasoningTwist: 'Lemon & thyme',
+            primaryProteinId: 'chicken_breast',
+            ingredientSwaps: { rice_dry: 'potatoes_raw' },
+            customAddons: [{ id: 'berries', grams: 40 }]
+          },
+          {
+            id: 'dinner',
+            title: 'Steamed Pork Bowl',
+            cookingMethod: 'Saute in olive oil',
+            seasoningTwist: 'Garlic & rosemary'
+          }
+        ]
+      }
+    };
+    const customPlan = solveDailyPortions(customData, {
+      preset: 'recomp',
+      slotSplits: { breakfast: 20, lunch: 35, dinner: 35, snack: 10 }
+    });
+    assertPlanInvariants(customPlan, 'custom_templates', { checkTargets: false });
+    assert.ok(mealById(customPlan, 'lunch').ingredients.some((i) => i.id === 'chicken_breast'));
+    assert.doesNotMatch(mealById(customPlan, 'dinner').cookingMethod, /olive oil/i);
+
+    // node:vm browser isolation parity
+    const code = fs.readFileSync(ENGINE_PATH, 'utf8');
+    const ctx = vm.createContext({ Object, Array, Math, Number, String, Boolean, RegExp, TypeError, Error });
+    ctx.globalThis = ctx;
+    ctx.self = ctx;
+    ctx.__NUTRITION_BASELINE__ = JSON.parse(JSON.stringify(BASELINE_SCHEMA));
+    vm.runInContext(code, ctx);
+
+    const vmPlan = ctx.MacroEngine.solveDailyPortions(null, {
+      preset: 'recomp',
+      slotSplits: { breakfast: 20, lunch: 35, dinner: 35, snack: 10 }
+    });
+    const nodePlan = solveDailyPortions(null, {
+      preset: 'recomp',
+      slotSplits: { breakfast: 20, lunch: 35, dinner: 35, snack: 10 }
+    });
+    assert.deepEqual(JSON.parse(JSON.stringify(vmPlan.meals)), nodePlan.meals);
+    assert.deepEqual(JSON.parse(JSON.stringify(vmPlan.totals)), nodePlan.totals);
+    assert.equal(ctx.resolveSlotSplits, undefined);
+    assert.equal(ctx.solveWithSlotSplits, undefined);
+  });
+
+  await t.test('9.6 scaleToHorizon compatibility (all 5 aisles including Frozen, batchPrep, frozenMealsOnHand, haveAtHome) and R4 exclusion', () => {
+    for (const preset of ['cut', 'recomp', 'maintenance']) {
+      const plan20 = solveDailyPortions(null, {
+        preset,
+        slotSplits: { breakfast: 20, lunch: 35, dinner: 35, snack: 10 }
+      });
+      const scaled7 = scaleToHorizon(plan20, null, { days: 7 });
+      assert.deepEqual(scaled7.groceryListByAisle.map((a) => a.aisle), Array.from(AISLE_ORDER), `${preset}: all 5 aisles including Frozen`);
+      assertNoRolloverKeys(plan20, `plan20/${preset}`);
+      assertNoRolloverKeys(scaled7, `scaled7/${preset}`);
+    }
+
+    for (const splits of [
+      { breakfast: 20, lunch: 35, dinner: 35, snack: 10 },
+      { breakfast: 50, lunch: 20, dinner: 20, snack: 10 }
+    ]) {
+      const plan = solveDailyPortions(null, {
+        preset: 'recomp',
+        lunchSwap: 'tuna_patties',
+        dinnerSwap: 'pork_loin_lean',
+        slotSplits: splits
+      });
+      for (const days of [3, 7, 14]) {
+        const sc = scaleToHorizon(plan, null, { days });
+        assert.equal(sc.fridgeDays + sc.freezerDays, days);
+
+        const fridgeBy = sc.storageSplit.fridge.batchWeights.byIngredient;
+        const freezerBy = sc.storageSplit.freezer.batchWeights.byIngredient;
+        for (const [id, dailyG] of Object.entries(plan.ingredientGrams)) {
+          const fRaw = fridgeBy[id].rawGrams;
+          const zRaw = freezerBy[id] ? freezerBy[id].rawGrams : 0;
+          const exp = Math.round(dailyG * days * 10) / 10;
+          assert.ok(Math.abs((fRaw + zRaw) - exp) < 0.21, `${id}/${days}d conservation`);
+        }
+
+        const bp = sc.batchPrep;
+        const expRice = Math.round(plan.ingredientGrams.rice_dry * days * 10) / 10;
+        assert.ok(Math.abs(bp.byIngredient.rice_dry.rawGrams - expRice) <= 0.11);
+        const expPot = Math.round(plan.ingredientGrams.potatoes_raw * days * 10) / 10;
+        assert.ok(Math.abs(bp.byIngredient.potatoes_raw.rawGrams - expPot) <= 0.11);
+      }
+
+      const bPot = mealById(plan, 'breakfast').ingredients.find((i) => i.id === 'potatoes_raw').grams;
+      const scFrozen7 = scaleToHorizon(plan, null, { days: 7, frozenMealsOnHand: 7 });
+      const potGrocery = scFrozen7.groceryListByAisle.flatMap((a) => a.items).find((i) => i.id === 'potatoes_raw');
+      assert.equal(potGrocery.remainingGrams, Math.round(bPot * 7 * 10) / 10);
+
+      const scPantry = scaleToHorizon(plan, null, { days: 7, haveAtHome: { rice_dry: true } });
+      const riceRow = scPantry.groceryListByAisle.flatMap((a) => a.items).find((i) => i.id === 'rice_dry');
+      assert.equal(riceRow.remainingGrams, 0);
+      assert.equal(riceRow.remainingCostCad, 0);
+      assert.ok(Math.abs((scPantry.summary.totalCostCad - scPantry.summary.remainingCostCad) - scPantry.summary.savedByPantryCad) < 1e-9);
+
+      // Adversarial R4 check: synthetic rollover keys ignored, boolean coercion enforced, integer ceiling packages
+      const scAdv = scaleToHorizon(plan, null, {
+        days: 7,
+        haveAtHome: { rice_dry: 0.5 },
+        leftovers: { rice_dry: 500 },
+        partialPackages: { potatoes_raw: 0.5 },
+        pantryRollover: true
+      });
+      assertNoRolloverKeys(scAdv, 'scAdv');
+      const riceAdv = scAdv.groceryListByAisle.flatMap((a) => a.items).find((i) => i.id === 'rice_dry');
+      assert.equal(riceAdv.inStock, true);
+      assert.equal(riceAdv.remainingGrams, 0);
+      for (const row of scAdv.groceryListByAisle.flatMap((a) => a.items)) {
+        if (!row.isBulk && row.packageGrams) {
+          assert.equal(row.packagesNeeded, Math.ceil(row.totalGramsNeeded / row.packageGrams));
+          assert.equal(row.remainingPackagesNeeded, row.remainingGrams === 0 ? 0 : Math.ceil(row.remainingGrams / row.packageGrams));
+        }
+      }
+    }
+
+    // Static R4 symbol scan on js/macroEngine.js source
+    const engineSrc = fs.readFileSync(ENGINE_PATH, 'utf8');
+    assert.equal(FORBIDDEN_R4_KEY_RE.test(engineSrc), false, 'Forbidden R4 term found in js/macroEngine.js');
+    assert.equal(/\b(?:pantryRollover|partialPackage|leftoverGrams|rolloverGrams|partialPackageCredit)\b/i.test(engineSrc), false);
   });
 });

@@ -133,6 +133,9 @@ def main():
     env_overrides = cfg.get("envOverrides", {})
     pre_remove_public = bool(cfg.get("preRemovePublic", False))
     run_twice = bool(cfg.get("runTwice", False))
+    copy_price_history = bool(cfg.get("copyPriceHistory", False))
+    initial_price_history = cfg.get("initialPriceHistory")
+    history_file = cfg.get("historyFile")
 
     # Resolve dynamic Thu-Wed placeholder if requested
     thu, wed = compute_current_thu_wed()
@@ -166,6 +169,22 @@ def main():
 
     try:
         shutil.copytree(os.path.join(root_dir, "scripts"), os.path.join(tmp_dir, "scripts"))
+        schema_src = os.path.join(root_dir, "schema")
+        if os.path.exists(schema_src):
+            shutil.copytree(schema_src, os.path.join(tmp_dir, "schema"))
+        ph_tmp = os.path.join(tmp_dir, history_file) if history_file else os.path.join(tmp_dir, "price_history.json")
+        if initial_price_history is not None:
+            os.makedirs(os.path.dirname(ph_tmp), exist_ok=True)
+            with open(ph_tmp, "w", encoding="utf-8") as f:
+                if isinstance(initial_price_history, str):
+                    f.write(initial_price_history)
+                else:
+                    json.dump(initial_price_history, f, indent=2)
+        elif copy_price_history:
+            ph_src = os.path.join(root_dir, "price_history.json")
+            if os.path.exists(ph_src):
+                os.makedirs(os.path.dirname(ph_tmp), exist_ok=True)
+                shutil.copy2(ph_src, ph_tmp)
         if not pre_remove_public:
             os.makedirs(os.path.join(tmp_dir, "public"), exist_ok=True)
 
@@ -250,7 +269,10 @@ def main():
             buf_err = io.StringIO()
             old_out, old_err = sys.stdout, sys.stderr
             sys.stdout, sys.stderr = buf_out, buf_err
-            sys.argv = [script_path]
+            argv = [script_path]
+            if history_file:
+                argv.extend(["--history-file", str(history_file)])
+            sys.argv = argv
             exit_code = 0
             exc_info = None
             try:
@@ -275,6 +297,13 @@ def main():
         pub_path = os.path.join(tmp_dir, "public", "data.json")
         data_bytes = open(data_path, "rb").read() if os.path.exists(data_path) else None
         pub_bytes = open(pub_path, "rb").read() if os.path.exists(pub_path) else None
+        ph_bytes = open(ph_tmp, "rb").read() if os.path.exists(ph_tmp) else None
+        ph_json = None
+        if ph_bytes is not None:
+            try:
+                ph_json = json.loads(ph_bytes.decode("utf-8"))
+            except Exception:
+                ph_json = None
 
         output = {
             "exitCode": runs[-1]["exitCode"],
@@ -285,6 +314,8 @@ def main():
             "byteIdentical": data_bytes is not None and data_bytes == pub_bytes,
             "dataJson": json.loads(data_bytes.decode("utf-8")) if data_bytes else None,
             "publicDataJson": json.loads(pub_bytes.decode("utf-8")) if pub_bytes else None,
+            "priceHistoryExists": ph_bytes is not None,
+            "priceHistory": ph_json,
             "currentThuWed": {"validFrom": thu, "validTo": wed},
         }
         print(json.dumps(output))

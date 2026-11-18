@@ -9,6 +9,7 @@ byte-identical UTF-8 JSON to both `public/data.json` and `./data.json`.
 
 from __future__ import annotations
 
+import argparse
 import copy
 import datetime as dt
 import hashlib
@@ -17,6 +18,7 @@ import math
 import os
 import re
 import sys
+import tempfile
 import unicodedata
 import urllib.error
 import urllib.parse
@@ -44,19 +46,21 @@ except ImportError:  # pragma: no cover
 
 
 SCHEMA_VERSION = "1.0.0"
+DEFAULT_SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema" / "nutrition_baseline.json"
 FLIPP_SEARCH_URL = "https://backflipp.wishabi.com/flipp/items/search"
 FLIPP_ITEM_URL = "https://backflipp.wishabi.com/flipp/items/{item_id}"
 DEFAULT_POSTAL_CODE = "H1W"
 REQUEST_TIMEOUT_SECONDS = 12
 ITEM_DETAIL_TIMEOUT_SECONDS = 5
 UPCOMING_FLYER_MAX_HORIZON = dt.timedelta(days=7)
+PRICE_HISTORY_WINDOW_WEEKS = 52
+PRICE_HISTORY_MAX_AGE_DAYS = 364
+MIN_HISTORY_OBS = 4
 
 STORES: dict[str, dict[str, Any]] = {
     "Maxi": {"merchant_id": 2349, "aliases": {"maxi"}},
     "Super C": {"merchant_id": 2585, "aliases": {"super c"}},
 }
-
-AISLES = ("Produce", "Meat", "Dairy/Eggs", "Pantry/Canned", "Frozen")
 
 PROTEIN_WEIGHTS: dict[str, float] = {
     "pork": 0.1625,
@@ -80,47 +84,174 @@ SUBCATEGORY_WEIGHTS: dict[str, float] = {
     **CARB_PRODUCE_WEIGHTS,
 }
 
-# Montreal H1W regular baseline prices & historical lows (CAD per 100g)
+SAFE_NEGATION_RE = re.compile(
+    r"\b(?:0\s*g|zero|no|without|sans)\s+(?:added\s+)?(?:cooking\s+)?(?:oil|huile)\b|\boil[- ]free\b",
+    re.IGNORECASE,
+)
+
+ADDED_OIL_RE = re.compile(
+    r"\b(oils?|oily|oiled|huiles?|butters?|buttered|buttery|beurres?|ghees?|tallows?|lards?|shortenings?|margarines?|sprays?|sprayed|pam)\b",
+    re.IGNORECASE,
+)
+
+
+def contains_added_oil(text: str | None) -> bool:
+    """Return True if text mentions added oils/fats (allowing boil/broil/foil/tenderloin and 0g oil/oil-free)."""
+    if not isinstance(text, str):
+        return False
+    cleaned = SAFE_NEGATION_RE.sub(" ", text)
+    return bool(ADDED_OIL_RE.search(cleaned))
+
+
+# Alias matching Explorer 3 naming
+contains_banned_oil = contains_added_oil
+
+
+def _require_finite_number(val: Any, context: str, *, allow_zero: bool) -> float:
+    if isinstance(val, bool) or not isinstance(val, (int, float)):
+        raise ValueError(f"{context} must be a finite number")
+    num = float(val)
+    if not math.isfinite(num):
+        raise ValueError(f"{context} must be finite")
+    if allow_zero:
+        if num < 0:
+            raise ValueError(f"{context} must be >= 0")
+    else:
+        if num <= 0:
+            raise ValueError(f"{context} must be > 0")
+    return num
+
+
+def load_nutrition_baseline(schema_path: Path | str | None = None) -> dict[str, Any]:
+    """Load and validate the shared nutrition/baseline schema JSON."""
+    path = Path(schema_path) if schema_path is not None else DEFAULT_SCHEMA_PATH
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError(f"Nutrition baseline schema must be a JSON object: {path}")
+
+    required_top = ("schemaVersion", "aisleOrder", "goalPresets", "categoryBaselines", "nutritionDb")
+    for key in required_top:
+        if key not in raw:
+            raise ValueError(f"Nutrition baseline schema missing required key {key!r}: {path}")
+
+    if not isinstance(raw["schemaVersion"], str) or not raw["schemaVersion"].strip():
+        raise ValueError("schemaVersion must be a non-empty string")
+
+    raw_aisles = raw["aisleOrder"]
+    if not isinstance(raw_aisles, list) or not raw_aisles:
+        raise ValueError("aisleOrder must be a non-empty list of strings")
+    aisle_set: set[str] = set()
+    for idx, aisle in enumerate(raw_aisles):
+        if not isinstance(aisle, str) or not aisle.strip():
+            raise ValueError(f"aisleOrder[{idx}] must be a non-empty string")
+        if aisle in aisle_set:
+            raise ValueError(f"aisleOrder contains duplicate entry {aisle!r}")
+        aisle_set.add(aisle)
+
+    goal_presets = raw["goalPresets"]
+    if not isinstance(goal_presets, dict) or not goal_presets:
+        raise ValueError("goalPresets must be a non-empty object")
+    for preset_id, preset in goal_presets.items():
+        if not isinstance(preset, dict):
+            raise ValueError(f"goalPresets[{preset_id!r}] must be an object")
+        for macro in ("calories", "protein", "fat", "carbs"):
+            if macro not in preset:
+                raise ValueError(f"goalPresets[{preset_id!r}] missing {macro!r}")
+            _require_finite_number(
+                preset[macro],
+                f"goalPresets[{preset_id!r}].{macro}",
+                allow_zero=True,
+            )
+
+    cat = raw["categoryBaselines"]
+    if not isinstance(cat, dict):
+        raise ValueError("categoryBaselines must be an object")
+    required_subcats = set(SUBCATEGORY_WEIGHTS.keys())
+    for subkey in ("baselinePrices", "historicalLows", "defaultUnitWeights"):
+        submap = cat.get(subkey)
+        if not isinstance(submap, dict) or not submap:
+            raise ValueError(f"categoryBaselines.{subkey} must be a non-empty object")
+        missing_subcats = sorted(required_subcats - set(submap.keys()))
+        if missing_subcats:
+            raise ValueError(
+                f"categoryBaselines.{subkey} missing required subcategories: {missing_subcats}"
+            )
+        for subcat_key, subcat_val in submap.items():
+            _require_finite_number(
+                subcat_val,
+                f"categoryBaselines.{subkey}[{subcat_key!r}]",
+                allow_zero=False,
+            )
+
+    db = raw["nutritionDb"]
+    if not isinstance(db, dict) or not db:
+        raise ValueError("nutritionDb must be a non-empty object")
+    for ing_id, entry in db.items():
+        if not isinstance(entry, dict):
+            raise ValueError(f"nutritionDb[{ing_id!r}] must be an object")
+        for field in ("name", "aisle", "per100g", "cookedYield", "packageGrams", "unitLabel", "price"):
+            if field not in entry:
+                raise ValueError(f"nutritionDb[{ing_id!r}] missing field {field!r}")
+        if not isinstance(entry["name"], str) or not entry["name"].strip():
+            raise ValueError(f"nutritionDb[{ing_id!r}].name must be a non-empty string")
+        normalized_id = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(ing_id).replace("_", " "))
+        if contains_added_oil(normalized_id) or contains_added_oil(entry["name"]):
+            raise ValueError(f"nutritionDb[{ing_id!r}] violates zero-added-oil rule")
+        if not isinstance(entry["aisle"], str) or entry["aisle"] not in aisle_set:
+            raise ValueError(f"nutritionDb[{ing_id!r}].aisle {entry['aisle']!r} not in aisleOrder")
+        if not isinstance(entry["unitLabel"], str) or not entry["unitLabel"].strip():
+            raise ValueError(f"nutritionDb[{ing_id!r}].unitLabel must be a non-empty string")
+        _require_finite_number(
+            entry["cookedYield"],
+            f"nutritionDb[{ing_id!r}].cookedYield",
+            allow_zero=False,
+        )
+        _require_finite_number(
+            entry["packageGrams"],
+            f"nutritionDb[{ing_id!r}].packageGrams",
+            allow_zero=False,
+        )
+        per = entry["per100g"]
+        if not isinstance(per, dict):
+            raise ValueError(f"nutritionDb[{ing_id!r}].per100g must be an object")
+        for macro in ("calories", "protein", "fat", "carbs"):
+            if macro not in per:
+                raise ValueError(f"nutritionDb[{ing_id!r}].per100g missing {macro!r}")
+            _require_finite_number(
+                per[macro],
+                f"nutritionDb[{ing_id!r}].per100g.{macro}",
+                allow_zero=True,
+            )
+        price = entry["price"]
+        if not isinstance(price, dict):
+            raise ValueError(f"nutritionDb[{ing_id!r}].price must be an object")
+        for pfield in ("cadPer100g", "cadPerPackage", "regularCadPer100g", "historicalLowCadPer100g"):
+            if pfield not in price:
+                raise ValueError(f"nutritionDb[{ing_id!r}].price missing {pfield!r}")
+            _require_finite_number(
+                price[pfield],
+                f"nutritionDb[{ing_id!r}].price.{pfield}",
+                allow_zero=True,
+            )
+
+    return raw
+
+
+_BASELINE_SCHEMA: dict[str, Any] = load_nutrition_baseline()
+
+AISLES: tuple[str, ...] = tuple(_BASELINE_SCHEMA["aisleOrder"])
+
+# Montreal H1W regular baseline prices, historical lows, and unit weights loaded from shared schema
 BASELINE_PRICES: dict[str, float] = {
-    "pork": 1.21,
-    "chicken": 1.54,
-    "canned_fish": 1.35,
-    "eggs": 0.70,
-    "potatoes": 0.26,
-    "rice": 0.45,
-    "cabbage": 0.33,
-    "cucumbers": 0.57,
-    "tomatoes": 0.44,
-    "carrots": 0.29,
-    "white_beans": 0.42,
+    k: float(v) for k, v in _BASELINE_SCHEMA["categoryBaselines"]["baselinePrices"].items()
 }
 
 HISTORICAL_LOWS: dict[str, float] = {
-    "pork": 0.39,
-    "chicken": 0.66,
-    "canned_fish": 0.59,
-    "eggs": 0.48,
-    "potatoes": 0.09,
-    "rice": 0.25,
-    "cabbage": 0.15,
-    "cucumbers": 0.28,
-    "tomatoes": 0.22,
-    "carrots": 0.11,
-    "white_beans": 0.24,
+    k: float(v) for k, v in _BASELINE_SCHEMA["categoryBaselines"]["historicalLows"].items()
 }
 
 DEFAULT_UNIT_WEIGHTS: dict[str, float] = {
-    "cabbage": 900.0,
-    "cucumbers": 350.0,
-    "tomatoes": 150.0,
-    "carrots": 908.0,
-    "potatoes": 2268.0,
-    "rice": 900.0,
-    "white_beans": 540.0,
-    "canned_fish": 170.0,
-    "pork": 1000.0,
-    "chicken": 900.0,
-    "eggs": 600.0,
+    k: float(v) for k, v in _BASELINE_SCHEMA["categoryBaselines"]["defaultUnitWeights"].items()
 }
 
 CATEGORY_SPECS: dict[str, dict[str, Any]] = {
@@ -288,32 +419,7 @@ USER_PROFILE: dict[str, Any] = {
     "zeroAddedOil": True,
 }
 
-GOAL_PRESETS: dict[str, dict[str, Any]] = {
-    "cut": {
-        "id": "cut",
-        "label": "Aggressive Cut",
-        "calories": 1900,
-        "protein": 200,
-        "fat": 50,
-        "carbs": 160,
-    },
-    "recomp": {
-        "id": "recomp",
-        "label": "Body Recomp",
-        "calories": 2400,
-        "protein": 175,
-        "fat": 80,
-        "carbs": 245,
-    },
-    "maintenance": {
-        "id": "maintenance",
-        "label": "Maintenance",
-        "calories": 2800,
-        "protein": 190,
-        "fat": 85,
-        "carbs": 315,
-    },
-}
+GOAL_PRESETS: dict[str, dict[str, Any]] = copy.deepcopy(_BASELINE_SCHEMA["goalPresets"])
 
 PROTEIN_SWAPS: dict[str, list[dict[str, str]]] = {
     "lunch": [
@@ -364,510 +470,8 @@ PROTEIN_SWAPS: dict[str, list[dict[str, str]]] = {
     ],
 }
 
-# Raw/as-purchased (or drained-edible for canned goods) per-100g nutrition DB.
-# ground_chicken MUST stay exactly {calories: 140, protein: 17.0, fat: 9.0, carbs: 0.0}.
-DEFAULT_NUTRITION_DB: dict[str, dict[str, Any]] = {
-    "whole_egg": {
-        "name": "Whole Large Eggs",
-        "aisle": "Dairy/Eggs",
-        "per100g": {"calories": 143, "protein": 12.6, "fat": 9.5, "carbs": 0.7},
-        "cookedYield": 0.90,
-        "packageGrams": 600,
-        "unitLabel": "dozen",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.67,
-            "cadPerPackage": 4.02,
-            "regularCadPer100g": 0.67,
-            "historicalLowCadPer100g": 0.49,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "egg_whites": {
-        "name": "Liquid Egg Whites",
-        "aisle": "Dairy/Eggs",
-        "per100g": {"calories": 48, "protein": 11.0, "fat": 0.0, "carbs": 0.7},
-        "cookedYield": 0.90,
-        "packageGrams": 500,
-        "unitLabel": "carton",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.80,
-            "cadPerPackage": 4.00,
-            "regularCadPer100g": 0.80,
-            "historicalLowCadPer100g": 0.65,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "potatoes_raw": {
-        "name": "Grelot / Baby / Russet Potatoes",
-        "aisle": "Produce",
-        "per100g": {"calories": 77, "protein": 2.0, "fat": 0.1, "carbs": 17.5},
-        "cookedYield": 0.85,
-        "packageGrams": 1361,
-        "unitLabel": "bag (3 lb)",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.29,
-            "cadPerPackage": 3.95,
-            "regularCadPer100g": 0.29,
-            "historicalLowCadPer100g": 0.15,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "green_onion": {
-        "name": "Green Onions / Scallions",
-        "aisle": "Produce",
-        "per100g": {"calories": 32, "protein": 1.8, "fat": 0.2, "carbs": 7.3},
-        "cookedYield": 1.00,
-        "packageGrams": 100,
-        "unitLabel": "bunch",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 1.29,
-            "cadPerPackage": 1.29,
-            "regularCadPer100g": 1.29,
-            "historicalLowCadPer100g": 0.79,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "pico": {
-        "name": "Roma Tomatoes, Onion & Lime (for Pico de Gallo)",
-        "aisle": "Produce",
-        "per100g": {"calories": 20, "protein": 0.9, "fat": 0.2, "carbs": 4.3},
-        "cookedYield": 1.00,
-        "packageGrams": 400,
-        "unitLabel": "batch (400g)",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.85,
-            "cadPerPackage": 3.40,
-            "regularCadPer100g": 0.85,
-            "historicalLowCadPer100g": 0.55,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "berries": {
-        "name": "Mixed Berries (Fresh/Frozen)",
-        "aisle": "Frozen",
-        "per100g": {"calories": 45, "protein": 0.8, "fat": 0.3, "carbs": 10.5},
-        "cookedYield": 1.00,
-        "packageGrams": 600,
-        "unitLabel": "bag",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.83,
-            "cadPerPackage": 4.98,
-            "regularCadPer100g": 0.83,
-            "historicalLowCadPer100g": 0.58,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "banana": {
-        "name": "Banana (Edible)",
-        "aisle": "Produce",
-        "per100g": {"calories": 89, "protein": 1.1, "fat": 0.3, "carbs": 22.8},
-        "cookedYield": 1.00,
-        "packageGrams": 600,
-        "unitLabel": "bunch",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.22,
-            "cadPerPackage": 1.32,
-            "regularCadPer100g": 0.22,
-            "historicalLowCadPer100g": 0.15,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "ground_chicken": {
-        "name": "Walmart Great Value Extra-Lean Ground Chicken",
-        "aisle": "Meat",
-        "per100g": {"calories": 140, "protein": 17.0, "fat": 9.0, "carbs": 0.0},
-        "cookedYield": 0.75,
-        "packageGrams": 454,
-        "unitLabel": "pack",
-        "requiresThaw": True,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 1.10,
-            "cadPerPackage": 5.00,
-            "regularCadPer100g": 1.10,
-            "historicalLowCadPer100g": 0.99,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Walmart Great Value Baseline (454g)",
-            "onFlyer": False,
-        },
-    },
-    "tuna_water": {
-        "name": "Canned Light Tuna in Water (Drained)",
-        "aisle": "Pantry/Canned",
-        "per100g": {"calories": 109, "protein": 25.5, "fat": 0.8, "carbs": 0.0},
-        "cookedYield": 0.95,
-        "packageGrams": 120,
-        "unitLabel": "can",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 1.24,
-            "cadPerPackage": 1.49,
-            "regularCadPer100g": 1.24,
-            "historicalLowCadPer100g": 0.83,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "sardines_water": {
-        "name": "Canned Sardines in Water/Tomato (Drained)",
-        "aisle": "Pantry/Canned",
-        "per100g": {"calories": 160, "protein": 22.0, "fat": 8.0, "carbs": 0.0},
-        "cookedYield": 1.00,
-        "packageGrams": 85,
-        "unitLabel": "can",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 1.99,
-            "cadPerPackage": 1.69,
-            "regularCadPer100g": 1.99,
-            "historicalLowCadPer100g": 1.47,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "pork_loin_lean": {
-        "name": "Pork Loin / Tenderloin (Trimmed Lean, Raw)",
-        "aisle": "Meat",
-        "per100g": {"calories": 136, "protein": 21.5, "fat": 4.5, "carbs": 0.0},
-        "cookedYield": 0.75,
-        "packageGrams": 1000,
-        "unitLabel": "kg pack",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 1.10,
-            "cadPerPackage": 11.00,
-            "regularCadPer100g": 1.10,
-            "historicalLowCadPer100g": 0.66,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "pork_shoulder": {
-        "name": "Pork Picnic Shoulder (Visibly Trimmed, Raw)",
-        "aisle": "Meat",
-        "per100g": {"calories": 175, "protein": 19.5, "fat": 10.0, "carbs": 0.0},
-        "cookedYield": 0.72,
-        "packageGrams": 1500,
-        "unitLabel": "roast",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.77,
-            "cadPerPackage": 11.55,
-            "regularCadPer100g": 0.77,
-            "historicalLowCadPer100g": 0.44,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "chicken_breast": {
-        "name": "Boneless Skinless Chicken Breast (Raw)",
-        "aisle": "Meat",
-        "per100g": {"calories": 120, "protein": 22.5, "fat": 2.6, "carbs": 0.0},
-        "cookedYield": 0.75,
-        "packageGrams": 1000,
-        "unitLabel": "kg pack",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 1.43,
-            "cadPerPackage": 14.30,
-            "regularCadPer100g": 1.43,
-            "historicalLowCadPer100g": 0.99,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "white_beans_cnd": {
-        "name": "Canned White / Cannellini Beans (Drained)",
-        "aisle": "Pantry/Canned",
-        "per100g": {"calories": 114, "protein": 7.5, "fat": 0.5, "carbs": 20.5},
-        "cookedYield": 1.00,
-        "packageGrams": 340,
-        "unitLabel": "can",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.50,
-            "cadPerPackage": 1.70,
-            "regularCadPer100g": 0.50,
-            "historicalLowCadPer100g": 0.29,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "diced_tomatoes": {
-        "name": "Canned Diced Tomatoes (No Oil)",
-        "aisle": "Pantry/Canned",
-        "per100g": {"calories": 21, "protein": 0.9, "fat": 0.1, "carbs": 4.4},
-        "cookedYield": 0.90,
-        "packageGrams": 796,
-        "unitLabel": "can",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.25,
-            "cadPerPackage": 1.99,
-            "regularCadPer100g": 0.25,
-            "historicalLowCadPer100g": 0.16,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "rice_dry": {
-        "name": "Long-Grain / Jasmine White Rice (Dry)",
-        "aisle": "Pantry/Canned",
-        "per100g": {"calories": 360, "protein": 7.0, "fat": 0.6, "carbs": 79.0},
-        "cookedYield": 2.80,
-        "packageGrams": 2000,
-        "unitLabel": "bag (2 kg)",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.30,
-            "cadPerPackage": 6.00,
-            "regularCadPer100g": 0.30,
-            "historicalLowCadPer100g": 0.20,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "cabbage": {
-        "name": "Green Cabbage (Shredded, Raw)",
-        "aisle": "Produce",
-        "per100g": {"calories": 25, "protein": 1.3, "fat": 0.1, "carbs": 5.8},
-        "cookedYield": 1.00,
-        "packageGrams": 900,
-        "unitLabel": "head",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.28,
-            "cadPerPackage": 2.52,
-            "regularCadPer100g": 0.28,
-            "historicalLowCadPer100g": 0.14,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "cucumber": {
-        "name": "English Cucumber (Raw)",
-        "aisle": "Produce",
-        "per100g": {"calories": 15, "protein": 0.7, "fat": 0.1, "carbs": 3.6},
-        "cookedYield": 1.00,
-        "packageGrams": 350,
-        "unitLabel": "each",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.57,
-            "cadPerPackage": 2.00,
-            "regularCadPer100g": 0.57,
-            "historicalLowCadPer100g": 0.28,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "carrots": {
-        "name": "Carrots (Raw)",
-        "aisle": "Produce",
-        "per100g": {"calories": 41, "protein": 0.9, "fat": 0.2, "carbs": 9.6},
-        "cookedYield": 1.00,
-        "packageGrams": 907,
-        "unitLabel": "bag (2 lb)",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.28,
-            "cadPerPackage": 2.54,
-            "regularCadPer100g": 0.28,
-            "historicalLowCadPer100g": 0.14,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "edamame": {
-        "name": "Shelled Edamame (Frozen)",
-        "aisle": "Frozen",
-        "per100g": {"calories": 121, "protein": 11.9, "fat": 5.2, "carbs": 8.9},
-        "cookedYield": 1.00,
-        "packageGrams": 400,
-        "unitLabel": "bag",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.87,
-            "cadPerPackage": 3.48,
-            "regularCadPer100g": 0.87,
-            "historicalLowCadPer100g": 0.62,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "corn": {
-        "name": "Corn Kernels (Frozen)",
-        "aisle": "Frozen",
-        "per100g": {"calories": 86, "protein": 3.3, "fat": 1.2, "carbs": 19.0},
-        "cookedYield": 1.00,
-        "packageGrams": 500,
-        "unitLabel": "bag",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.50,
-            "cadPerPackage": 2.50,
-            "regularCadPer100g": 0.50,
-            "historicalLowCadPer100g": 0.35,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "tzatziki_0": {
-        "name": "0% Greek Yogurt + Cucumber/Garlic/Lemon (for Tzatziki)",
-        "aisle": "Dairy/Eggs",
-        "per100g": {"calories": 55, "protein": 8.0, "fat": 0.2, "carbs": 4.5},
-        "cookedYield": 1.00,
-        "packageGrams": 500,
-        "unitLabel": "yogurt + veg (500g)",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.90,
-            "cadPerPackage": 4.50,
-            "regularCadPer100g": 0.90,
-            "historicalLowCadPer100g": 0.65,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "skyr_0": {
-        "name": "Siggi's 0% Plain Skyr",
-        "aisle": "Dairy/Eggs",
-        "per100g": {"calories": 63, "protein": 10.9, "fat": 0.2, "carbs": 4.0},
-        "cookedYield": 1.00,
-        "packageGrams": 750,
-        "unitLabel": "tub",
-        "requiresThaw": False,
-        "pantryDefault": False,
-        "price": {
-            "cadPer100g": 0.80,
-            "cadPerPackage": 6.00,
-            "regularCadPer100g": 0.80,
-            "historicalLowCadPer100g": 0.53,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Montreal H1W Regular Baseline",
-            "onFlyer": False,
-        },
-    },
-    "whey_isolate": {
-        "name": "Whey Protein Isolate",
-        "aisle": "Pantry/Canned",
-        "per100g": {"calories": 370, "protein": 86.7, "fat": 1.0, "carbs": 3.3},
-        "cookedYield": 1.00,
-        "packageGrams": 900,
-        "unitLabel": "tub",
-        "requiresThaw": False,
-        "pantryDefault": True,
-        "price": {
-            "cadPer100g": 3.89,
-            "cadPerPackage": 35.01,
-            "regularCadPer100g": 3.89,
-            "historicalLowCadPer100g": 2.99,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Pantry Protein Tub Baseline",
-            "onFlyer": False,
-        },
-    },
-    "aromatics_zero": {
-        "name": "Ginger / Garlic / Onion / Spices / Broth",
-        "aisle": "Produce",
-        "per100g": {"calories": 0, "protein": 0.0, "fat": 0.0, "carbs": 0.0},
-        "cookedYield": 1.00,
-        "packageGrams": 250,
-        "unitLabel": "bundle",
-        "requiresThaw": False,
-        "pantryDefault": True,
-        "price": {
-            "cadPer100g": 0.40,
-            "cadPerPackage": 1.00,
-            "regularCadPer100g": 0.40,
-            "historicalLowCadPer100g": 0.25,
-            "savingsPct": 0,
-            "radarTag": "REGULAR",
-            "flyerItemName": "Aromatics & Broth Baseline",
-            "onFlyer": False,
-        },
-    },
-}
+# Raw/as-purchased (or drained-edible for canned goods) per-100g nutrition DB loaded from shared schema.
+DEFAULT_NUTRITION_DB: dict[str, dict[str, Any]] = copy.deepcopy(_BASELINE_SCHEMA["nutritionDb"])
 
 BASE_MEAL_TEMPLATES: list[dict[str, Any]] = [
     {
@@ -1126,17 +730,6 @@ GEMINI_PLAN_SCHEMA: dict[str, Any] = {
         },
     },
 }
-
-SAFE_NEGATION_RE = re.compile(
-    r"\b(?:0\s*g|zero|no|without|sans)\s+(?:added\s+)?(?:cooking\s+)?(?:oil|huile)\b|\boil[- ]free\b",
-    re.IGNORECASE,
-)
-
-ADDED_OIL_RE = re.compile(
-    r"\b(oils?|oily|oiled|huiles?|butters?|buttered|buttery|beurres?|ghees?|tallows?|lards?|shortenings?|margarines?|sprays?|sprayed|pam)\b",
-    re.IGNORECASE,
-)
-
 
 class _AmericaTorontoFallback(dt.tzinfo):
     """Pure-stdlib America/Toronto EST/EDT tzinfo fallback when tzdata is absent."""
@@ -1458,6 +1051,7 @@ def parse_unit_price_per_100g(
     item: dict[str, Any],
     subcategory: str,
     detail_fetcher: Callable[[Any], dict[str, Any] | None] | None = None,
+    default_unit_weights: dict[str, float] | None = None,
 ) -> tuple[float | None, float | None, str]:
     """Parse (cad_per_100g, package_grams, unit_note) for a Flipp item.
 
@@ -1554,7 +1148,8 @@ def parse_unit_price_per_100g(
             elif subcategory == "canned_fish" and "sardine" in combined:
                 weight_grams = 106.0
             else:
-                weight_grams = DEFAULT_UNIT_WEIGHTS.get(subcategory, 500.0)
+                unit_weights = DEFAULT_UNIT_WEIGHTS if default_unit_weights is None else default_unit_weights
+                weight_grams = unit_weights.get(subcategory, 500.0)
 
     cad_per_100g = round(unit_price / (weight_grams / 100.0), 4)
     return cad_per_100g, round(weight_grams, 2), f"{round(weight_grams)}g"
@@ -1647,11 +1242,16 @@ def fetch_flipp_items(
 def score_stores(
     items_by_store: dict[str, list[dict[str, Any]]],
     now: dt.datetime | None = None,
+    baseline_prices: dict[str, float] | None = None,
+    default_unit_weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Score Maxi vs Super C using 65% protein / 35% carb+produce weights and select one winner."""
+    resolved_baselines = BASELINE_PRICES if baseline_prices is None else baseline_prices
+    resolved_unit_weights = DEFAULT_UNIT_WEIGHTS if default_unit_weights is None else default_unit_weights
     now_utc = (now or dt.datetime.now(dt.timezone.utc)).astimezone(dt.timezone.utc)
     store_comparison: dict[str, dict[str, Any]] = {}
     best_deals_by_store: dict[str, dict[str, dict[str, Any]]] = {}
+    best_ingredient_deals_by_store: dict[str, dict[str, dict[str, Any]]] = {}
     egg_whites_by_store: dict[str, dict[str, Any] | None] = {}
     flyer_periods_by_store: dict[str, dict[str, str]] = {}
     any_matched_deals = False
@@ -1699,6 +1299,7 @@ def score_stores(
         flyer_periods_by_store[store] = store_period
 
         best_by_cat: dict[str, dict[str, Any]] = {}
+        best_by_ingredient: dict[str, dict[str, Any]] = {}
         matched_deals = 0
         best_egg_whites: dict[str, Any] | None = None
 
@@ -1708,7 +1309,12 @@ def score_stores(
             desc = str(item.get("description") or "")
             if is_egg_whites_item(name, desc):
                 detail_fetcher = item.get("_detail_fetcher")
-                cad100, pkg_g, unit_note = parse_unit_price_per_100g(item, "eggs", detail_fetcher=detail_fetcher)
+                cad100, pkg_g, unit_note = parse_unit_price_per_100g(
+                    item,
+                    "eggs",
+                    detail_fetcher=detail_fetcher,
+                    default_unit_weights=resolved_unit_weights,
+                )
                 if cad100 is not None and (best_egg_whites is None or cad100 < best_egg_whites["cadPer100g"]):
                     best_egg_whites = {
                         "name": name.replace("\xa0", " ").strip(),
@@ -1725,13 +1331,18 @@ def score_stores(
                 if is_excluded_item(name, subcat, desc):
                     continue
                 detail_fetcher = item.get("_detail_fetcher")
-                cad100, pkg_g, unit_note = parse_unit_price_per_100g(item, subcat, detail_fetcher=detail_fetcher)
+                cad100, pkg_g, unit_note = parse_unit_price_per_100g(
+                    item,
+                    subcat,
+                    detail_fetcher=detail_fetcher,
+                    default_unit_weights=resolved_unit_weights,
+                )
                 if cad100 is None:
                     continue
                 candidates.append({
                     "name": name.replace("\xa0", " ").strip(),
                     "cadPer100g": cad100,
-                    "packageGrams": pkg_g or DEFAULT_UNIT_WEIGHTS.get(subcat, 500.0),
+                    "packageGrams": pkg_g or resolved_unit_weights.get(subcat, 500.0),
                     "unitNote": unit_note,
                     "raw": item,
                 })
@@ -1740,17 +1351,23 @@ def score_stores(
                 best_by_cat[subcat] = best
                 matched_deals += 1
                 any_matched_deals = True
+                for cand in candidates:
+                    ing_id = resolve_deal_ingredient_id(subcat, cand["name"])
+                    if ing_id is not None and ing_id not in ("egg_whites", "ground_chicken"):
+                        existing_ing = best_by_ingredient.get(ing_id)
+                        if existing_ing is None or cand["cadPer100g"] < existing_ing["cadPer100g"]:
+                            best_by_ingredient[ing_id] = {**cand, "subcategory": subcat}
 
         protein_sum = 0.0
         for subcat, weight in PROTEIN_WEIGHTS.items():
-            price = best_by_cat[subcat]["cadPer100g"] if subcat in best_by_cat else BASELINE_PRICES[subcat]
-            protein_sum += weight * (price / BASELINE_PRICES[subcat])
+            price = best_by_cat[subcat]["cadPer100g"] if subcat in best_by_cat else resolved_baselines[subcat]
+            protein_sum += weight * (price / resolved_baselines[subcat])
         protein_score = round(protein_sum / 0.65, 4)
 
         carb_sum = 0.0
         for subcat, weight in CARB_PRODUCE_WEIGHTS.items():
-            price = best_by_cat[subcat]["cadPer100g"] if subcat in best_by_cat else BASELINE_PRICES[subcat]
-            carb_sum += weight * (price / BASELINE_PRICES[subcat])
+            price = best_by_cat[subcat]["cadPer100g"] if subcat in best_by_cat else resolved_baselines[subcat]
+            carb_sum += weight * (price / resolved_baselines[subcat])
         carb_produce_score = round(carb_sum / 0.35, 4)
 
         weighted_score = round(0.65 * protein_score + 0.35 * carb_produce_score, 4)
@@ -1761,6 +1378,7 @@ def score_stores(
             "matchedDeals": matched_deals,
         }
         best_deals_by_store[store] = best_by_cat
+        best_ingredient_deals_by_store[store] = best_by_ingredient
         egg_whites_by_store[store] = best_egg_whites
 
     maxi = store_comparison["Maxi"]
@@ -1787,6 +1405,10 @@ def score_stores(
         "flyerPeriod": flyer_period,
         "bestDeals": best_deals_by_store[winning_store],
         "eggWhitesDeal": egg_whites_by_store[winning_store],
+        "bestDealsByStore": best_deals_by_store,
+        "bestIngredientDeals": best_ingredient_deals_by_store[winning_store],
+        "bestIngredientDealsByStore": best_ingredient_deals_by_store,
+        "eggWhitesByStore": egg_whites_by_store,
         "hasLiveDeals": any_matched_deals,
     }
 
@@ -1821,43 +1443,42 @@ def _apply_deal_price(entry: dict[str, Any], deal: dict[str, Any]) -> None:
     }
 
 
-def build_nutrition_db(
-    best_deals: dict[str, dict[str, Any]],
-    egg_whites_deal: dict[str, Any] | None = None,
-    ground_chicken_override: dict[str, Any] | None = None,
-) -> dict[str, dict[str, Any]]:
-    """Build all 25 nutritionDb entries, applying winning-store flyer deals while isolating ground_chicken."""
-    db = copy.deepcopy(DEFAULT_NUTRITION_DB)
+def resolve_deal_ingredient_id(subcat: str, deal_name: str) -> str | None:
+    """Map a Flipp subcategory and item name to its canonical nutritionDb ingredient ID."""
+    folded = fold_accents(deal_name)
 
-    if "pork" in best_deals:
-        pork_deal = best_deals["pork"]
-        folded_pork = fold_accents(pork_deal["name"])
-        if any(k in folded_pork for k in ("epaule", "picnic", "shoulder")):
-            _apply_deal_price(db["pork_shoulder"], pork_deal)
-        elif any(k in folded_pork for k in ("filet", "longe", "loin", "tenderloin")):
-            _apply_deal_price(db["pork_loin_lean"], pork_deal)
-        else:
-            _apply_deal_price(db["pork_loin_lean"], pork_deal)
+    if subcat == "pork":
+        if any(k in folded for k in ("epaule", "picnic", "shoulder")):
+            return "pork_shoulder"
+        if any(k in folded for k in ("filet", "longe", "loin", "tenderloin")):
+            return "pork_loin_lean"
+        return "pork_loin_lean"
 
-    if "chicken" in best_deals:
-        chicken_deal = best_deals["chicken"]
-        folded_chx = fold_accents(chicken_deal["name"])
-        if any(k in folded_chx for k in ("poitrine", "breast", "filet")):
-            _apply_deal_price(db["chicken_breast"], chicken_deal)
+    if subcat == "chicken":
+        if any(k in folded for k in ("poitrine", "breast", "filet")):
+            return "chicken_breast"
+        return None
 
-    if "canned_fish" in best_deals:
-        fish_deal = best_deals["canned_fish"]
-        folded_fish = fold_accents(fish_deal["name"])
-        if "sardine" in folded_fish:
-            _apply_deal_price(db["sardines_water"], fish_deal)
-        else:
-            _apply_deal_price(db["tuna_water"], fish_deal)
+    if subcat == "canned_fish":
+        return "sardines_water" if "sardine" in folded else "tuna_water"
 
-    if "eggs" in best_deals:
-        _apply_deal_price(db["whole_egg"], best_deals["eggs"])
+    if subcat == "eggs":
+        return "whole_egg"
 
-    if egg_whites_deal is not None:
-        _apply_deal_price(db["egg_whites"], egg_whites_deal)
+    if subcat == "egg_whites":
+        return "egg_whites"
+
+    if subcat == "tomatoes":
+        if any(
+            k in folded
+            for k in (
+                "en des", "diced", "coulis", "strained", "broye", "broyees",
+                "crushed", "entieres", "passata", "boite", "conserve", "canned",
+                "aylmer", "primo", "unico", "aurora",
+            )
+        ) or re.search(r"\b(?:796|680|540)\s*ml\b", folded):
+            return "diced_tomatoes"
+        return "pico"
 
     direct_map = {
         "potatoes": "potatoes_raw",
@@ -1867,42 +1488,56 @@ def build_nutrition_db(
         "carrots": "carrots",
         "white_beans": "white_beans_cnd",
     }
-    for subcat, db_key in direct_map.items():
-        if subcat in best_deals:
-            _apply_deal_price(db[db_key], best_deals[subcat])
+    return direct_map.get(subcat)
 
-    if "tomatoes" in best_deals:
-        tom_deal = best_deals["tomatoes"]
-        folded_tom = fold_accents(tom_deal["name"])
-        if any(
-            k in folded_tom
-            for k in (
-                "en des", "diced", "coulis", "strained", "broye", "broyees",
-                "crushed", "entieres", "796", "680", "540",
-                "aylmer", "primo", "unico", "aurora",
-            )
-        ):
-            _apply_deal_price(db["diced_tomatoes"], tom_deal)
-        else:
-            _apply_deal_price(db["pico"], tom_deal)
+
+_INGREDIENT_TO_SUBCATEGORY: dict[str, str] = {
+    "pork_shoulder": "pork",
+    "pork_loin_lean": "pork",
+    "chicken_breast": "chicken",
+    "sardines_water": "canned_fish",
+    "tuna_water": "canned_fish",
+    "whole_egg": "eggs",
+    "egg_whites": "eggs",
+    "diced_tomatoes": "tomatoes",
+    "pico": "tomatoes",
+    "potatoes_raw": "potatoes",
+    "rice_dry": "rice",
+    "cabbage": "cabbage",
+    "cucumber": "cucumbers",
+    "carrots": "carrots",
+    "white_beans_cnd": "white_beans",
+}
+
+
+def build_nutrition_db(
+    best_deals: dict[str, dict[str, Any]],
+    egg_whites_deal: dict[str, Any] | None = None,
+    ground_chicken_override: dict[str, Any] | None = None,
+    base_db: dict[str, dict[str, Any]] | None = None,
+    best_ingredient_deals: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Build all 25 nutritionDb entries, applying winning-store flyer deals while isolating ground_chicken."""
+    db = copy.deepcopy(DEFAULT_NUTRITION_DB if base_db is None else base_db)
+
+    if best_ingredient_deals is not None:
+        for ing_id, deal in best_ingredient_deals.items():
+            if ing_id in db and ing_id not in ("ground_chicken", "egg_whites"):
+                _apply_deal_price(db[ing_id], deal)
+    else:
+        for subcat, deal in best_deals.items():
+            ing_id = resolve_deal_ingredient_id(subcat, deal["name"])
+            if ing_id is not None and ing_id in db:
+                _apply_deal_price(db[ing_id], deal)
+
+    if egg_whites_deal is not None and "egg_whites" in db:
+        _apply_deal_price(db["egg_whites"], egg_whites_deal)
 
     # ground_chicken stays strictly isolated at Walmart Great Value baseline unless explicitly overridden
     if ground_chicken_override:
         _apply_deal_price(db["ground_chicken"], ground_chicken_override)
 
     return db
-
-
-def contains_added_oil(text: str | None) -> bool:
-    """Return True if text mentions added oils/fats (allowing boil/broil/foil/tenderloin and 0g oil/oil-free)."""
-    if not isinstance(text, str):
-        return False
-    cleaned = SAFE_NEGATION_RE.sub(" ", text)
-    return bool(ADDED_OIL_RE.search(cleaned))
-
-
-# Alias matching Explorer 3 naming
-contains_banned_oil = contains_added_oil
 
 
 def validate_zero_added_oil(obj: Any, path: str = "root") -> list[tuple[str, str]]:
@@ -2091,16 +1726,273 @@ def generate_meal_plan(
         return base_plan, "fallback"
 
 
+def _iso_utc(now_utc: dt.datetime) -> str:
+    return now_utc.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _empty_price_history(now_utc: dt.datetime) -> dict[str, Any]:
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "windowWeeks": PRICE_HISTORY_WINDOW_WEEKS,
+        "updatedAt": _iso_utc(now_utc),
+        "byPostalCode": {},
+    }
+
+
+def _quantile(sorted_vals: list[float], q: float) -> float:
+    if not sorted_vals:
+        return 0.0
+    if len(sorted_vals) == 1:
+        return float(sorted_vals[0])
+    pos = q * (len(sorted_vals) - 1)
+    lo = int(math.floor(pos))
+    hi = int(math.ceil(pos))
+    if lo == hi:
+        return float(sorted_vals[lo])
+    return float(sorted_vals[lo]) + (float(sorted_vals[hi]) - float(sorted_vals[lo])) * (pos - lo)
+
+
+def load_and_prune_price_history(history_path: Path, now_utc: dt.datetime) -> dict[str, Any]:
+    """Load price_history.json safely, recover from corruption, and prune entries older than 364 days."""
+    if not history_path.exists():
+        return _empty_price_history(now_utc)
+
+    try:
+        raw_text = history_path.read_text(encoding="utf-8")
+        raw = json.loads(raw_text)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return _empty_price_history(now_utc)
+
+    if not isinstance(raw, dict):
+        return _empty_price_history(now_utc)
+
+    raw_by_postal = raw.get("byPostalCode")
+    if not isinstance(raw_by_postal, dict):
+        raw_by_postal = {}
+
+    today = now_utc.date()
+    by_postal: dict[str, dict[str, list[dict[str, Any]]]] = {}
+
+    for raw_fsa, ing_map in raw_by_postal.items():
+        if not isinstance(raw_fsa, str) or not isinstance(ing_map, dict):
+            continue
+        try:
+            fsa = format_postal_display(raw_fsa)
+        except ValueError:
+            continue
+
+        postal_bucket = by_postal.setdefault(fsa, {})
+        for ing_id, entries in ing_map.items():
+            if not isinstance(ing_id, str) or not ing_id.strip() or not isinstance(entries, list):
+                continue
+
+            dedup: dict[tuple[str, str], dict[str, Any]] = {
+                (e["observedAt"], e["store"]): e for e in postal_bucket.get(ing_id, [])
+            }
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                obs_at = entry.get("observedAt")
+                if not isinstance(obs_at, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", obs_at):
+                    continue
+                try:
+                    obs_date = dt.date.fromisoformat(obs_at)
+                except ValueError:
+                    continue
+                age_days = (today - obs_date).days
+                if age_days < 0 or age_days > PRICE_HISTORY_MAX_AGE_DAYS:
+                    continue
+
+                store = entry.get("store")
+                if not isinstance(store, str) or not store.strip():
+                    continue
+                store_clean = store.strip()
+
+                raw_price = entry.get("cadPer100g")
+                if (
+                    not isinstance(raw_price, (int, float))
+                    or isinstance(raw_price, bool)
+                    or not math.isfinite(float(raw_price))
+                    or float(raw_price) <= 0.0
+                ):
+                    continue
+                rounded_price = round(float(raw_price), 4)
+                if rounded_price <= 0.0:
+                    continue
+
+                item_name = entry.get("itemName")
+                subcat = entry.get("subcategory")
+                if not isinstance(item_name, str) or not isinstance(subcat, str):
+                    continue
+
+                dedup[(obs_at, store_clean)] = {
+                    "observedAt": obs_at,
+                    "store": store_clean,
+                    "cadPer100g": rounded_price,
+                    "itemName": item_name,
+                    "subcategory": subcat,
+                }
+
+            if dedup:
+                postal_bucket[ing_id] = sorted(
+                    dedup.values(),
+                    key=lambda e: (e["observedAt"], e["store"]),
+                )
+
+        if not postal_bucket:
+            by_postal.pop(fsa, None)
+
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "windowWeeks": PRICE_HISTORY_WINDOW_WEEKS,
+        "updatedAt": _iso_utc(now_utc),
+        "byPostalCode": by_postal,
+    }
+
+
+def upsert_price_observations(
+    history: dict[str, Any],
+    postal_fsa: str,
+    now_utc: dt.datetime,
+    best_deals_by_store: dict[str, dict[str, dict[str, Any]]],
+    egg_whites_by_store: dict[str, dict[str, Any] | None],
+    best_ingredient_deals_by_store: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> None:
+    """Idempotently upsert today's Flipp unit-price observations keyed by (observedAt, store, ingredientId)."""
+    obs_date_str = now_utc.date().isoformat()
+    by_postal = history.setdefault("byPostalCode", {})
+    postal_bucket = by_postal.setdefault(postal_fsa, {})
+
+    def _upsert(ing_id: str, store: str, deal: dict[str, Any], subcat: str) -> None:
+        entries = postal_bucket.setdefault(ing_id, [])
+        record = {
+            "observedAt": obs_date_str,
+            "store": store,
+            "cadPer100g": round(float(deal["cadPer100g"]), 4),
+            "itemName": str(deal["name"]),
+            "subcategory": subcat,
+        }
+        replaced = False
+        for idx, existing in enumerate(entries):
+            if existing.get("observedAt") == obs_date_str and existing.get("store") == store:
+                entries[idx] = record
+                replaced = True
+                break
+        if not replaced:
+            entries.append(record)
+        entries.sort(key=lambda e: (e["observedAt"], e["store"]))
+
+    for store in ("Maxi", "Super C"):
+        if best_ingredient_deals_by_store is not None:
+            for ing_id, deal in best_ingredient_deals_by_store.get(store, {}).items():
+                if ing_id in ("ground_chicken", "egg_whites"):
+                    continue
+                subcat = str(deal.get("subcategory") or _INGREDIENT_TO_SUBCATEGORY.get(ing_id, ""))
+                _upsert(ing_id, store, deal, subcat)
+        else:
+            for subcat, deal in best_deals_by_store.get(store, {}).items():
+                ing_id = resolve_deal_ingredient_id(subcat, deal["name"])
+                if ing_id is not None:
+                    _upsert(ing_id, store, deal, subcat)
+        ew_deal = egg_whites_by_store.get(store)
+        if ew_deal is not None:
+            _upsert("egg_whites", store, ew_deal, "eggs")
+
+    if not postal_bucket:
+        by_postal.pop(postal_fsa, None)
+
+
+def calibrate_base_db_from_history(
+    base_db: dict[str, dict[str, Any]],
+    history: dict[str, Any],
+    postal_fsa: str,
+) -> dict[str, dict[str, Any]]:
+    """Derive regularCadPer100g and historicalLowCadPer100g from 52-week postal history when >= MIN_HISTORY_OBS."""
+    calibrated_db = copy.deepcopy(base_db)
+    postal_obs = history.get("byPostalCode", {}).get(postal_fsa, {})
+    if not isinstance(postal_obs, dict):
+        return calibrated_db
+
+    for ing_id, entry in calibrated_db.items():
+        if ing_id in ("ground_chicken", "aromatics_zero"):
+            continue
+        obs_list = postal_obs.get(ing_id, [])
+        if not isinstance(obs_list, list) or len(obs_list) < MIN_HISTORY_OBS:
+            continue
+
+        prices = sorted(float(o["cadPer100g"]) for o in obs_list)
+        schema_reg = float(entry["price"]["regularCadPer100g"])
+        cal_low = round(prices[0], 2)
+        cal_reg = round(max(schema_reg, _quantile(prices, 0.75)), 2)
+
+        entry["price"]["historicalLowCadPer100g"] = cal_low
+        entry["price"]["regularCadPer100g"] = cal_reg
+        if not entry["price"].get("onFlyer", False):
+            entry["price"]["cadPer100g"] = cal_reg
+            entry["price"]["cadPerPackage"] = round(cal_reg * (float(entry["packageGrams"]) / 100.0), 2)
+
+    return calibrated_db
+
+
+def save_price_history(history_path: Path, history: dict[str, Any]) -> None:
+    """Persist price_history.json atomically via sibling temp file and os.replace."""
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(history, indent=2, ensure_ascii=False) + "\n"
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=history_path.parent,
+            prefix=f".{history_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp_file:
+            tmp_path = Path(tmp_file.name)
+            tmp_file.write(payload)
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
+        os.replace(tmp_path, history_path)
+        tmp_path = None
+    finally:
+        if tmp_path is not None and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
 def run_pipeline(
     output_dir: Path | str | None = None,
     now: dt.datetime | None = None,
     postal_code: str | None = None,
     api_key: str | None = None,
     http_get: Callable[..., dict[str, Any]] | None = None,
+    schema_path: Path | str | None = None,
+    history_path: Path | str | None = None,
 ) -> dict[str, Any]:
     """Execute the full Flipp + scoring + Gemini/fallback pipeline and write identical data.json files."""
     root_dir = Path(output_dir) if output_dir is not None else Path(__file__).resolve().parent.parent
+    resolved_history_path = Path(history_path) if history_path is not None else root_dir / "price_history.json"
     now_utc = (now or dt.datetime.now(dt.timezone.utc)).astimezone(dt.timezone.utc)
+
+    if schema_path is not None:
+        schema = load_nutrition_baseline(schema_path)
+        schema_version = str(schema.get("schemaVersion") or SCHEMA_VERSION)
+        baseline_prices = {
+            k: float(v) for k, v in schema["categoryBaselines"]["baselinePrices"].items()
+        }
+        unit_weights = {
+            k: float(v) for k, v in schema["categoryBaselines"]["defaultUnitWeights"].items()
+        }
+        goal_presets = copy.deepcopy(schema["goalPresets"])
+        base_db = copy.deepcopy(schema["nutritionDb"])
+    else:
+        schema_version = SCHEMA_VERSION
+        baseline_prices = BASELINE_PRICES
+        unit_weights = DEFAULT_UNIT_WEIGHTS
+        goal_presets = GOAL_PRESETS
+        base_db = DEFAULT_NUTRITION_DB
 
     raw_postal = postal_code or os.environ.get("POSTAL_CODE", DEFAULT_POSTAL_CODE)
     try:
@@ -2111,7 +2003,12 @@ def run_pipeline(
         postal_query = normalize_postal_code(DEFAULT_POSTAL_CODE)
 
     items_by_store, flipp_online = fetch_flipp_items(postal_query, http_get=http_get)
-    scoring = score_stores(items_by_store, now=now_utc)
+    scoring = score_stores(
+        items_by_store,
+        now=now_utc,
+        baseline_prices=baseline_prices,
+        default_unit_weights=unit_weights,
+    )
     price_source = "flipp" if (flipp_online and scoring["hasLiveDeals"]) else "baseline"
 
     if price_source == "baseline":
@@ -2123,11 +2020,27 @@ def run_pipeline(
         }
         scoring["flyerPeriod"] = default_flyer_period(now_utc)
         scoring["bestDeals"] = {}
+        scoring["bestIngredientDeals"] = {}
         scoring["eggWhitesDeal"] = None
+
+    history = load_and_prune_price_history(resolved_history_path, now_utc)
+    if price_source == "flipp":
+        upsert_price_observations(
+            history,
+            postal_display,
+            now_utc,
+            scoring["bestDealsByStore"],
+            scoring["eggWhitesByStore"],
+            best_ingredient_deals_by_store=scoring["bestIngredientDealsByStore"],
+        )
+    history["updatedAt"] = _iso_utc(now_utc)
+    calibrated_base_db = calibrate_base_db_from_history(base_db, history, postal_display)
 
     nutrition_db = build_nutrition_db(
         scoring["bestDeals"],
         egg_whites_deal=scoring["eggWhitesDeal"],
+        base_db=calibrated_base_db,
+        best_ingredient_deals=scoring["bestIngredientDeals"],
     )
 
     plan_sections, ai_source = generate_meal_plan(
@@ -2138,8 +2051,8 @@ def run_pipeline(
     )
 
     data: dict[str, Any] = {
-        "schemaVersion": SCHEMA_VERSION,
-        "generatedAt": now_utc.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "schemaVersion": schema_version,
+        "generatedAt": _iso_utc(now_utc),
         "source": f"{ai_source}+{price_source}",
         "location": {
             "postalCodeDisplay": postal_display,
@@ -2155,7 +2068,7 @@ def run_pipeline(
             **copy.deepcopy(USER_PROFILE),
             "postalCode": postal_display,
         },
-        "goalPresets": copy.deepcopy(GOAL_PRESETS),
+        "goalPresets": copy.deepcopy(goal_presets),
         "nutritionDb": nutrition_db,
         "proteinSwaps": copy.deepcopy(PROTEIN_SWAPS),
         "mealTemplates": plan_sections["mealTemplates"],
@@ -2172,11 +2085,32 @@ def run_pipeline(
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(payload_bytes)
 
+    save_price_history(resolved_history_path, history)
+
     return data
 
 
-def main() -> int:
-    data = run_pipeline()
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Update grocery flyer and meal plan JSON.")
+    parser.add_argument(
+        "--schema-file",
+        default=None,
+        help="Optional path to a custom nutrition_baseline.json schema file.",
+    )
+    parser.add_argument(
+        "--history-file",
+        default=None,
+        help="Optional path to a custom price_history.json file.",
+    )
+    if argv is not None:
+        args = parser.parse_args(argv)
+    else:
+        args, _ = parser.parse_known_args()
+
+    run_kwargs: dict[str, Any] = {"schema_path": args.schema_file}
+    if args.history_file is not None:
+        run_kwargs["history_path"] = args.history_file
+    data = run_pipeline(**run_kwargs)
     print(
         f"Updated data.json & public/data.json | source={data['source']} | "
         f"winningStore={data['winningStore']} | "
@@ -2186,4 +2120,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

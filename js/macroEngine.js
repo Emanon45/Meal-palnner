@@ -1,22 +1,17 @@
 (function (root, factory) {
   'use strict';
   if (typeof module === 'object' && module !== null && typeof module.exports === 'object') {
-    module.exports = factory();
+    module.exports = factory(root);
   } else if (typeof define === 'function' && define.amd) {
-    define([], factory);
+    define([], function () { return factory(root); });
   } else {
-    root.MacroEngine = factory();
+    root.MacroEngine = factory(root);
   }
-})(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this), function () {
+})(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this), function (root) {
   'use strict';
 
-  var AISLE_ORDER = Object.freeze([
-    'Produce',
-    'Meat',
-    'Dairy/Eggs',
-    'Pantry/Canned',
-    'Frozen'
-  ]);
+  var AISLE_ORDER = [];
+  var activeAisleOrder = [];
 
   var HORIZON_LIMITS = Object.freeze({
     MIN_DAYS: 1,
@@ -24,32 +19,8 @@
     DEFAULT_DAYS: 7
   });
 
-  var GOAL_PRESETS = Object.freeze({
-    cut: Object.freeze({
-      id: 'cut',
-      label: 'Aggressive Cut',
-      calories: 1900,
-      protein: 200,
-      fat: 50,
-      carbs: 160
-    }),
-    recomp: Object.freeze({
-      id: 'recomp',
-      label: 'Body Recomp',
-      calories: 2400,
-      protein: 175,
-      fat: 80,
-      carbs: 245
-    }),
-    maintenance: Object.freeze({
-      id: 'maintenance',
-      label: 'Maintenance',
-      calories: 2800,
-      protein: 190,
-      fat: 85,
-      carbs: 315
-    })
-  });
+  var GOAL_PRESETS = {};
+  var DEFAULT_NUTRITION_DB = {};
 
   function makeDbEntry(cfg) {
     var cadPerPackage = cfg.cadPerPackage !== undefined
@@ -83,210 +54,180 @@
     });
   }
 
-  // Verified raw/as-purchased per-100g nutrition database (25 ingredients)
-  var DEFAULT_NUTRITION_DB = Object.freeze({
-    whole_egg: makeDbEntry({
-      name: 'Whole Large Eggs',
-      aisle: 'Dairy/Eggs',
-      calories: 143, protein: 12.6, fat: 9.5, carbs: 0.7,
-      cookedYield: 0.90, packageGrams: 600, unitLabel: 'carton (12)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.67, regularCadPer100g: 0.72, historicalLowCadPer100g: 0.50
-    }),
-    egg_whites: makeDbEntry({
-      name: 'Liquid Egg Whites',
-      aisle: 'Dairy/Eggs',
-      calories: 48, protein: 11.0, fat: 0.0, carbs: 0.7,
-      cookedYield: 0.90, packageGrams: 500, unitLabel: 'carton (500g)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.80, regularCadPer100g: 0.90, historicalLowCadPer100g: 0.66
-    }),
-    potatoes_raw: makeDbEntry({
-      name: 'Grelot / Baby / Russet Potatoes',
-      aisle: 'Produce',
-      calories: 77, protein: 2.0, fat: 0.1, carbs: 17.5,
-      cookedYield: 0.85, packageGrams: 1360, unitLabel: 'bag (3 lb)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.22, regularCadPer100g: 0.29, historicalLowCadPer100g: 0.11
-    }),
-    green_onion: makeDbEntry({
-      name: 'Green Onions / Scallions',
-      aisle: 'Produce',
-      calories: 32, protein: 1.8, fat: 0.2, carbs: 7.3,
-      cookedYield: 1.00, packageGrams: 100, unitLabel: 'bunch',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 1.29, regularCadPer100g: 1.49, historicalLowCadPer100g: 0.88
-    }),
-    pico: makeDbEntry({
-      name: 'Roma Tomatoes, Onion & Lime (for Pico de Gallo)',
-      aisle: 'Produce',
-      calories: 20, protein: 0.9, fat: 0.2, carbs: 4.3,
-      cookedYield: 1.00, packageGrams: 400, unitLabel: 'batch (400g)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.99, regularCadPer100g: 1.12, historicalLowCadPer100g: 0.75
-    }),
-    berries: makeDbEntry({
-      name: 'Mixed Berries',
-      aisle: 'Frozen',
-      calories: 45, protein: 0.8, fat: 0.3, carbs: 10.5,
-      cookedYield: 1.00, packageGrams: 600, unitLabel: 'bag (600g)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.83, regularCadPer100g: 1.00, historicalLowCadPer100g: 0.66
-    }),
-    banana: makeDbEntry({
-      name: 'Banana',
-      aisle: 'Produce',
-      calories: 89, protein: 1.1, fat: 0.3, carbs: 22.8,
-      cookedYield: 1.00, packageGrams: 500, unitLabel: 'kg',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.17, regularCadPer100g: 0.19, historicalLowCadPer100g: 0.13
-    }),
-    ground_chicken: makeDbEntry({
-      name: 'Walmart Great Value Extra-Lean Ground Chicken',
-      aisle: 'Meat',
-      calories: 140, protein: 17.0, fat: 9.0, carbs: 0.0,
-      cookedYield: 0.75, packageGrams: 454, unitLabel: 'pack (454g)',
-      requiresThaw: true, pantryDefault: false,
-      cadPer100g: 1.10, regularCadPer100g: 1.32, historicalLowCadPer100g: 0.99,
-      cadPerPackage: 5.00
-    }),
-    tuna_water: makeDbEntry({
-      name: 'Canned Light Tuna in Water (drained)',
-      aisle: 'Pantry/Canned',
-      calories: 109, protein: 25.5, fat: 0.8, carbs: 0.0,
-      cookedYield: 1.00, packageGrams: 120, unitLabel: 'can (170g)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 1.04, regularCadPer100g: 1.49, historicalLowCadPer100g: 0.83
-    }),
-    sardines_water: makeDbEntry({
-      name: 'Canned Sardines in Water (drained)',
-      aisle: 'Pantry/Canned',
-      calories: 160, protein: 22.0, fat: 8.0, carbs: 0.0,
-      cookedYield: 1.00, packageGrams: 85, unitLabel: 'can (106g)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 1.76, regularCadPer100g: 2.11, historicalLowCadPer100g: 1.18
-    }),
-    pork_loin_lean: makeDbEntry({
-      name: 'Pork Loin / Tenderloin (trimmed lean, raw)',
-      aisle: 'Meat',
-      calories: 136, protein: 21.5, fat: 4.5, carbs: 0.0,
-      cookedYield: 0.75, packageGrams: 1000, unitLabel: 'kg',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.88, regularCadPer100g: 1.10, historicalLowCadPer100g: 0.55
-    }),
-    pork_shoulder: makeDbEntry({
-      name: 'Pork Picnic Shoulder (visibly trimmed, raw)',
-      aisle: 'Meat',
-      calories: 175, protein: 19.5, fat: 10.0, carbs: 0.0,
-      cookedYield: 0.72, packageGrams: 1000, unitLabel: 'kg',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.55, regularCadPer100g: 0.77, historicalLowCadPer100g: 0.39
-    }),
-    chicken_breast: makeDbEntry({
-      name: 'Boneless Skinless Chicken Breast (raw)',
-      aisle: 'Meat',
-      calories: 120, protein: 22.5, fat: 2.6, carbs: 0.0,
-      cookedYield: 0.75, packageGrams: 1000, unitLabel: 'kg',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 1.32, regularCadPer100g: 1.65, historicalLowCadPer100g: 0.99
-    }),
-    white_beans_cnd: makeDbEntry({
-      name: 'Canned White / Cannellini Beans (drained)',
-      aisle: 'Pantry/Canned',
-      calories: 114, protein: 7.5, fat: 0.5, carbs: 20.5,
-      cookedYield: 1.00, packageGrams: 340, unitLabel: 'can (540ml)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.44, regularCadPer100g: 0.53, historicalLowCadPer100g: 0.29
-    }),
-    diced_tomatoes: makeDbEntry({
-      name: 'Canned Diced Tomatoes (no oil)',
-      aisle: 'Pantry/Canned',
-      calories: 21, protein: 0.9, fat: 0.1, carbs: 4.4,
-      cookedYield: 0.90, packageGrams: 796, unitLabel: 'can (796ml)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.25, regularCadPer100g: 0.31, historicalLowCadPer100g: 0.16
-    }),
-    rice_dry: makeDbEntry({
-      name: 'Long-Grain / Jasmine White Rice (dry)',
-      aisle: 'Pantry/Canned',
-      calories: 360, protein: 7.0, fat: 0.6, carbs: 79.0,
-      cookedYield: 2.80, packageGrams: 2000, unitLabel: 'bag (2 kg)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.25, regularCadPer100g: 0.32, historicalLowCadPer100g: 0.18
-    }),
-    cabbage: makeDbEntry({
-      name: 'Green Cabbage (shredded, raw)',
-      aisle: 'Produce',
-      calories: 25, protein: 1.3, fat: 0.1, carbs: 5.8,
-      cookedYield: 1.00, packageGrams: 900, unitLabel: 'kg',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.22, regularCadPer100g: 0.28, historicalLowCadPer100g: 0.13
-    }),
-    cucumber: makeDbEntry({
-      name: 'English Cucumber (raw)',
-      aisle: 'Produce',
-      calories: 15, protein: 0.7, fat: 0.1, carbs: 3.6,
-      cookedYield: 1.00, packageGrams: 350, unitLabel: 'unit (~350g)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.43, regularCadPer100g: 0.57, historicalLowCadPer100g: 0.25
-    }),
-    carrots: makeDbEntry({
-      name: 'Carrots (raw)',
-      aisle: 'Produce',
-      calories: 41, protein: 0.9, fat: 0.2, carbs: 9.6,
-      cookedYield: 1.00, packageGrams: 907, unitLabel: 'bag (2 lb)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.22, regularCadPer100g: 0.28, historicalLowCadPer100g: 0.11
-    }),
-    edamame: makeDbEntry({
-      name: 'Shelled Edamame (frozen)',
-      aisle: 'Frozen',
-      calories: 121, protein: 11.9, fat: 5.2, carbs: 8.9,
-      cookedYield: 1.00, packageGrams: 400, unitLabel: 'bag (400g)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.87, regularCadPer100g: 1.00, historicalLowCadPer100g: 0.62
-    }),
-    corn: makeDbEntry({
-      name: 'Corn Kernels (frozen)',
-      aisle: 'Frozen',
-      calories: 86, protein: 3.3, fat: 1.2, carbs: 19.0,
-      cookedYield: 1.00, packageGrams: 750, unitLabel: 'bag (750g)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.40, regularCadPer100g: 0.47, historicalLowCadPer100g: 0.27
-    }),
-    tzatziki_0: makeDbEntry({
-      name: '0% Greek Yogurt + Cucumber/Garlic/Lemon (for Tzatziki)',
-      aisle: 'Dairy/Eggs',
-      calories: 55, protein: 8.0, fat: 0.2, carbs: 4.5,
-      cookedYield: 1.00, packageGrams: 500, unitLabel: 'yogurt + veg (500g)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.90, regularCadPer100g: 1.00, historicalLowCadPer100g: 0.70
-    }),
-    skyr_0: makeDbEntry({
-      name: "Siggi's 0% Plain Skyr",
-      aisle: 'Dairy/Eggs',
-      calories: 63, protein: 10.9, fat: 0.2, carbs: 4.0,
-      cookedYield: 1.00, packageGrams: 650, unitLabel: 'tub (650g)',
-      requiresThaw: false, pantryDefault: false,
-      cadPer100g: 0.92, regularCadPer100g: 1.08, historicalLowCadPer100g: 0.77
-    }),
-    whey_isolate: makeDbEntry({
-      name: 'Whey Protein Isolate',
-      aisle: 'Pantry/Canned',
-      calories: 370, protein: 86.7, fat: 1.0, carbs: 3.3,
-      cookedYield: 1.00, packageGrams: 907, unitLabel: 'tub (907g)',
-      requiresThaw: false, pantryDefault: true,
-      cadPer100g: 3.86, regularCadPer100g: 4.41, historicalLowCadPer100g: 3.30
-    }),
-    aromatics_zero: makeDbEntry({
-      name: 'Ginger / Garlic / Onion / Spices / Broth',
-      aisle: 'Produce',
-      calories: 0, protein: 0.0, fat: 0.0, carbs: 0.0,
-      cookedYield: 1.00, packageGrams: 100, unitLabel: 'pantry',
-      requiresThaw: false, pantryDefault: true,
-      cadPer100g: 0.00, regularCadPer100g: 0.00, historicalLowCadPer100g: 0.00
-    })
-  });
+  function isPlainObject(val) {
+    return Boolean(val) && typeof val === 'object' && !Array.isArray(val);
+  }
+
+  function isSafeObjectKey(key) {
+    return typeof key === 'string' && key.length > 0 && key !== '__proto__' && !hasOwn(Object.prototype, key);
+  }
+
+  function clearObjectInPlace(target) {
+    var keys = Object.keys(target);
+    for (var i = 0; i < keys.length; i++) {
+      delete target[keys[i]];
+    }
+  }
+
+  function sanitizeAisleOrder(rawList) {
+    if (!Array.isArray(rawList)) return [];
+    var out = [];
+    var seen = Object.create(null);
+    for (var i = 0; i < rawList.length; i++) {
+      if (typeof rawList[i] !== 'string') continue;
+      var trimmed = rawList[i].trim();
+      if (!trimmed || !isSafeObjectKey(trimmed) || hasOwn(seen, trimmed)) continue;
+      seen[trimmed] = true;
+      out.push(trimmed);
+    }
+    return out;
+  }
+
+  function setBaselineData(schema) {
+    if (!isPlainObject(schema)) {
+      throw new TypeError('setBaselineData requires a plain schema object');
+    }
+    if (!Array.isArray(schema.aisleOrder)) {
+      throw new TypeError('setBaselineData requires schema.aisleOrder array');
+    }
+    var nextAisles = [];
+    var seenAisles = Object.create(null);
+    var i;
+    for (i = 0; i < schema.aisleOrder.length; i++) {
+      if (typeof schema.aisleOrder[i] !== 'string') {
+        throw new TypeError('setBaselineData invalid aisle entry at index ' + i);
+      }
+      var trimmedAisle = schema.aisleOrder[i].trim();
+      if (!trimmedAisle || !isSafeObjectKey(trimmedAisle)) {
+        throw new TypeError('setBaselineData invalid or unsafe aisle entry: ' + schema.aisleOrder[i]);
+      }
+      if (!hasOwn(seenAisles, trimmedAisle)) {
+        seenAisles[trimmedAisle] = true;
+        nextAisles.push(trimmedAisle);
+      }
+    }
+    if (nextAisles.length === 0) {
+      throw new TypeError('setBaselineData requires at least one valid aisle in schema.aisleOrder');
+    }
+
+    if (!isPlainObject(schema.goalPresets)) {
+      throw new TypeError('setBaselineData requires schema.goalPresets object');
+    }
+    var nextPresets = {};
+    var presetKeys = Object.keys(schema.goalPresets);
+    for (i = 0; i < presetKeys.length; i++) {
+      var pk = presetKeys[i];
+      if (!isSafeObjectKey(pk)) continue;
+      var rawPreset = schema.goalPresets[pk];
+      if (!isPlainObject(rawPreset)) {
+        throw new TypeError('setBaselineData invalid goalPreset entry: ' + pk);
+      }
+      if (
+        !hasValidNonNegNumber(rawPreset.calories) ||
+        !hasValidNonNegNumber(rawPreset.protein) ||
+        !hasValidNonNegNumber(rawPreset.fat) ||
+        !hasValidNonNegNumber(rawPreset.carbs)
+      ) {
+        throw new TypeError('setBaselineData invalid macro numbers in goalPreset: ' + pk);
+      }
+      nextPresets[pk] = Object.freeze({
+        id: (typeof rawPreset.id === 'string' && rawPreset.id.trim()) ? rawPreset.id.trim() : pk,
+        label: (typeof rawPreset.label === 'string' && rawPreset.label.trim()) ? rawPreset.label.trim() : pk,
+        calories: Number(rawPreset.calories),
+        protein: Number(rawPreset.protein),
+        fat: Number(rawPreset.fat),
+        carbs: Number(rawPreset.carbs)
+      });
+    }
+    if (Object.keys(nextPresets).length === 0) {
+      throw new TypeError('setBaselineData requires at least one entry in schema.goalPresets');
+    }
+
+    if (!isPlainObject(schema.nutritionDb)) {
+      throw new TypeError('setBaselineData requires schema.nutritionDb object');
+    }
+    var nextDb = {};
+    var dbKeys = Object.keys(schema.nutritionDb);
+    for (i = 0; i < dbKeys.length; i++) {
+      var id = dbKeys[i];
+      if (!isSafeObjectKey(id)) continue;
+      var item = schema.nutritionDb[id];
+      if (!isPlainObject(item)) {
+        throw new TypeError('setBaselineData invalid nutritionDb entry: ' + id);
+      }
+      var itemName = (typeof item.name === 'string' && item.name.trim()) ? item.name.trim() : id;
+      if (isOilIngredient(id, itemName)) {
+        continue;
+      }
+      var per = isPlainObject(item.per100g) ? item.per100g : item;
+      if (
+        !hasValidNonNegNumber(per.calories) ||
+        !hasValidNonNegNumber(per.protein) ||
+        !hasValidNonNegNumber(per.fat) ||
+        !hasValidNonNegNumber(per.carbs)
+      ) {
+        throw new TypeError('setBaselineData invalid per100g macros for nutritionDb entry: ' + id);
+      }
+      var rawPrice = isPlainObject(item.price) ? item.price : item;
+      var cadPer100g = hasValidNonNegNumber(rawPrice.cadPer100g) ? Number(rawPrice.cadPer100g) : 0;
+      var regularCadPer100g = hasValidNonNegNumber(rawPrice.regularCadPer100g) ? Number(rawPrice.regularCadPer100g) : cadPer100g;
+      var historicalLowCadPer100g = hasValidNonNegNumber(rawPrice.historicalLowCadPer100g) ? Number(rawPrice.historicalLowCadPer100g) : cadPer100g;
+      var cadPerPackage = hasValidNonNegNumber(rawPrice.cadPerPackage) ? Number(rawPrice.cadPerPackage) : undefined;
+      var cookedYieldNum = Number(item.cookedYield);
+      var pkgNum = Number(item.packageGrams);
+      var resolvedAisle = nextAisles.indexOf(item.aisle) !== -1
+        ? item.aisle
+        : (nextAisles.indexOf('Pantry/Canned') !== -1 ? 'Pantry/Canned' : nextAisles[0]);
+      var resolvedUnitLabel = (typeof item.unitLabel === 'string' && item.unitLabel.trim())
+        ? item.unitLabel.trim()
+        : 'kg';
+
+      nextDb[id] = makeDbEntry({
+        name: itemName,
+        aisle: resolvedAisle,
+        calories: Number(per.calories),
+        protein: Number(per.protein),
+        fat: Number(per.fat),
+        carbs: Number(per.carbs),
+        cookedYield: (Number.isFinite(cookedYieldNum) && cookedYieldNum > 0) ? cookedYieldNum : 1.0,
+        packageGrams: (Number.isFinite(pkgNum) && pkgNum > 0) ? pkgNum : 100,
+        unitLabel: resolvedUnitLabel,
+        requiresThaw: Boolean(item.requiresThaw),
+        pantryDefault: Boolean(item.pantryDefault),
+        cadPer100g: cadPer100g,
+        cadPerPackage: cadPerPackage,
+        regularCadPer100g: regularCadPer100g,
+        historicalLowCadPer100g: historicalLowCadPer100g
+      });
+    }
+    if (Object.keys(nextDb).length === 0) {
+      throw new TypeError('setBaselineData requires at least one valid non-oil entry in schema.nutritionDb');
+    }
+
+    activeAisleOrder = nextAisles.slice();
+    if (!Object.isFrozen(AISLE_ORDER)) {
+      Array.prototype.splice.apply(AISLE_ORDER, [0, AISLE_ORDER.length].concat(nextAisles));
+    }
+
+    clearObjectInPlace(GOAL_PRESETS);
+    var npKeys = Object.keys(nextPresets);
+    for (i = 0; i < npKeys.length; i++) {
+      GOAL_PRESETS[npKeys[i]] = nextPresets[npKeys[i]];
+    }
+
+    clearObjectInPlace(DEFAULT_NUTRITION_DB);
+    var ndKeys = Object.keys(nextDb);
+    for (i = 0; i < ndKeys.length; i++) {
+      DEFAULT_NUTRITION_DB[ndKeys[i]] = nextDb[ndKeys[i]];
+    }
+
+    return {
+      AISLE_ORDER: AISLE_ORDER,
+      aisleOrder: activeAisleOrder.slice(),
+      GOAL_PRESETS: GOAL_PRESETS,
+      DEFAULT_NUTRITION_DB: DEFAULT_NUTRITION_DB
+    };
+  }
 
   var DEFAULT_LUNCH_SWAPS = Object.freeze({
     ground_chicken: {
@@ -462,6 +403,10 @@
     return Math.floor((Number(n) || 0) / 25) * 25;
   }
 
+  function floor50(n) {
+    return Math.floor((Number(n) || 0) / 50) * 50;
+  }
+
   function sanitizeNonNegNumber(val, fallback) {
     if (val === undefined || val === null || typeof val === 'boolean') return fallback;
     if (typeof val === 'string' && !val.trim()) return fallback;
@@ -498,6 +443,11 @@
     var seen = Object.create(null);
     var keys = Object.keys(DEFAULT_NUTRITION_DB).concat(Object.keys(overrides));
 
+    var suppliedAisleOrder = sanitizeAisleOrder(data && data.aisleOrder);
+    var aisleList = activeAisleOrder.length
+      ? activeAisleOrder
+      : (AISLE_ORDER.length ? AISLE_ORDER : suppliedAisleOrder);
+
     for (var i = 0; i < keys.length; i++) {
       var id = keys[i];
       if (id === '__proto__' || hasOwn(seen, id)) continue;
@@ -521,10 +471,17 @@
         carbs: sanitizeNonNegNumber(ovPer.carbs, basePer.carbs)
       };
 
-      var rawAisle = (ov && ov.aisle) || (base && base.aisle) || 'Pantry/Canned';
-      var aisle = AISLE_ORDER.indexOf(rawAisle) !== -1
-        ? rawAisle
-        : ((base && base.aisle && AISLE_ORDER.indexOf(base.aisle) !== -1) ? base.aisle : 'Pantry/Canned');
+      var rawAisle = (ov && typeof ov.aisle === 'string' && ov.aisle.trim())
+        ? ov.aisle.trim()
+        : ((base && base.aisle) || 'Pantry/Canned');
+      var aisle;
+      if (aisleList.length > 0) {
+        aisle = aisleList.indexOf(rawAisle) !== -1
+          ? rawAisle
+          : ((base && base.aisle && aisleList.indexOf(base.aisle) !== -1) ? base.aisle : 'Pantry/Canned');
+      } else {
+        aisle = isSafeObjectKey(rawAisle) ? rawAisle : 'Pantry/Canned';
+      }
 
       var rawYield = Number(ov && ov.cookedYield !== undefined ? ov.cookedYield : (base ? base.cookedYield : 1.0));
       var cookedYield = (Number.isFinite(rawYield) && rawYield > 0) ? rawYield : (base ? base.cookedYield : 1.0);
@@ -608,33 +565,96 @@
   }
 
   function resolveTargets(data, options) {
-    var presetId = (options && typeof options.preset === 'string' && hasOwn(GOAL_PRESETS, options.preset))
-      ? options.preset
-      : 'cut';
-    var defaultPreset = GOAL_PRESETS[presetId];
-    var dataPreset = (data && data.goalPresets && typeof data.goalPresets === 'object' && hasOwn(data.goalPresets, presetId) && data.goalPresets[presetId] && typeof data.goalPresets[presetId] === 'object')
-      ? data.goalPresets[presetId]
-      : {};
+    var requestedPreset = (options && isSafeObjectKey(options.preset)) ? options.preset : 'cut';
+    var dataPresets = (data && data.goalPresets && typeof data.goalPresets === 'object') ? data.goalPresets : null;
+    var presetId = hasOwn(GOAL_PRESETS, requestedPreset)
+      ? requestedPreset
+      : (!Object.keys(GOAL_PRESETS).length && dataPresets && hasOwn(dataPresets, requestedPreset)
+        ? requestedPreset
+        : 'cut');
+    var defaultPreset = hasOwn(GOAL_PRESETS, presetId)
+      ? GOAL_PRESETS[presetId]
+      : (hasOwn(GOAL_PRESETS, 'cut') ? GOAL_PRESETS.cut : null);
+    var dataPreset = (dataPresets && hasOwn(dataPresets, presetId) && dataPresets[presetId] && typeof dataPresets[presetId] === 'object')
+      ? dataPresets[presetId]
+      : ((dataPresets && hasOwn(dataPresets, 'cut') && dataPresets.cut && typeof dataPresets.cut === 'object')
+        ? dataPresets.cut
+        : {});
 
     var base = {
-      calories: sanitizeNonNegNumber(dataPreset.calories, defaultPreset.calories),
-      protein: sanitizeNonNegNumber(dataPreset.protein, defaultPreset.protein),
-      fat: sanitizeNonNegNumber(dataPreset.fat, defaultPreset.fat),
-      carbs: sanitizeNonNegNumber(dataPreset.carbs, defaultPreset.carbs)
+      calories: sanitizeNonNegNumber(dataPreset.calories, defaultPreset ? defaultPreset.calories : undefined),
+      protein: sanitizeNonNegNumber(dataPreset.protein, defaultPreset ? defaultPreset.protein : undefined),
+      fat: sanitizeNonNegNumber(dataPreset.fat, defaultPreset ? defaultPreset.fat : undefined),
+      carbs: sanitizeNonNegNumber(dataPreset.carbs, defaultPreset ? defaultPreset.carbs : undefined)
     };
 
     var rawTargets = (options && options.targets && typeof options.targets === 'object') ? options.targets : null;
-    if (!rawTargets) {
-      return base;
-    }
+    var resolved = rawTargets
+      ? {
+        calories: sanitizeNonNegNumber(rawTargets.calories, base.calories),
+        protein: sanitizeNonNegNumber(rawTargets.protein, base.protein),
+        fat: sanitizeNonNegNumber(rawTargets.fat !== undefined ? rawTargets.fat : rawTargets.fatCeiling, base.fat),
+        carbs: sanitizeNonNegNumber(rawTargets.carbs, base.carbs)
+      }
+      : base;
 
-    var rawFat = rawTargets.fat !== undefined ? rawTargets.fat : rawTargets.fatCeiling;
-    return {
-      calories: sanitizeNonNegNumber(rawTargets.calories, base.calories),
-      protein: sanitizeNonNegNumber(rawTargets.protein, base.protein),
-      fat: sanitizeNonNegNumber(rawFat, base.fat),
-      carbs: sanitizeNonNegNumber(rawTargets.carbs, base.carbs)
-    };
+    if (
+      !hasValidNonNegNumber(resolved.calories) ||
+      !hasValidNonNegNumber(resolved.protein) ||
+      !hasValidNonNegNumber(resolved.fat) ||
+      !hasValidNonNegNumber(resolved.carbs)
+    ) {
+      throw new Error('MacroEngine goalPresets are not loaded; call setBaselineData(schema) or supply data.goalPresets/options.targets');
+    }
+    return resolved;
+  }
+
+  var SLOT_IDS = ['breakfast', 'lunch', 'dinner', 'snack'];
+
+  function resolveSlotSplits(rawSplits) {
+    if (!isPlainObject(rawSplits)) return null;
+    var w = {};
+    var maxW = 0;
+    var i;
+    for (i = 0; i < SLOT_IDS.length; i++) {
+      var sid = SLOT_IDS[i];
+      var v = 0;
+      if (hasOwn(rawSplits, sid)) {
+        var rawVal = rawSplits[sid];
+        if (
+          rawVal !== undefined &&
+          rawVal !== null &&
+          typeof rawVal !== 'boolean' &&
+          !(typeof rawVal === 'string' && !rawVal.trim())
+        ) {
+          var parsed = Number(rawVal);
+          if (Number.isFinite(parsed) && parsed > 0) {
+            v = parsed;
+          }
+        }
+      }
+      w[sid] = v;
+      if (v > maxW) maxW = v;
+    }
+    if (!(maxW > 0) || !Number.isFinite(maxW)) return null;
+
+    var scaled = {};
+    var sum = 0;
+    for (i = 0; i < SLOT_IDS.length; i++) {
+      var sKey = SLOT_IDS[i];
+      var sc = w[sKey] / maxW;
+      scaled[sKey] = sc;
+      sum += sc;
+    }
+    if (!(sum > 0) || !Number.isFinite(sum)) return null;
+
+    var norm = {};
+    for (i = 0; i < SLOT_IDS.length; i++) {
+      var nKey = SLOT_IDS[i];
+      var nVal = Math.round((scaled[nKey] / sum) * 1e12) / 1e12;
+      norm[nKey] = nVal === 0 ? 0 : nVal;
+    }
+    return norm;
   }
 
   function resolveSwapInfo(dataSwaps, defaultSwaps, requestedId, fallbackId) {
@@ -863,32 +883,9 @@
     return 'produce';
   }
 
-  function buildMealsAndTotals(g, db, templates, lunchSwapInfo, dinnerSwapInfo, targets) {
+  function buildMealsAndTotals(g, db, templates, lunchSwapInfo, dinnerSwapInfo, targets, slotGrams) {
     var lunchSwap = lunchSwapInfo.id;
     var dinnerSwap = dinnerSwapInfo.id;
-
-    // Exact integer splits preserving sum(meal.ingredients[id].grams) === g[id]
-    var picoB = Math.floor((g.pico || 0) / 2);
-    var picoL = (g.pico || 0) - picoB;
-
-    var berriesB = Math.floor((g.berries || 0) / 2);
-    var berriesS = (g.berries || 0) - berriesB;
-
-    var potTotal = g.potatoes_raw || 0;
-    var potL = lunchSwap === 'tuna_patties' ? Math.min(potTotal, round5(potTotal * 0.42)) : 0;
-    var potB = potTotal - potL;
-
-    var riceTotal = g.rice_dry || 0;
-    var riceL = Math.floor(riceTotal / 2);
-    var riceD = riceTotal - riceL;
-
-    var skyrTotal = g.skyr_0 || 0;
-    var skyrD = skyrTotal >= 60 ? 30 : 0;
-    var skyrS = skyrTotal - skyrD;
-
-    var aromTotal = g.aromatics_zero || 0;
-    var aromL = Math.floor(aromTotal / 2);
-    var aromD = aromTotal - aromL;
 
     var lunchMeatIds = lunchSwap === 'ground_chicken'
       ? ['ground_chicken']
@@ -994,71 +991,183 @@
       return baseGrams;
     }
 
-    var resolvedLunchMeatPairs = (templates.lunch.primaryProteinId && hasOwn(db, templates.lunch.primaryProteinId))
-      ? [[templates.lunch.primaryProteinId, scaleCustomMeatGrams(lunchMeatIds[0], g[lunchMeatIds[0]] || 160, templates.lunch.primaryProteinId)]]
-      : lunchMeatIds.map(function (mid) { return [mid, g[mid] || 0]; });
+    var slotSpecs;
+    if (slotGrams) {
+      var bSlot = slotGrams.breakfast || {};
+      var lSlot = slotGrams.lunch || {};
+      var dSlot = slotGrams.dinner || {};
+      var sSlot = slotGrams.snack || {};
 
-    var resolvedDinnerMeatId = (templates.dinner.primaryProteinId && hasOwn(db, templates.dinner.primaryProteinId))
-      ? templates.dinner.primaryProteinId
-      : dinnerSwap;
-    var resolvedDinnerMeatGrams = scaleCustomMeatGrams(dinnerSwap, g[dinnerSwap] || 0, resolvedDinnerMeatId);
-
-    var slotSpecs = [
-      {
-        template: templates.breakfast,
-        title: templates.breakfast.title,
-        activeSwap: null,
-        pairs: applySlotOverrides(templates.breakfast, [
-          ['whole_egg', g.whole_egg || 0],
-          ['egg_whites', g.egg_whites || 0],
-          ['potatoes_raw', potB],
-          ['green_onion', g.green_onion || 0],
-          ['pico', picoB],
-          ['berries', berriesB]
-        ])
-      },
-      {
-        template: templates.lunch,
-        title: lunchTitle,
-        activeSwap: templates.lunch.primaryProteinId ? null : lunchSwap,
-        pairs: applySlotOverrides(templates.lunch, resolvedLunchMeatPairs.concat([
-          ['potatoes_raw', potL],
-          ['rice_dry', riceL],
-          ['cabbage', g.cabbage || 0],
-          ['cucumber', g.cucumber || 0],
-          ['carrots', g.carrots || 0],
-          ['edamame', g.edamame || 0],
-          ['corn', g.corn || 0],
-          ['pico', picoL],
-          ['tzatziki_0', g.tzatziki_0 || 0],
-          ['aromatics_zero', aromL]
-        ]))
-      },
-      {
-        template: templates.dinner,
-        title: dinnerTitle,
-        activeSwap: templates.dinner.primaryProteinId ? null : dinnerSwap,
-        pairs: applySlotOverrides(templates.dinner, [
-          [resolvedDinnerMeatId, resolvedDinnerMeatGrams],
-          ['white_beans_cnd', g.white_beans_cnd || 0],
-          ['diced_tomatoes', g.diced_tomatoes || 0],
-          ['rice_dry', riceD],
-          ['skyr_0', skyrD],
-          ['aromatics_zero', aromD]
-        ])
-      },
-      {
-        template: templates.snack,
-        title: templates.snack.title,
-        activeSwap: null,
-        pairs: applySlotOverrides(templates.snack, [
-          ['skyr_0', skyrS],
-          ['whey_isolate', g.whey_isolate || 0],
-          ['berries', berriesS],
-          ['banana', g.banana || 0]
-        ])
+      var sgLunchMeatPairs;
+      if (templates.lunch.primaryProteinId && hasOwn(db, templates.lunch.primaryProteinId)) {
+        var lPrimaryBaseG = lSlot[lunchMeatIds[0]] || 0;
+        sgLunchMeatPairs = lPrimaryBaseG > 0
+          ? [[templates.lunch.primaryProteinId, scaleCustomMeatGrams(lunchMeatIds[0], lPrimaryBaseG, templates.lunch.primaryProteinId)]]
+          : [];
+      } else {
+        sgLunchMeatPairs = lunchMeatIds.map(function (mid) { return [mid, lSlot[mid] || 0]; });
       }
-    ];
+
+      var sgDinnerMeatId = (templates.dinner.primaryProteinId && hasOwn(db, templates.dinner.primaryProteinId))
+        ? templates.dinner.primaryProteinId
+        : dinnerSwap;
+      var sgDinnerMeatGrams = scaleCustomMeatGrams(dinnerSwap, dSlot[dinnerSwap] || 0, sgDinnerMeatId);
+
+      slotSpecs = [
+        {
+          template: templates.breakfast,
+          title: templates.breakfast.title,
+          activeSwap: null,
+          pairs: applySlotOverrides(templates.breakfast, [
+            ['whole_egg', bSlot.whole_egg || 0],
+            ['egg_whites', bSlot.egg_whites || 0],
+            ['potatoes_raw', bSlot.potatoes_raw || 0],
+            ['green_onion', bSlot.green_onion || 0],
+            ['pico', bSlot.pico || 0],
+            ['berries', bSlot.berries || 0],
+            ['banana', bSlot.banana || 0],
+            ['skyr_0', bSlot.skyr_0 || 0],
+            ['whey_isolate', bSlot.whey_isolate || 0]
+          ])
+        },
+        {
+          template: templates.lunch,
+          title: lunchTitle,
+          activeSwap: templates.lunch.primaryProteinId ? null : lunchSwap,
+          pairs: applySlotOverrides(templates.lunch, sgLunchMeatPairs.concat([
+            ['potatoes_raw', lSlot.potatoes_raw || 0],
+            ['rice_dry', lSlot.rice_dry || 0],
+            ['cabbage', lSlot.cabbage || 0],
+            ['cucumber', lSlot.cucumber || 0],
+            ['carrots', lSlot.carrots || 0],
+            ['edamame', lSlot.edamame || 0],
+            ['corn', lSlot.corn || 0],
+            ['pico', lSlot.pico || 0],
+            ['tzatziki_0', lSlot.tzatziki_0 || 0],
+            ['skyr_0', lSlot.skyr_0 || 0],
+            ['egg_whites', lSlot.egg_whites || 0],
+            ['whey_isolate', lSlot.whey_isolate || 0],
+            ['aromatics_zero', lSlot.aromatics_zero || 0]
+          ]))
+        },
+        {
+          template: templates.dinner,
+          title: dinnerTitle,
+          activeSwap: templates.dinner.primaryProteinId ? null : dinnerSwap,
+          pairs: applySlotOverrides(templates.dinner, [
+            [sgDinnerMeatId, sgDinnerMeatGrams],
+            ['white_beans_cnd', dSlot.white_beans_cnd || 0],
+            ['diced_tomatoes', dSlot.diced_tomatoes || 0],
+            ['rice_dry', dSlot.rice_dry || 0],
+            ['skyr_0', dSlot.skyr_0 || 0],
+            ['egg_whites', dSlot.egg_whites || 0],
+            ['whey_isolate', dSlot.whey_isolate || 0],
+            ['aromatics_zero', dSlot.aromatics_zero || 0]
+          ])
+        },
+        {
+          template: templates.snack,
+          title: templates.snack.title,
+          activeSwap: null,
+          pairs: applySlotOverrides(templates.snack, [
+            ['skyr_0', sSlot.skyr_0 || 0],
+            ['egg_whites', sSlot.egg_whites || 0],
+            ['whey_isolate', sSlot.whey_isolate || 0],
+            ['berries', sSlot.berries || 0],
+            ['banana', sSlot.banana || 0]
+          ])
+        }
+      ];
+    } else {
+      // Exact integer splits preserving sum(meal.ingredients[id].grams) === g[id]
+      var picoB = Math.floor((g.pico || 0) / 2);
+      var picoL = (g.pico || 0) - picoB;
+
+      var berriesB = Math.floor((g.berries || 0) / 2);
+      var berriesS = (g.berries || 0) - berriesB;
+
+      var potTotal = g.potatoes_raw || 0;
+      var potL = lunchSwap === 'tuna_patties' ? Math.min(potTotal, round5(potTotal * 0.42)) : 0;
+      var potB = potTotal - potL;
+
+      var riceTotal = g.rice_dry || 0;
+      var riceL = Math.floor(riceTotal / 2);
+      var riceD = riceTotal - riceL;
+
+      var skyrTotal = g.skyr_0 || 0;
+      var skyrD = skyrTotal >= 60 ? 30 : 0;
+      var skyrS = skyrTotal - skyrD;
+
+      var aromTotal = g.aromatics_zero || 0;
+      var aromL = Math.floor(aromTotal / 2);
+      var aromD = aromTotal - aromL;
+
+      var resolvedLunchMeatPairs = (templates.lunch.primaryProteinId && hasOwn(db, templates.lunch.primaryProteinId))
+        ? [[templates.lunch.primaryProteinId, scaleCustomMeatGrams(lunchMeatIds[0], g[lunchMeatIds[0]] || 160, templates.lunch.primaryProteinId)]]
+        : lunchMeatIds.map(function (mid) { return [mid, g[mid] || 0]; });
+
+      var resolvedDinnerMeatId = (templates.dinner.primaryProteinId && hasOwn(db, templates.dinner.primaryProteinId))
+        ? templates.dinner.primaryProteinId
+        : dinnerSwap;
+      var resolvedDinnerMeatGrams = scaleCustomMeatGrams(dinnerSwap, g[dinnerSwap] || 0, resolvedDinnerMeatId);
+
+      slotSpecs = [
+        {
+          template: templates.breakfast,
+          title: templates.breakfast.title,
+          activeSwap: null,
+          pairs: applySlotOverrides(templates.breakfast, [
+            ['whole_egg', g.whole_egg || 0],
+            ['egg_whites', g.egg_whites || 0],
+            ['potatoes_raw', potB],
+            ['green_onion', g.green_onion || 0],
+            ['pico', picoB],
+            ['berries', berriesB]
+          ])
+        },
+        {
+          template: templates.lunch,
+          title: lunchTitle,
+          activeSwap: templates.lunch.primaryProteinId ? null : lunchSwap,
+          pairs: applySlotOverrides(templates.lunch, resolvedLunchMeatPairs.concat([
+            ['potatoes_raw', potL],
+            ['rice_dry', riceL],
+            ['cabbage', g.cabbage || 0],
+            ['cucumber', g.cucumber || 0],
+            ['carrots', g.carrots || 0],
+            ['edamame', g.edamame || 0],
+            ['corn', g.corn || 0],
+            ['pico', picoL],
+            ['tzatziki_0', g.tzatziki_0 || 0],
+            ['aromatics_zero', aromL]
+          ]))
+        },
+        {
+          template: templates.dinner,
+          title: dinnerTitle,
+          activeSwap: templates.dinner.primaryProteinId ? null : dinnerSwap,
+          pairs: applySlotOverrides(templates.dinner, [
+            [resolvedDinnerMeatId, resolvedDinnerMeatGrams],
+            ['white_beans_cnd', g.white_beans_cnd || 0],
+            ['diced_tomatoes', g.diced_tomatoes || 0],
+            ['rice_dry', riceD],
+            ['skyr_0', skyrD],
+            ['aromatics_zero', aromD]
+          ])
+        },
+        {
+          template: templates.snack,
+          title: templates.snack.title,
+          activeSwap: null,
+          pairs: applySlotOverrides(templates.snack, [
+            ['skyr_0', skyrS],
+            ['whey_isolate', g.whey_isolate || 0],
+            ['berries', berriesS],
+            ['banana', g.banana || 0]
+          ])
+        }
+      ];
+    }
 
     var meals = [];
     var dailyTotals = { calories: 0, protein: 0, fat: 0, carbs: 0 };
@@ -1124,6 +1233,542 @@
     };
   }
 
+  function solveWithSlotSplits(db, targets, templates, lunchSwapInfo, dinnerSwapInfo, slotSplits, trimSpecs) {
+    var lunchSwap = lunchSwapInfo.id;
+    var dinnerSwap = dinnerSwapInfo.id;
+    var slotGrams = { breakfast: {}, lunch: {}, dinner: {}, snack: {} };
+    var slotTargetP = {};
+    var slotTargetC = {};
+    var si;
+    for (si = 0; si < SLOT_IDS.length; si++) {
+      var sid = SLOT_IDS[si];
+      slotTargetP[sid] = targets.protein * slotSplits[sid];
+      slotTargetC[sid] = targets.carbs * slotSplits[sid];
+    }
+
+    function syncDailyG() {
+      var out = {};
+      for (var i = 0; i < SLOT_IDS.length; i++) {
+        var sg = slotGrams[SLOT_IDS[i]];
+        var keys = Object.keys(sg);
+        for (var j = 0; j < keys.length; j++) {
+          var id = keys[j];
+          var val = sg[id] || 0;
+          if (val > 0) out[id] = (hasOwn(out, id) ? out[id] : 0) + val;
+        }
+      }
+      return out;
+    }
+
+    var wB = slotSplits.breakfast;
+    var wL = slotSplits.lunch;
+    var wD = slotSplits.dinner;
+    var wS = slotSplits.snack;
+
+    // Step 1: Per-Slot Savory Produce & Beans
+    var cScale = targets.carbs < 65 ? Math.max(0.25, targets.carbs / 65) : 1;
+
+    if (wB > 0) {
+      var goG = Math.max(0, round5(30 * Math.min(1, wB / 0.25) * cScale));
+      if (wB < 0.15 && targets.carbs > 0 && goG > 0 && db.green_onion.per100g.carbs > 0) {
+        goG = Math.min(goG, Math.max(0, floor5((0.35 * slotTargetC.breakfast) / (db.green_onion.per100g.carbs / 100))));
+      }
+      slotGrams.breakfast.green_onion = goG;
+    }
+
+    if (wL > 0) {
+      var lScale = Math.min(1, wL / 0.25) * cScale;
+      slotGrams.lunch.cabbage = Math.max(0, round5(100 * lScale));
+      slotGrams.lunch.cucumber = Math.max(0, round5(100 * lScale));
+      slotGrams.lunch.carrots = Math.max(0, round5(60 * lScale));
+      slotGrams.lunch.aromatics_zero = wL >= 0.05 ? 10 : 0;
+
+      if (wL < 0.15 && targets.carbs > 0) {
+        var lStep1 = sumMacros(slotGrams.lunch, db);
+        var rL = 1;
+        if (lStep1.carbs > 0.45 * slotTargetC.lunch) {
+          rL = Math.min(rL, (0.45 * slotTargetC.lunch) / Math.max(0.01, lStep1.carbs));
+        }
+        if (targets.protein > 0 && lStep1.protein > 0.45 * slotTargetP.lunch) {
+          rL = Math.min(rL, (0.45 * slotTargetP.lunch) / Math.max(0.01, lStep1.protein));
+        }
+        if (rL < 1) {
+          slotGrams.lunch.cabbage = Math.max(0, floor5(slotGrams.lunch.cabbage * rL));
+          slotGrams.lunch.cucumber = Math.max(0, floor5(slotGrams.lunch.cucumber * rL));
+          slotGrams.lunch.carrots = Math.max(0, floor5(slotGrams.lunch.carrots * rL));
+        }
+      }
+    }
+
+    if (wD > 0) {
+      var dScale = Math.min(1, wD / 0.25) * cScale;
+      slotGrams.dinner.diced_tomatoes = Math.max(0, round5(200 * dScale));
+      slotGrams.dinner.white_beans_cnd = Math.max(0, round5((targets.carbs < 90 ? 60 : 120) * Math.min(1, wD / 0.30) * cScale));
+      slotGrams.dinner.aromatics_zero = wD >= 0.05 ? 10 : 0;
+
+      if (wD < 0.15 && targets.carbs > 0) {
+        var dStep1 = sumMacros(slotGrams.dinner, db);
+        var rD = 1;
+        if (dStep1.carbs > 0.45 * slotTargetC.dinner) {
+          rD = Math.min(rD, (0.45 * slotTargetC.dinner) / Math.max(0.01, dStep1.carbs));
+        }
+        if (targets.protein > 0 && dStep1.protein > 0.45 * slotTargetP.dinner) {
+          rD = Math.min(rD, (0.45 * slotTargetP.dinner) / Math.max(0.01, dStep1.protein));
+        }
+        if (rD < 1) {
+          slotGrams.dinner.diced_tomatoes = Math.max(0, floor5(slotGrams.dinner.diced_tomatoes * rD));
+          slotGrams.dinner.white_beans_cnd = Math.max(0, floor5(slotGrams.dinner.white_beans_cnd * rD));
+        }
+      }
+    }
+
+    // Step 2: Fat-Bearing Breakfast & Bowl Accents
+    var traceReserve = Math.min(4.0, Math.max(1.5, targets.fat * 0.15));
+    var fatBudget = Math.max(0, targets.fat - traceReserve);
+
+    if (wB > 0 && targets.protein > 0) {
+      var baseEgg = 0;
+      if (fatBudget >= 60 && targets.protein >= 130) {
+        baseEgg = wB > 0.45 ? 250 : 200;
+      } else if (fatBudget >= 42 && targets.protein >= 110) {
+        baseEgg = wB > 0.45 ? 150 : 100;
+      } else if (fatBudget >= 25 && targets.protein >= 90) {
+        baseEgg = 50;
+      }
+      if (wB < 0.25) {
+        baseEgg = floor50(baseEgg * (wB / 0.25));
+      }
+      var eggPPerG = db.whole_egg.per100g.protein / 100;
+      var eggFPerG = db.whole_egg.per100g.fat / 100;
+      if (eggPPerG > 0) {
+        baseEgg = Math.min(baseEgg, floor50((slotTargetP.breakfast * 0.65) / eggPPerG));
+      }
+      if (eggFPerG > 0) {
+        var bFatShare = fatBudget * (wB / Math.max(0.01, wB + wL + wD));
+        baseEgg = Math.min(baseEgg, floor50(bFatShare / eggFPerG));
+      }
+      slotGrams.breakfast.whole_egg = Math.max(0, baseEgg);
+    }
+
+    if (wL > 0) {
+      var baseEd = 0;
+      var baseCn = 0;
+      if (fatBudget >= 60 && targets.protein >= 130) {
+        baseEd = 80;
+        baseCn = 60;
+      } else if (fatBudget >= 42 && targets.protein >= 110) {
+        baseEd = 60;
+        baseCn = 40;
+      } else if (fatBudget >= 25 && targets.protein >= 90) {
+        baseEd = 30;
+        baseCn = 30;
+      }
+      var accentScale = Math.min(1, wL / 0.25);
+      var edG = Math.max(0, round5(baseEd * accentScale));
+      var cnG = Math.max(0, round5(baseCn * accentScale));
+      if (targets.protein > 0 && db.edamame.per100g.protein > 0) {
+        edG = Math.min(edG, Math.max(0, floor5((slotTargetP.lunch * 0.25) / (db.edamame.per100g.protein / 100))));
+      } else if (targets.protein <= 0) {
+        edG = 0;
+      }
+      if (targets.carbs > 0 && db.corn.per100g.carbs > 0) {
+        cnG = Math.min(cnG, Math.max(0, floor5((slotTargetC.lunch * 0.25) / (db.corn.per100g.carbs / 100))));
+      } else if (targets.carbs <= 0) {
+        cnG = 0;
+      }
+      slotGrams.lunch.edamame = Math.max(0, edG);
+      slotGrams.lunch.corn = Math.max(0, cnG);
+    }
+
+    // Step 3: Per-Slot Lunch & Dinner Swap Proteins
+    var curFat = sumMacros(syncDailyG(), db).fat;
+    var remFat = Math.max(0, fatBudget - curFat);
+    var lStep1Macros = sumMacros(slotGrams.lunch, db);
+    var dStep1Macros = sumMacros(slotGrams.dinner, db);
+    var riceCarbReserveL = targets.carbs > 0 ? Math.max(0, slotTargetC.lunch - lStep1Macros.carbs) * 0.088 : 0;
+    var riceCarbReserveD = targets.carbs > 0 ? Math.max(0, slotTargetC.dinner - dStep1Macros.carbs) * 0.088 : 0;
+    var wantLunchP = wL > 0 ? Math.max(0, slotTargetP.lunch - lStep1Macros.protein - riceCarbReserveL) : 0;
+    var wantDinnerP = wD > 0 ? Math.max(0, slotTargetP.dinner - dStep1Macros.protein - riceCarbReserveD) : 0;
+
+    var dProtPerG = db[dinnerSwap].per100g.protein / 100;
+    var dFatPerG = db[dinnerSwap].per100g.fat / 100;
+    var lFloor = (wL >= 0.15 && wantLunchP >= 12) ? 50 : 0;
+    var dFloor = (wD >= 0.15 && wantDinnerP >= 12) ? 50 : 0;
+
+    var lunchMeatPlan = [];
+    if (wL > 0 && wantLunchP > 0) {
+      if (lunchSwap === 'ground_chicken') {
+        var gcP = db.ground_chicken.per100g.protein / 100;
+        var gcG = gcP > 0 ? Math.min(420, Math.max(lFloor, round5(wantLunchP / gcP))) : 0;
+        lunchMeatPlan.push({ id: 'ground_chicken', grams: gcG, minG: lFloor });
+      } else if (lunchSwap === 'tuna_patties') {
+        var tnP = db.tuna_water.per100g.protein / 100;
+        var tnG = tnP > 0 ? Math.min(420, Math.max(lFloor, round5(wantLunchP / tnP))) : 0;
+        lunchMeatPlan.push({ id: 'tuna_water', grams: tnG, minG: lFloor });
+      } else {
+        var sdP = db.sardines_water.per100g.protein / 100;
+        var tnMixP = db.tuna_water.per100g.protein / 100;
+        var sdG = 0;
+        if (wL >= 0.15 && remFat >= 6 && wantLunchP >= 8 && sdP > 0) {
+          sdG = Math.min(120, Math.max(0, round5((wantLunchP * 0.35) / sdP)));
+        }
+        var remMixP = Math.max(0, wantLunchP - sdG * sdP);
+        var tnMixG = tnMixP > 0 ? Math.min(420, Math.max(lFloor, round5(remMixP / tnMixP))) : 0;
+        if (sdG > 0) lunchMeatPlan.push({ id: 'sardines_water', grams: sdG, minG: 0 });
+        lunchMeatPlan.push({ id: 'tuna_water', grams: tnMixG, minG: lFloor });
+      }
+    }
+
+    var dinnerMeatG = (wD > 0 && wantDinnerP > 0 && dProtPerG > 0)
+      ? Math.min(420, Math.max(dFloor, round5(wantDinnerP / dProtPerG)))
+      : 0;
+
+    var lowFatMeatF = 0;
+    var highFatItems = [];
+    var highFatF = 0;
+    var lmIdx;
+    for (lmIdx = 0; lmIdx < lunchMeatPlan.length; lmIdx++) {
+      var lItem = lunchMeatPlan[lmIdx];
+      var lFatRate = db[lItem.id].per100g.fat / 100;
+      if (db[lItem.id].per100g.fat >= 2.0) {
+        highFatItems.push({ slot: 'lunch', item: lItem, fatRate: lFatRate });
+        highFatF += lItem.grams * lFatRate;
+      } else {
+        lowFatMeatF += lItem.grams * lFatRate;
+      }
+    }
+    if (dinnerMeatG > 0) {
+      if (db[dinnerSwap].per100g.fat >= 2.0) {
+        var dItemObj = { id: dinnerSwap, grams: dinnerMeatG, minG: dFloor };
+        highFatItems.push({ slot: 'dinner', item: dItemObj, fatRate: dFatPerG });
+        highFatF += dinnerMeatG * dFatPerG;
+      } else {
+        lowFatMeatF += dinnerMeatG * dFatPerG;
+      }
+    }
+
+    if (lowFatMeatF + highFatF > remFat) {
+      var availHighF = Math.max(0, remFat - lowFatMeatF);
+      if (highFatF > 0) {
+        var hRatio = availHighF / highFatF;
+        for (var hi = 0; hi < highFatItems.length; hi++) {
+          var hf = highFatItems[hi];
+          hf.item.grams = Math.max(hf.item.minG, floor5(hf.item.grams * hRatio));
+        }
+      }
+      if (lowFatMeatF > remFat && lowFatMeatF > 0) {
+        var lRatio = remFat / lowFatMeatF;
+        for (lmIdx = 0; lmIdx < lunchMeatPlan.length; lmIdx++) {
+          if (db[lunchMeatPlan[lmIdx].id].per100g.fat < 2.0) {
+            lunchMeatPlan[lmIdx].grams = Math.max(lunchMeatPlan[lmIdx].minG, floor5(lunchMeatPlan[lmIdx].grams * lRatio));
+          }
+        }
+      }
+    }
+
+    for (lmIdx = 0; lmIdx < lunchMeatPlan.length; lmIdx++) {
+      slotGrams.lunch[lunchMeatPlan[lmIdx].id] = Math.max(0, lunchMeatPlan[lmIdx].grams);
+    }
+    for (var hi2 = 0; hi2 < highFatItems.length; hi2++) {
+      if (highFatItems[hi2].slot === 'dinner') {
+        dinnerMeatG = highFatItems[hi2].item.grams;
+      }
+    }
+    if (wD > 0) {
+      slotGrams.dinner[dinnerSwap] = Math.max(0, dinnerMeatG);
+    }
+
+    // Step 4: Per-Slot Carbohydrate Allocation
+    var estRemP = {};
+    var estLeanC = {};
+    for (si = 0; si < SLOT_IDS.length; si++) {
+      var sKey4 = SLOT_IDS[si];
+      estRemP[sKey4] = slotSplits[sKey4] > 0 ? Math.max(0, slotTargetP[sKey4] - sumMacros(slotGrams[sKey4], db).protein) : 0;
+      if (targets.carbs <= 0 || slotSplits[sKey4] <= 0) {
+        estLeanC[sKey4] = 0;
+      } else if (sKey4 === 'breakfast') {
+        estLeanC[sKey4] = Math.min(slotTargetC[sKey4] * 0.25, estRemP[sKey4] * 0.06);
+      } else if (sKey4 === 'lunch') {
+        estLeanC[sKey4] = Math.min(slotTargetC[sKey4] * 0.25, estRemP[sKey4] * 0.10);
+      } else if (sKey4 === 'dinner') {
+        estLeanC[sKey4] = Math.min(slotTargetC[sKey4] * 0.20, estRemP[sKey4] * 0.06);
+      } else {
+        estLeanC[sKey4] = Math.min(slotTargetC[sKey4] * 0.50, estRemP[sKey4] * 0.24);
+      }
+    }
+
+    var berriesCarbPerG = db.berries.per100g.carbs / 100;
+    var bananaCarbPerG = db.banana.per100g.carbs / 100;
+    var potCarbPerG = db.potatoes_raw.per100g.carbs / 100;
+    var riceCarbPerG = db.rice_dry.per100g.carbs / 100;
+
+    if (wB > 0) {
+      var remCB = Math.max(0, slotTargetC.breakfast - sumMacros(slotGrams.breakfast, db).carbs - estLeanC.breakfast);
+      if (berriesCarbPerG > 0 && remCB >= 12) {
+        var bBerries = round5((remCB * 0.16) / berriesCarbPerG);
+        if (wB >= 0.15 && remCB >= 15 && bBerries < 50) bBerries = 50;
+        bBerries = Math.min(150, bBerries, Math.max(0, floor5(remCB / berriesCarbPerG)));
+        slotGrams.breakfast.berries = Math.max(0, bBerries);
+        remCB = Math.max(0, remCB - bBerries * berriesCarbPerG);
+      }
+      if (remCB > 110 && bananaCarbPerG > 0) {
+        var bBanana = Math.min(250, Math.max(0, round5(((remCB - 100) * 0.35) / bananaCarbPerG)));
+        slotGrams.breakfast.banana = bBanana;
+        remCB = Math.max(0, remCB - bBanana * bananaCarbPerG);
+      }
+      if (potCarbPerG > 0 && remCB > 0) {
+        slotGrams.breakfast.potatoes_raw = Math.max(0, round10(remCB / potCarbPerG));
+      }
+    }
+
+    if (wL > 0) {
+      var remCL = Math.max(0, slotTargetC.lunch - sumMacros(slotGrams.lunch, db).carbs - estLeanC.lunch);
+      if (lunchSwap === 'tuna_patties' && potCarbPerG > 0 && remCL >= 5) {
+        var lPot = Math.max(0, round10((remCL * 0.42) / potCarbPerG));
+        slotGrams.lunch.potatoes_raw = lPot;
+        remCL = Math.max(0, remCL - lPot * potCarbPerG);
+      }
+      if (riceCarbPerG > 0 && remCL > 0) {
+        slotGrams.lunch.rice_dry = Math.max(0, round5(remCL / riceCarbPerG));
+      }
+    }
+
+    if (wD > 0) {
+      var remCD = Math.max(0, slotTargetC.dinner - sumMacros(slotGrams.dinner, db).carbs - estLeanC.dinner);
+      if (riceCarbPerG > 0 && remCD > 0) {
+        slotGrams.dinner.rice_dry = Math.max(0, round5(remCD / riceCarbPerG));
+      }
+    }
+
+    if (wS > 0) {
+      var remCS = Math.max(0, slotTargetC.snack - sumMacros(slotGrams.snack, db).carbs - estLeanC.snack);
+      if (berriesCarbPerG > 0 && remCS >= 10) {
+        var sBerries = round5((remCS * 0.30) / berriesCarbPerG);
+        if (wS >= 0.10 && remCS >= 15 && sBerries < 50) sBerries = 50;
+        sBerries = Math.min(200, sBerries, Math.max(0, floor5(remCS / berriesCarbPerG)));
+        slotGrams.snack.berries = Math.max(0, sBerries);
+        remCS = Math.max(0, remCS - sBerries * berriesCarbPerG);
+      }
+      if (bananaCarbPerG > 0 && remCS > 0) {
+        slotGrams.snack.banana = Math.max(0, round5(remCS / bananaCarbPerG));
+      }
+    }
+
+    // Step 5: Per-Slot Lean Protein Backfill & Carb Fine-Tune
+    var ewP = db.egg_whites.per100g.protein / 100;
+    var skyrP = db.skyr_0.per100g.protein / 100;
+    var skyrF = db.skyr_0.per100g.fat / 100;
+    var tzP = db.tzatziki_0.per100g.protein / 100;
+    var tzF = db.tzatziki_0.per100g.fat / 100;
+    var tzC = db.tzatziki_0.per100g.carbs / 100;
+    var wheyP = db.whey_isolate.per100g.protein / 100;
+    var wheyF = db.whey_isolate.per100g.fat / 100;
+
+    if (wB > 0) {
+      var remPB = Math.max(0, slotTargetP.breakfast - sumMacros(slotGrams.breakfast, db).protein);
+      var ewCapB = wB > 0.45 ? 650 : 450;
+      if (ewP > 0 && remPB > 0) {
+        var ewB = Math.min(ewCapB, Math.max(0, round10(remPB / ewP)));
+        slotGrams.breakfast.egg_whites = ewB;
+        remPB = Math.max(0, slotTargetP.breakfast - sumMacros(slotGrams.breakfast, db).protein);
+      }
+      var fhB = Math.max(0, targets.fat - sumMacros(syncDailyG(), db).fat);
+      if (remPB > 2 && wB > 0.45 && skyrP > 0 && fhB >= 0.4) {
+        var bSkyrMaxFat = skyrF > 0 ? floor25(fhB / skyrF) : 350;
+        var bSkyr = Math.min(350, bSkyrMaxFat, Math.max(0, round25((remPB * 0.45) / skyrP)));
+        if (bSkyr > 0) {
+          slotGrams.breakfast.skyr_0 = bSkyr;
+          remPB = Math.max(0, slotTargetP.breakfast - sumMacros(slotGrams.breakfast, db).protein);
+          fhB = Math.max(0, targets.fat - sumMacros(syncDailyG(), db).fat);
+        }
+      }
+      if (remPB > 1 && wheyP > 0) {
+        var bWheyMaxFat = wheyF > 0 ? Math.floor(fhB / wheyF) : 260;
+        var bWhey = Math.min(240, bWheyMaxFat, Math.max(0, Math.round(remPB / wheyP)));
+        if (bWhey > 0) {
+          slotGrams.breakfast.whey_isolate = bWhey;
+          remPB = Math.max(0, slotTargetP.breakfast - sumMacros(slotGrams.breakfast, db).protein);
+        }
+      }
+      if (remPB > 2 && ewP > 0) {
+        slotGrams.breakfast.egg_whites = Math.min(900, (slotGrams.breakfast.egg_whites || 0) + Math.max(0, round10(remPB / ewP)));
+      }
+    }
+
+    if (wL > 0) {
+      var remPL = Math.max(0, slotTargetP.lunch - sumMacros(slotGrams.lunch, db).protein);
+      var fhL = Math.max(0, targets.fat - sumMacros(syncDailyG(), db).fat);
+      if (remPL >= 5 && wL >= 0.10 && tzP > 0 && fhL >= 0.1) {
+        var lTzMaxFat = tzF > 0 ? floor5(fhL / tzF) : 120;
+        var lTz = Math.min(120, lTzMaxFat, Math.max(0, round5((remPL * 0.45) / tzP)));
+        if (targets.carbs > 0 && tzC > 0) {
+          var lCarbRoom = Math.max(0, slotTargetC.lunch - sumMacros(slotGrams.lunch, db).carbs + 4);
+          lTz = Math.min(lTz, Math.max(0, floor5(lCarbRoom / tzC)));
+        }
+        if (lTz > 0) {
+          slotGrams.lunch.tzatziki_0 = lTz;
+          remPL = Math.max(0, slotTargetP.lunch - sumMacros(slotGrams.lunch, db).protein);
+          fhL = Math.max(0, targets.fat - sumMacros(syncDailyG(), db).fat);
+        }
+      }
+      if (remPL >= 20 && wL > 0.40 && skyrP > 0 && fhL >= 0.4) {
+        var lSkyrMaxFat = skyrF > 0 ? floor25(fhL / skyrF) : 250;
+        var lSkyr = Math.min(250, lSkyrMaxFat, Math.max(0, round25((remPL * 0.40) / skyrP)));
+        if (lSkyr > 0) {
+          slotGrams.lunch.skyr_0 = lSkyr;
+          remPL = Math.max(0, slotTargetP.lunch - sumMacros(slotGrams.lunch, db).protein);
+          fhL = Math.max(0, targets.fat - sumMacros(syncDailyG(), db).fat);
+        }
+      }
+      if (remPL > 1.5 && wheyP > 0) {
+        var lWheyMaxFat = targets.fat >= 15 && wheyF > 0 ? Math.floor(fhL / wheyF) : 240;
+        var lWhey = Math.min(240, lWheyMaxFat, Math.max(0, Math.round(remPL / wheyP)));
+        if (lWhey > 0) {
+          slotGrams.lunch.whey_isolate = lWhey;
+          remPL = Math.max(0, slotTargetP.lunch - sumMacros(slotGrams.lunch, db).protein);
+        }
+      }
+    }
+
+    if (wD > 0) {
+      var remPD = Math.max(0, slotTargetP.dinner - sumMacros(slotGrams.dinner, db).protein);
+      var fhD = Math.max(0, targets.fat - sumMacros(syncDailyG(), db).fat);
+      if (wD >= 0.15 && remPD >= 3.5 && skyrP > 0 && fhD >= 0.1) {
+        var dSkyr = (remPD >= 20 && wD > 0.40)
+          ? Math.min(250, skyrF > 0 ? floor25(fhD / skyrF) : 250, Math.max(30, round25((remPD * 0.35) / skyrP)))
+          : 30;
+        if (dSkyr > 0) {
+          slotGrams.dinner.skyr_0 = dSkyr;
+          remPD = Math.max(0, slotTargetP.dinner - sumMacros(slotGrams.dinner, db).protein);
+          fhD = Math.max(0, targets.fat - sumMacros(syncDailyG(), db).fat);
+        }
+      }
+      if (remPD > 1.5 && wheyP > 0) {
+        var dWheyMaxFat = targets.fat >= 15 && wheyF > 0 ? Math.floor(fhD / wheyF) : 240;
+        var dWhey = Math.min(240, dWheyMaxFat, Math.max(0, Math.round(remPD / wheyP)));
+        if (dWhey > 0) {
+          slotGrams.dinner.whey_isolate = dWhey;
+          remPD = Math.max(0, slotTargetP.dinner - sumMacros(slotGrams.dinner, db).protein);
+        }
+      }
+    }
+
+    if (wS > 0) {
+      var remPS = Math.max(0, slotTargetP.snack - sumMacros(slotGrams.snack, db).protein);
+      var fhS = Math.max(0, targets.fat - sumMacros(syncDailyG(), db).fat);
+      var skyrCapS = wS > 0.50 ? 750 : 350;
+      if (remPS > 0 && skyrP > 0 && fhS >= 0.1) {
+        var skyrShare = remPS >= 20 ? 0.62 : 0.70;
+        var sSkyr = (remPS >= 25 && wS >= 0.15)
+          ? Math.max(100, round25((remPS * skyrShare) / skyrP))
+          : round5((remPS * skyrShare) / skyrP);
+        var sSkyrMaxP = floor5(remPS / skyrP);
+        var sSkyrMaxF = skyrF > 0 ? floor5(fhS / skyrF) : skyrCapS;
+        sSkyr = Math.max(0, Math.min(skyrCapS, sSkyrMaxP, sSkyrMaxF, sSkyr));
+        if (sSkyr > 0) {
+          slotGrams.snack.skyr_0 = sSkyr;
+          remPS = Math.max(0, slotTargetP.snack - sumMacros(slotGrams.snack, db).protein);
+          fhS = Math.max(0, targets.fat - sumMacros(syncDailyG(), db).fat);
+        }
+      }
+      if (remPS > 0.5 && wheyP > 0) {
+        var sWheyMaxF = targets.fat >= 15 && wheyF > 0 ? Math.floor(fhS / wheyF) : 260;
+        var sWhey = Math.min(260, sWheyMaxF, Math.max(0, Math.round(remPS / wheyP)));
+        if (sWhey > 0) {
+          slotGrams.snack.whey_isolate = sWhey;
+          remPS = Math.max(0, slotTargetP.snack - sumMacros(slotGrams.snack, db).protein);
+        }
+      }
+    }
+
+    // Per-slot carb fine-tune
+    for (si = 0; si < SLOT_IDS.length; si++) {
+      var cSid = SLOT_IDS[si];
+      if (!(slotSplits[cSid] > 0)) continue;
+      var cDiff = slotTargetC[cSid] - sumMacros(slotGrams[cSid], db).carbs;
+      if (Math.abs(cDiff) < 1.5) continue;
+      if (cSid === 'breakfast' && potCarbPerG > 0) {
+        if (cDiff > 0 || (slotGrams.breakfast.potatoes_raw || 0) > 0) {
+          slotGrams.breakfast.potatoes_raw = Math.max(0, (slotGrams.breakfast.potatoes_raw || 0) + round5(cDiff / potCarbPerG));
+        }
+      } else if (cSid === 'lunch') {
+        if ((slotGrams.lunch.rice_dry || 0) > 0 || (cDiff > 0 && lunchSwap !== 'tuna_patties')) {
+          if (riceCarbPerG > 0) {
+            slotGrams.lunch.rice_dry = Math.max(0, (slotGrams.lunch.rice_dry || 0) + round5(cDiff / riceCarbPerG));
+          }
+        } else if (potCarbPerG > 0 && ((slotGrams.lunch.potatoes_raw || 0) > 0 || cDiff > 0)) {
+          slotGrams.lunch.potatoes_raw = Math.max(0, (slotGrams.lunch.potatoes_raw || 0) + round5(cDiff / potCarbPerG));
+        }
+      } else if (cSid === 'dinner' && riceCarbPerG > 0) {
+        if (cDiff > 0 || (slotGrams.dinner.rice_dry || 0) > 0) {
+          slotGrams.dinner.rice_dry = Math.max(0, (slotGrams.dinner.rice_dry || 0) + round5(cDiff / riceCarbPerG));
+        }
+      } else if (cSid === 'snack') {
+        if ((slotGrams.snack.banana || 0) > 0 || (cDiff > 0 && bananaCarbPerG > 0)) {
+          slotGrams.snack.banana = Math.max(0, (slotGrams.snack.banana || 0) + round5(cDiff / bananaCarbPerG));
+        } else if (berriesCarbPerG > 0 && (slotGrams.snack.berries || 0) > 0) {
+          slotGrams.snack.berries = Math.max(0, (slotGrams.snack.berries || 0) + round5(cDiff / berriesCarbPerG));
+        }
+      }
+    }
+
+    // Final per-slot protein polish
+    for (si = 0; si < SLOT_IDS.length; si++) {
+      var pSid = SLOT_IDS[si];
+      if (!(slotSplits[pSid] > 0)) continue;
+      var pDiff = slotTargetP[pSid] - sumMacros(slotGrams[pSid], db).protein;
+      if (Math.abs(pDiff) < 1.0) continue;
+      var fhP = Math.max(0, targets.fat - sumMacros(syncDailyG(), db).fat);
+      if (pSid === 'breakfast' && (slotGrams.breakfast.whey_isolate || 0) === 0 && ewP > 0 && (pDiff < 0 || fhP < 0.2)) {
+        slotGrams.breakfast.egg_whites = Math.max(0, Math.min(900, (slotGrams.breakfast.egg_whites || 0) + round5(pDiff / ewP)));
+      } else if (wheyP > 0) {
+        var deltaW = Math.round(pDiff / wheyP);
+        if (deltaW > 0 && targets.fat >= 15 && wheyF > 0) {
+          deltaW = Math.min(deltaW, Math.floor(fhP / wheyF));
+        }
+        slotGrams[pSid].whey_isolate = Math.max(0, Math.min(260, (slotGrams[pSid].whey_isolate || 0) + deltaW));
+      }
+    }
+
+    // Step 6: Per-Slot-Aware Fat-Ceiling Guard Loop
+    var assembled = buildMealsAndTotals(syncDailyG(), db, templates, lunchSwapInfo, dinnerSwapInfo, targets, slotGrams);
+    var iter = 0;
+    while (assembled.totals.fat > targets.fat && iter < 400) {
+      iter++;
+      var trimmed = false;
+      for (var t = 0; t < trimSpecs.length; t++) {
+        var spec = trimSpecs[t];
+        for (var si2 = 0; si2 < SLOT_IDS.length; si2++) {
+          var sId = SLOT_IDS[si2];
+          var cur = slotGrams[sId][spec.id] || 0;
+          var minG = slotSplits[sId] >= 0.15 ? spec.minG : 0;
+          if (cur > minG) {
+            var next = Math.max(minG, cur - spec.step);
+            var deltaG = cur - next;
+            if (deltaG <= 0) continue;
+            slotGrams[sId][spec.id] = next;
+
+            var lostP = (deltaG * db[spec.id].per100g.protein) / 100;
+            if (lostP > 0) {
+              if ((targets.fat < 25 || sId === 'breakfast') && ewP > 0) {
+                slotGrams[sId].egg_whites = Math.min(900, (slotGrams[sId].egg_whites || 0) + round5(lostP / ewP));
+              } else if (wheyP > 0) {
+                slotGrams[sId].whey_isolate = Math.min(260, (slotGrams[sId].whey_isolate || 0) + Math.round(lostP / wheyP));
+              }
+            }
+            trimmed = true;
+            break;
+          }
+        }
+        if (trimmed) break;
+      }
+      if (!trimmed) break;
+      assembled = buildMealsAndTotals(syncDailyG(), db, templates, lunchSwapInfo, dinnerSwapInfo, targets, slotGrams);
+    }
+
+    return assembled;
+  }
+
   function solveDailyPortions(data, options) {
     var safeData = data && typeof data === 'object' ? data : {};
     var safeOpts = options && typeof options === 'object' ? options : {};
@@ -1131,6 +1776,7 @@
     var db = buildMergedDb(safeData);
     var targets = resolveTargets(safeData, safeOpts);
     var templates = resolveTemplates(safeData);
+    var slotSplits = resolveSlotSplits(safeOpts.slotSplits);
 
     var lunchSwapsData = safeData.proteinSwaps && safeData.proteinSwaps.lunch;
     var dinnerSwapsData = safeData.proteinSwaps && safeData.proteinSwaps.dinner;
@@ -1139,166 +1785,18 @@
     var lunchSwap = lunchSwapInfo.id;
     var dinnerSwap = dinnerSwapInfo.id;
 
-    // Step 1: Fixed Savory Produce & Beans
-    var g = {
-      green_onion: 30,
-      pico: 0,
-      diced_tomatoes: 200,
-      cabbage: 100,
-      cucumber: 100,
-      carrots: 60,
-      tzatziki_0: 0,
-      white_beans_cnd: targets.carbs < 90 ? 60 : 120,
-      aromatics_zero: 20,
-      whole_egg: 0,
-      egg_whites: 0,
-      edamame: 0,
-      corn: 0,
-      berries: 0,
-      banana: 0,
-      potatoes_raw: 0,
-      rice_dry: 0,
-      skyr_0: 0,
-      whey_isolate: 0,
-      ground_chicken: 0,
-      tuna_water: 0,
-      sardines_water: 0,
-      pork_loin_lean: 0,
-      pork_shoulder: 0,
-      chicken_breast: 0
-    };
-
-    if (targets.carbs < 65) {
-      var cScale = Math.max(0.25, targets.carbs / 65);
-      var scaleKeys = ['pico', 'diced_tomatoes', 'cabbage', 'cucumber', 'carrots', 'white_beans_cnd'];
-      for (var k = 0; k < scaleKeys.length; k++) {
-        var sk = scaleKeys[k];
-        g[sk] = Math.max(5, round5(g[sk] * cScale));
+    var requiredIds = [
+      'whole_egg', 'egg_whites', 'potatoes_raw', 'berries', 'banana',
+      'ground_chicken', 'tuna_water', 'sardines_water', 'rice_dry',
+      'skyr_0', 'whey_isolate', dinnerSwap
+    ];
+    for (var reqIdx = 0; reqIdx < requiredIds.length; reqIdx++) {
+      var reqId = requiredIds[reqIdx];
+      if (!hasOwn(db, reqId) || !db[reqId] || !db[reqId].per100g) {
+        throw new Error('MacroEngine baseline nutritionDb is not loaded; call setBaselineData(schema) or supply data.nutritionDb');
       }
     }
 
-    // Step 2: Fat-Bearing Breakfast & Bowl Accents
-    var traceReserve = Math.min(4.0, Math.max(1.5, targets.fat * 0.15));
-    var fatBudget = Math.max(0, targets.fat - traceReserve);
-
-    if (fatBudget >= 60 && targets.protein >= 130) {
-      g.whole_egg = 200;
-      g.edamame = 80;
-      g.corn = 60;
-    } else if (fatBudget >= 42 && targets.protein >= 110) {
-      g.whole_egg = 100;
-      g.edamame = 60;
-      g.corn = 40;
-    } else if (fatBudget >= 25 && targets.protein >= 90) {
-      g.whole_egg = 50;
-      g.edamame = 30;
-      g.corn = 30;
-    }
-
-    // Step 3: Lunch & Dinner Swap Proteins
-    var curFat = sumMacros(g, db).fat;
-    var remFat = Math.max(0, fatBudget - curFat);
-    var pFactor = Math.min(1.10, Math.max(0.45, targets.protein / 185));
-    var highCal = targets.calories >= 2300;
-    var dFatPerG = db[dinnerSwap].per100g.fat / 100;
-
-    if (lunchSwap === 'ground_chicken') {
-      var lFatPerG = db.ground_chicken.per100g.fat / 100;
-      var baseL = round5((highCal ? 210 : 175) * pFactor);
-      var baseD = round5((highCal ? 220 : 195) * pFactor);
-      var needF = baseL * lFatPerG + baseD * dFatPerG;
-      if (needF > remFat && needF > 0) {
-        var ratio = remFat / needF;
-        baseL = Math.max(50, floor5(baseL * ratio));
-        baseD = Math.max(50, floor5(baseD * ratio));
-      }
-      g.ground_chicken = Math.max(50, baseL);
-      g[dinnerSwap] = Math.max(50, baseD);
-    } else if (lunchSwap === 'tuna_patties') {
-      g.tuna_water = Math.max(50, round5((highCal ? 185 : 160) * pFactor));
-      var remFTuna = Math.max(0, remFat - (g.tuna_water * db.tuna_water.per100g.fat) / 100);
-      var defaultD = round5((highCal ? 225 : 200) * pFactor);
-      if (dFatPerG > 0 && defaultD * dFatPerG > remFTuna) {
-        defaultD = Math.max(50, floor5(remFTuna / dFatPerG));
-      }
-      g[dinnerSwap] = Math.max(50, defaultD);
-    } else {
-      // sardine_tuna
-      var sardBase = remFat >= 22 ? 100 : (remFat >= 14 ? 75 : (remFat >= 6 ? 40 : 0));
-      g.sardines_water = round5(sardBase * Math.min(1, pFactor + 0.1));
-      g.tuna_water = Math.max(50, round5(115 * Math.min(1.05, pFactor)));
-      var usedMixFat = ((g.sardines_water * db.sardines_water.per100g.fat) + (g.tuna_water * db.tuna_water.per100g.fat)) / 100;
-      var remFMix = Math.max(0, remFat - usedMixFat);
-      var defaultDMix = round5((highCal ? 210 : 185) * pFactor);
-      if (dFatPerG > 0 && defaultDMix * dFatPerG > remFMix) {
-        defaultDMix = Math.max(50, floor5(remFMix / dFatPerG));
-      }
-      g[dinnerSwap] = Math.max(50, defaultDMix);
-    }
-
-    // Step 4: Carbohydrate Allocation (Pre-Lean-Protein)
-    var leanProteinCarbReserve = targets.protein >= 110 ? 9 : 4;
-    var remC = Math.max(0, targets.carbs - sumMacros(g, db).carbs - leanProteinCarbReserve);
-
-    g.berries = remC >= 40 ? 100 : (remC >= 15 ? 50 : 0);
-    remC = Math.max(0, remC - (g.berries * db.berries.per100g.carbs) / 100);
-
-    g.banana = remC >= 80 ? 100 : 0;
-    if (g.banana > 0) {
-      remC = Math.max(0, remC - (g.banana * db.banana.per100g.carbs) / 100);
-    }
-
-    var potShare = lunchSwap === 'tuna_patties' ? 0.42 : 0.35;
-    var potCarbPerG = db.potatoes_raw.per100g.carbs / 100;
-    if (potCarbPerG > 0) {
-      g.potatoes_raw = Math.max(0, round10((remC * potShare) / potCarbPerG));
-      remC = Math.max(0, remC - g.potatoes_raw * potCarbPerG);
-    }
-
-    var riceCarbPerG = db.rice_dry.per100g.carbs / 100;
-    if (riceCarbPerG > 0) {
-      g.rice_dry = Math.max(0, round5(remC / riceCarbPerG));
-    }
-
-    // Step 5: Lean Protein Backfill & Carb Fine-Tune
-    var remP = Math.max(0, targets.protein - sumMacros(g, db).protein);
-
-    var ewP = db.egg_whites.per100g.protein / 100;
-    if (ewP > 0 && remP > 0) {
-      var ewMin = remP >= 40 ? 100 : 0;
-      var ewTarget = round10((remP * 0.32) / ewP);
-      var ewMax = floor10(remP / ewP);
-      g.egg_whites = Math.max(ewMin, Math.min(300, ewMax, ewTarget));
-      if (g.egg_whites > ewMax && ewMax >= 0) {
-        g.egg_whites = Math.max(0, ewMax);
-      }
-      remP = Math.max(0, targets.protein - sumMacros(g, db).protein);
-    }
-
-    var skyrP = db.skyr_0.per100g.protein / 100;
-    if (skyrP > 0 && remP > 0) {
-      var skyrMin = remP >= 25 ? 125 : 0;
-      var skyrTarget = round25((remP * 0.62) / skyrP);
-      var skyrMax = floor25(remP / skyrP);
-      g.skyr_0 = Math.max(skyrMin, Math.min(350, skyrMax, skyrTarget));
-      if (g.skyr_0 > skyrMax && skyrMax >= 0) {
-        g.skyr_0 = Math.max(0, skyrMax);
-      }
-      remP = Math.max(0, targets.protein - sumMacros(g, db).protein);
-    }
-
-    var wheyP = db.whey_isolate.per100g.protein / 100;
-    if (wheyP > 0 && remP > 0) {
-      g.whey_isolate = Math.max(0, Math.min(80, round5(remP / wheyP)));
-    }
-
-    // Fine-tune rice carbs
-    var carbDiff = targets.carbs - sumMacros(g, db).carbs;
-    if (Math.abs(carbDiff) >= 4 && riceCarbPerG > 0) {
-      g.rice_dry = Math.max(0, g.rice_dry + round5(carbDiff / riceCarbPerG));
-    }
-
-    // Step 6: Strict Fat-Ceiling Guard Loop (checks post-split built totals directly)
     var trimSpecs = [
       { id: 'pork_shoulder', minG: 50, step: 5 },
       { id: 'ground_chicken', minG: 50, step: 5 },
@@ -1310,36 +1808,201 @@
       { id: 'corn', minG: 0, step: 5 }
     ];
 
-    var assembled = buildMealsAndTotals(g, db, templates, lunchSwapInfo, dinnerSwapInfo, targets);
-    var iter = 0;
-    while (assembled.totals.fat > targets.fat && iter < 400) {
-      iter++;
-      var trimmed = false;
-      for (var t = 0; t < trimSpecs.length; t++) {
-        var spec = trimSpecs[t];
-        var cur = g[spec.id] || 0;
-        if (cur > spec.minG) {
-          var next = Math.max(spec.minG, cur - spec.step);
-          var deltaG = cur - next;
-          if (deltaG <= 0) continue;
-          g[spec.id] = next;
+    var assembled;
+    if (slotSplits !== null) {
+      assembled = solveWithSlotSplits(db, targets, templates, lunchSwapInfo, dinnerSwapInfo, slotSplits, trimSpecs);
+    } else {
+      // Step 1: Fixed Savory Produce & Beans
+      var g = {
+        green_onion: 30,
+        pico: 0,
+        diced_tomatoes: 200,
+        cabbage: 100,
+        cucumber: 100,
+        carrots: 60,
+        tzatziki_0: 0,
+        white_beans_cnd: targets.carbs < 90 ? 60 : 120,
+        aromatics_zero: 20,
+        whole_egg: 0,
+        egg_whites: 0,
+        edamame: 0,
+        corn: 0,
+        berries: 0,
+        banana: 0,
+        potatoes_raw: 0,
+        rice_dry: 0,
+        skyr_0: 0,
+        whey_isolate: 0,
+        ground_chicken: 0,
+        tuna_water: 0,
+        sardines_water: 0,
+        pork_loin_lean: 0,
+        pork_shoulder: 0,
+        chicken_breast: 0
+      };
 
-          var lostP = (deltaG * db[spec.id].per100g.protein) / 100;
-          if (lostP > 0) {
-            if (targets.fat < 25 && ewP > 0) {
-              g.egg_whites = Math.min(500, g.egg_whites + round5(lostP / ewP));
-            } else if (wheyP > 0) {
-              g.whey_isolate = Math.min(120, g.whey_isolate + Math.round(lostP / wheyP));
-            }
-          }
-          trimmed = true;
-          break;
+      if (targets.carbs < 65) {
+        var cScale = Math.max(0.25, targets.carbs / 65);
+        var scaleKeys = ['pico', 'diced_tomatoes', 'cabbage', 'cucumber', 'carrots', 'white_beans_cnd'];
+        for (var k = 0; k < scaleKeys.length; k++) {
+          var sk = scaleKeys[k];
+          g[sk] = Math.max(5, round5(g[sk] * cScale));
         }
       }
-      if (!trimmed) {
-        break;
+
+      // Step 2: Fat-Bearing Breakfast & Bowl Accents
+      var traceReserve = Math.min(4.0, Math.max(1.5, targets.fat * 0.15));
+      var fatBudget = Math.max(0, targets.fat - traceReserve);
+
+      if (fatBudget >= 60 && targets.protein >= 130) {
+        g.whole_egg = 200;
+        g.edamame = 80;
+        g.corn = 60;
+      } else if (fatBudget >= 42 && targets.protein >= 110) {
+        g.whole_egg = 100;
+        g.edamame = 60;
+        g.corn = 40;
+      } else if (fatBudget >= 25 && targets.protein >= 90) {
+        g.whole_egg = 50;
+        g.edamame = 30;
+        g.corn = 30;
       }
-      assembled = buildMealsAndTotals(g, db, templates, lunchSwapInfo, dinnerSwapInfo, targets);
+
+      // Step 3: Lunch & Dinner Swap Proteins
+      var curFat = sumMacros(g, db).fat;
+      var remFat = Math.max(0, fatBudget - curFat);
+      var pFactor = Math.min(1.10, Math.max(0.45, targets.protein / 185));
+      var highCal = targets.calories >= 2300;
+      var dFatPerG = db[dinnerSwap].per100g.fat / 100;
+
+      if (lunchSwap === 'ground_chicken') {
+        var lFatPerG = db.ground_chicken.per100g.fat / 100;
+        var baseL = round5((highCal ? 210 : 175) * pFactor);
+        var baseD = round5((highCal ? 220 : 195) * pFactor);
+        var needF = baseL * lFatPerG + baseD * dFatPerG;
+        if (needF > remFat && needF > 0) {
+          var ratio = remFat / needF;
+          baseL = Math.max(50, floor5(baseL * ratio));
+          baseD = Math.max(50, floor5(baseD * ratio));
+        }
+        g.ground_chicken = Math.max(50, baseL);
+        g[dinnerSwap] = Math.max(50, baseD);
+      } else if (lunchSwap === 'tuna_patties') {
+        g.tuna_water = Math.max(50, round5((highCal ? 185 : 160) * pFactor));
+        var remFTuna = Math.max(0, remFat - (g.tuna_water * db.tuna_water.per100g.fat) / 100);
+        var defaultD = round5((highCal ? 225 : 200) * pFactor);
+        if (dFatPerG > 0 && defaultD * dFatPerG > remFTuna) {
+          defaultD = Math.max(50, floor5(remFTuna / dFatPerG));
+        }
+        g[dinnerSwap] = Math.max(50, defaultD);
+      } else {
+        // sardine_tuna
+        var sardBase = remFat >= 22 ? 100 : (remFat >= 14 ? 75 : (remFat >= 6 ? 40 : 0));
+        g.sardines_water = round5(sardBase * Math.min(1, pFactor + 0.1));
+        g.tuna_water = Math.max(50, round5(115 * Math.min(1.05, pFactor)));
+        var usedMixFat = ((g.sardines_water * db.sardines_water.per100g.fat) + (g.tuna_water * db.tuna_water.per100g.fat)) / 100;
+        var remFMix = Math.max(0, remFat - usedMixFat);
+        var defaultDMix = round5((highCal ? 210 : 185) * pFactor);
+        if (dFatPerG > 0 && defaultDMix * dFatPerG > remFMix) {
+          defaultDMix = Math.max(50, floor5(remFMix / dFatPerG));
+        }
+        g[dinnerSwap] = Math.max(50, defaultDMix);
+      }
+
+      // Step 4: Carbohydrate Allocation (Pre-Lean-Protein)
+      var leanProteinCarbReserve = targets.protein >= 110 ? 9 : 4;
+      var remC = Math.max(0, targets.carbs - sumMacros(g, db).carbs - leanProteinCarbReserve);
+
+      g.berries = remC >= 40 ? 100 : (remC >= 15 ? 50 : 0);
+      remC = Math.max(0, remC - (g.berries * db.berries.per100g.carbs) / 100);
+
+      g.banana = remC >= 80 ? 100 : 0;
+      if (g.banana > 0) {
+        remC = Math.max(0, remC - (g.banana * db.banana.per100g.carbs) / 100);
+      }
+
+      var potShare = lunchSwap === 'tuna_patties' ? 0.42 : 0.35;
+      var potCarbPerG = db.potatoes_raw.per100g.carbs / 100;
+      if (potCarbPerG > 0) {
+        g.potatoes_raw = Math.max(0, round10((remC * potShare) / potCarbPerG));
+        remC = Math.max(0, remC - g.potatoes_raw * potCarbPerG);
+      }
+
+      var riceCarbPerG = db.rice_dry.per100g.carbs / 100;
+      if (riceCarbPerG > 0) {
+        g.rice_dry = Math.max(0, round5(remC / riceCarbPerG));
+      }
+
+      // Step 5: Lean Protein Backfill & Carb Fine-Tune
+      var remP = Math.max(0, targets.protein - sumMacros(g, db).protein);
+
+      var ewP = db.egg_whites.per100g.protein / 100;
+      if (ewP > 0 && remP > 0) {
+        var ewMin = remP >= 40 ? 100 : 0;
+        var ewTarget = round10((remP * 0.32) / ewP);
+        var ewMax = floor10(remP / ewP);
+        g.egg_whites = Math.max(ewMin, Math.min(300, ewMax, ewTarget));
+        if (g.egg_whites > ewMax && ewMax >= 0) {
+          g.egg_whites = Math.max(0, ewMax);
+        }
+        remP = Math.max(0, targets.protein - sumMacros(g, db).protein);
+      }
+
+      var skyrP = db.skyr_0.per100g.protein / 100;
+      if (skyrP > 0 && remP > 0) {
+        var skyrMin = remP >= 25 ? 125 : 0;
+        var skyrTarget = round25((remP * 0.62) / skyrP);
+        var skyrMax = floor25(remP / skyrP);
+        g.skyr_0 = Math.max(skyrMin, Math.min(350, skyrMax, skyrTarget));
+        if (g.skyr_0 > skyrMax && skyrMax >= 0) {
+          g.skyr_0 = Math.max(0, skyrMax);
+        }
+        remP = Math.max(0, targets.protein - sumMacros(g, db).protein);
+      }
+
+      var wheyP = db.whey_isolate.per100g.protein / 100;
+      if (wheyP > 0 && remP > 0) {
+        g.whey_isolate = Math.max(0, Math.min(80, round5(remP / wheyP)));
+      }
+
+      // Fine-tune rice carbs
+      var carbDiff = targets.carbs - sumMacros(g, db).carbs;
+      if (Math.abs(carbDiff) >= 4 && riceCarbPerG > 0) {
+        g.rice_dry = Math.max(0, g.rice_dry + round5(carbDiff / riceCarbPerG));
+      }
+
+      // Step 6: Strict Fat-Ceiling Guard Loop (checks post-split built totals directly)
+      assembled = buildMealsAndTotals(g, db, templates, lunchSwapInfo, dinnerSwapInfo, targets, null);
+      var iter = 0;
+      while (assembled.totals.fat > targets.fat && iter < 400) {
+        iter++;
+        var trimmed = false;
+        for (var t = 0; t < trimSpecs.length; t++) {
+          var spec = trimSpecs[t];
+          var cur = g[spec.id] || 0;
+          if (cur > spec.minG) {
+            var next = Math.max(spec.minG, cur - spec.step);
+            var deltaG = cur - next;
+            if (deltaG <= 0) continue;
+            g[spec.id] = next;
+
+            var lostP = (deltaG * db[spec.id].per100g.protein) / 100;
+            if (lostP > 0) {
+              if (targets.fat < 25 && ewP > 0) {
+                g.egg_whites = Math.min(500, g.egg_whites + round5(lostP / ewP));
+              } else if (wheyP > 0) {
+                g.whey_isolate = Math.min(120, g.whey_isolate + Math.round(lostP / wheyP));
+              }
+            }
+            trimmed = true;
+            break;
+          }
+        }
+        if (!trimmed) {
+          break;
+        }
+        assembled = buildMealsAndTotals(g, db, templates, lunchSwapInfo, dinnerSwapInfo, targets, null);
+      }
     }
 
     var hasCustomRecipeArray = (
@@ -1445,7 +2108,7 @@
       }
     }
 
-    return {
+    var result = {
       meals: assembled.meals,
       ingredientGrams: assembled.ingredientGrams,
       totals: assembled.totals,
@@ -1453,6 +2116,10 @@
       fatCeilingExceeded: assembled.totals.fat > targets.fat,
       zeroAddedOil: true
     };
+    if (slotSplits !== null) {
+      result.slotSplits = slotSplits;
+    }
+    return result;
   }
 
   function clampDays(rawDays) {
@@ -1994,9 +2661,28 @@
     var haveAtHome = (safeOpts.haveAtHome && typeof safeOpts.haveAtHome === 'object') ? safeOpts.haveAtHome : {};
     var frozenPortionsApplied = Math.min(days, Math.max(0, Math.floor(Number(safeOpts.frozenMealsOnHand) || 0)));
 
-    var buckets = {};
-    for (i = 0; i < AISLE_ORDER.length; i++) {
-      buckets[AISLE_ORDER[i]] = [];
+    var suppliedAisleOrder = sanitizeAisleOrder(safeData.aisleOrder);
+    var baseAisleOrder = activeAisleOrder.length
+      ? activeAisleOrder
+      : (AISLE_ORDER.length ? AISLE_ORDER : suppliedAisleOrder);
+    var aisleOrder = baseAisleOrder.slice();
+    if (aisleOrder.length === 0) {
+      var derivedSeen = Object.create(null);
+      var dbIdsForAisles = Object.keys(db);
+      for (i = 0; i < dbIdsForAisles.length; i++) {
+        var derivedAisle = db[dbIdsForAisles[i]] && db[dbIdsForAisles[i]].aisle;
+        if (isSafeObjectKey(derivedAisle) && !hasOwn(derivedSeen, derivedAisle)) {
+          derivedSeen[derivedAisle] = true;
+          aisleOrder.push(derivedAisle);
+        }
+      }
+      if (!hasOwn(derivedSeen, 'Pantry/Canned')) {
+        aisleOrder.push('Pantry/Canned');
+      }
+    }
+    var buckets = Object.create(null);
+    for (i = 0; i < aisleOrder.length; i++) {
+      buckets[aisleOrder[i]] = [];
     }
 
     var totalCents = 0;
@@ -2038,7 +2724,13 @@
       totalCents += costCents;
       remainingCents += remCostCents;
 
-      var aisleKey = AISLE_ORDER.indexOf(gItem.aisle) !== -1 ? gItem.aisle : 'Pantry/Canned';
+      var aisleKey = (isSafeObjectKey(gItem.aisle) && aisleOrder.indexOf(gItem.aisle) !== -1)
+        ? gItem.aisle
+        : 'Pantry/Canned';
+      if (!hasOwn(buckets, aisleKey)) {
+        buckets[aisleKey] = [];
+        aisleOrder.push(aisleKey);
+      }
       buckets[aisleKey].push({
         id: gid,
         name: gItem.name,
@@ -2070,10 +2762,10 @@
     }
 
     var groceryListByAisle = [];
-    for (i = 0; i < AISLE_ORDER.length; i++) {
-      var aisleName = AISLE_ORDER[i];
+    for (i = 0; i < aisleOrder.length; i++) {
+      var aisleName = aisleOrder[i];
       var list = buckets[aisleName];
-      if (list.length > 0) {
+      if (list && list.length > 0) {
         list.sort(function (a, b) {
           return a.name.localeCompare(b.name, 'en');
         });
@@ -2105,10 +2797,39 @@
     };
   }
 
+  if (typeof require === 'function' && typeof module === 'object' && module !== null && typeof __dirname === 'string') {
+    var nodeFs = require('fs');
+    var nodePath = require('path');
+    var baselineFilePath = nodePath.join(__dirname, '..', 'schema', 'nutrition_baseline.json');
+    var baselinePayload = JSON.parse(nodeFs.readFileSync(baselineFilePath, 'utf8'));
+    setBaselineData(baselinePayload);
+    Object.freeze(AISLE_ORDER);
+  } else if (
+    (typeof globalThis !== 'undefined' && globalThis.__NUTRITION_BASELINE__) ||
+    (root && root.__NUTRITION_BASELINE__)
+  ) {
+    var preloadedBaseline = (typeof globalThis !== 'undefined' && globalThis.__NUTRITION_BASELINE__)
+      ? globalThis.__NUTRITION_BASELINE__
+      : root.__NUTRITION_BASELINE__;
+    setBaselineData(preloadedBaseline);
+  } else if (typeof window !== 'undefined' && typeof XMLHttpRequest === 'function') {
+    try {
+      var baselineXhr = new XMLHttpRequest();
+      baselineXhr.open('GET', './schema/nutrition_baseline.json', false);
+      baselineXhr.send(null);
+      if ((baselineXhr.status === 200 || (baselineXhr.status === 0 && baselineXhr.responseText)) && baselineXhr.responseText) {
+        setBaselineData(JSON.parse(baselineXhr.responseText));
+      }
+    } catch (e) {
+      // Browser caller may hydrate asynchronously via MacroEngine.setBaselineData(schema)
+    }
+  }
+
   return {
     AISLE_ORDER: AISLE_ORDER,
     GOAL_PRESETS: GOAL_PRESETS,
     DEFAULT_NUTRITION_DB: DEFAULT_NUTRITION_DB,
+    setBaselineData: setBaselineData,
     solveDailyPortions: solveDailyPortions,
     scaleToHorizon: scaleToHorizon
   };

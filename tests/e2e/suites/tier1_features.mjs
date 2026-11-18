@@ -8,33 +8,53 @@ import {
   REQUIRED_NUTRITION_IDS,
   assertAtwaterConsistency,
   assertDataJsonSchema,
+  assertNoLeftoverRollover,
+  assertNutritionBaselineSchema,
+  assertPriceHistorySchema,
   assertZeroAddedOil,
   parseCad,
   parsePngDimensions,
 } from '../lib/assertions.mjs';
-import { makeFlippCatalog, makeSampleDataJson } from '../lib/fixtures.mjs';
-import { runUpdatePlanIsolated } from '../lib/python.mjs';
+import {
+  makeDatedFlippCatalog,
+  makeFlippCatalog,
+  makePriceHistoryJson,
+  makeSampleDataJson,
+  shiftIsoDate,
+} from '../lib/fixtures.mjs';
+import { runUpdatePlanIsolated, runUpdatePlanSequence } from '../lib/python.mjs';
 import { startStaticServer } from '../lib/server.mjs';
 import {
   activateServiceWorker,
+  assertEsModulesLoaded,
+  assertLocalStylesheetLoaded,
   assertMobileLayout,
+  assertZeroExternalRequests,
   createIsolatedContext,
+  triggerVisibilityChange,
 } from '../lib/isolation.mjs';
 import {
+  findLeftoverRolloverUi,
   getActiveTabPanel,
+  getCheapestProteinsButton,
   getCheckboxOrToggle,
   getFeedbackControls,
   getGroceryRows,
+  getGrocerySwapSelect,
   getHorizonButton,
   getMarkEatenButton,
   getMealCard,
+  getMealSlotSplitIndicator,
   getNumericInput,
+  getPrepStepCards,
+  getPrepTimerAction,
+  getPrepTimerReadout,
   getPresetButton,
   getRangeSlider,
-  getSwapPill,
+  getSlotSplitInput,
+  getSlotSplitSection,
   getSyncButton,
   getTab,
-  getThawBanner,
   getAisleHeadingsY,
   setInputOrSliderValue,
   switchTab,
@@ -1086,19 +1106,17 @@ export const tier1Tests = [
     feature: 'F9',
     channel: 'CLI/FS',
     requiresBrowser: false,
-    title: 'sw.js guards external CDN and optional ./public/data.json via Promise.allSettled (not brittle single cache.addAll)',
+    title: 'sw.js eliminates external CDNs and guards optional ./public/data.json via Promise.allSettled',
     async run({ rootDir }) {
       const swPath = path.join(rootDir, 'sw.js');
       assert.ok(fs.existsSync(swPath), `Missing ${swPath}`);
       const sw = fs.readFileSync(swPath, 'utf8');
       assert.match(sw, /Promise\.allSettled/);
-      // Verify no cache.addAll([...]) call contains cdn.tailwindcss.com or public/data.json inside the same array literal
+      assert.doesNotMatch(sw, /cdn\.tailwindcss\.com/, 'sw.js must not reference cdn.tailwindcss.com');
+      assert.doesNotMatch(sw, /https:\/\//, 'sw.js must not reference external https:// URLs');
+      assert.match(sw, /css\/styles\.css/, 'sw.js must precache ./css/styles.css');
       const addAllBlocks = [...sw.matchAll(/addAll\s*\(\s*\[([\s\S]*?)\]\s*\)/g)].map((m) => m[1]);
       for (const blk of addAllBlocks) {
-        assert.ok(
-          !blk.includes('cdn.tailwindcss.com'),
-          'External Tailwind CDN URL must not be inside brittle cache.addAll'
-        );
         assert.ok(
           !blk.includes('public/data.json'),
           'Optional ./public/data.json must not be inside brittle cache.addAll with local shell'
@@ -1387,7 +1405,7 @@ export const tier1Tests = [
       try {
         await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
         const bodyText = await iso.page.locator('body').innerText();
-        assert.match(bodyText, /Greek Scramble/i);
+        assert.match(bodyText, /Eggs\s*&\s*Crispy\s*Grelot\s*Potatoes/i);
         await switchTab(iso.page, /Groceries/i);
         const grocText = await iso.page.locator('body').innerText();
         assert.match(grocText, /Maxi/i);
@@ -1502,20 +1520,30 @@ export const tier1Tests = [
     feature: 'F12',
     channel: 'Browser/390px',
     requiresBrowser: true,
-    title: '1-tap Lunch and Dinner protein swap pills update ingredients and daily macros',
+    title: 'Groceries out-of-stock swaps & Cheapest Proteins button update meal ingredients and macros',
     async run({ rootDir, browser }) {
       const srv = await startStaticServer({ rootDir });
       const iso = await createIsolatedContext(browser);
       try {
         await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        await switchTab(iso.page, /Groceries/i);
+
+        const gcSwap = iso.page.locator('select[aria-label*="Ground Chicken"]').first();
+        assert.ok((await gcSwap.count()) > 0, 'Missing Groceries out-of-stock swap select for Ground Chicken');
+        await gcSwap.selectOption('tuna_water');
+
+        const porkSwap = iso.page.locator('select[aria-label*="Pork Loin"]').first();
+        assert.ok((await porkSwap.count()) > 0, 'Missing Groceries out-of-stock swap select for Pork Loin');
+        await porkSwap.selectOption('chicken_breast');
+
         await switchTab(iso.page, /Meals/i);
         const lunch = await getMealCard(iso.page, /Lunch/i);
-        await getSwapPill(lunch, /Tuna Patties/i).click();
         assert.match(await lunch.innerText(), /Tuna/i);
-
         const dinner = await getMealCard(iso.page, /Dinner/i);
-        await getSwapPill(dinner, /Chicken Breast/i).click();
         assert.match(await dinner.innerText(), /Chicken Breast/i);
+
+        await getCheapestProteinsButton(iso.page).click();
+        assert.match(await iso.page.locator('body').innerText(), /kcal/i);
       } finally {
         await iso.close();
         await srv.close();
@@ -1528,8 +1556,17 @@ export const tier1Tests = [
     feature: 'F12',
     channel: 'Browser/390px',
     requiresBrowser: true,
-    title: 'When to Thaw 24h banner displays for Ground Chicken / Day 5+ freezer portions',
+    title: 'Day 5+ Freezer storage split, Prep 24h thaw reminder, and MacroEngine thawAlerts for Ground Chicken',
     async run({ rootDir, browser }) {
+      const me = loadMacroEngine(rootDir);
+      const data = readRootDataJson(rootDir);
+      const daily = me.solveDailyPortions(data, { targets: me.GOAL_PRESETS.cut, lunchSwap: 'ground_chicken' });
+      const scaled7 = me.scaleToHorizon(daily, data, { days: 7 });
+      assert.ok(
+        Array.isArray(scaled7.thawAlerts) && scaled7.thawAlerts.length > 0,
+        'Expected MacroEngine.scaleToHorizon thawAlerts for 7-day ground_chicken plan'
+      );
+
       const srv = await startStaticServer({ rootDir });
       const iso = await createIsolatedContext(browser);
       try {
@@ -1537,10 +1574,18 @@ export const tier1Tests = [
         await switchTab(iso.page, /Settings|Targets/i);
         await getHorizonButton(iso.page, 7).click();
         await switchTab(iso.page, /Meals/i);
-        const lunch = await getMealCard(iso.page, /Lunch/i);
-        await getSwapPill(lunch, /Ground Chicken/i).click();
-        const banner = await getThawBanner(iso.page);
-        assert.equal(await banner.isVisible(), true, 'Expected 24h When to Thaw banner to be visible');
+
+        const daySelect = iso.page.locator('#meals-day-select');
+        await daySelect.selectOption('1');
+        assert.match(await iso.page.locator('body').innerText(), /Storage:\s*Fridge/i);
+
+        await daySelect.selectOption('5');
+        assert.match(await iso.page.locator('body').innerText(), /Storage:\s*Freezer\s*\(Day\s*5\+\)/i);
+
+        await switchTab(iso.page, /Prep/i);
+        const prepTxt = await iso.page.locator('body').innerText();
+        assert.match(prepTxt, /Freezer\s*\(Days?\s*5\s*[–-]\s*7\)/i);
+        assert.match(prepTxt, /24h\s*thaw/i);
       } finally {
         await iso.close();
         await srv.close();
@@ -1874,7 +1919,7 @@ export const tier1Tests = [
     feature: 'F15',
     channel: 'Browser/390px',
     requiresBrowser: true,
-    title: 'Settings Tab displays editable User Profile description, Canadian Postal Code, and zero added oil',
+    title: 'Settings Tab displays editable User Profile description, Canadian Postal Code, and zero-oil plan',
     async run({ rootDir, browser }) {
       const srv = await startStaticServer({ rootDir });
       const iso = await createIsolatedContext(browser);
@@ -1884,7 +1929,13 @@ export const tier1Tests = [
         const text = await iso.page.locator('body').innerText();
         assert.match(text, /Profile Description/i);
         assert.match(text, /Postal Code/i);
-        assert.match(text, /zero.*oil|no.*oil/i);
+        const descInput = iso.page.getByRole('textbox', { name: /Profile Description/i }).first();
+        assert.ok((await descInput.count()) > 0, 'Missing editable Profile Description input');
+        await descInput.fill('High-Protein Zero-Oil Prep');
+        await descInput.dispatchEvent('change');
+        assert.match(await iso.page.locator('header').first().innerText(), /High-Protein Zero-Oil Prep/i);
+        await switchTab(iso.page, /Meals/i);
+        assert.match(await iso.page.locator('body').innerText(), /zero.*oil|no.*oil/i);
       } finally {
         await iso.close();
         await srv.close();
@@ -2019,6 +2070,1029 @@ export const tier1Tests = [
         await iso.close();
         await srv.close();
       }
+    },
+  },
+
+  // ==================== F16 (R1): Rolling 52-Week Price History & Self-Calibrating Radar ====================
+  {
+    id: 'T1-F16-01',
+    tier: 1,
+    feature: 'F16',
+    channel: 'CLI/FS',
+    requiresBrowser: false,
+    title: 'Single update_plan.py run logs Flipp observations keyed by postal FSA in price_history.json',
+    async run({ rootDir }) {
+      const nowIso = '2026-11-12T13:00:00Z';
+      const res = await runUpdatePlanSequence({
+        rootDir,
+        steps: [
+          {
+            nowIso,
+            postalCode: 'H1W1A1',
+            flippScenario: makeDatedFlippCatalog({
+              validFromDate: '2026-11-12',
+              maxiDeals: [
+                { name: 'LONGE DE PORC DESOSSEE', current_price: 2.99, post_price_text: '/lb', _queries: ['pork', 'porc', 'longe de porc'] },
+                { name: 'CHOU VERT', current_price: 0.99, post_price_text: '/lb', _queries: ['cabbage', 'chou'] },
+              ],
+            }),
+          },
+        ],
+      });
+      assert.equal(res.exitCode, 0);
+      assert.ok(res.priceHistory, 'R1/M2 prerequisite missing: price_history.json was not generated');
+      assertPriceHistorySchema(res.priceHistory, { expectedPostalKeys: ['H1W'], nowIso });
+      assert.ok(
+        Array.isArray(res.priceHistory.byPostalCode.H1W.pork_loin_lean) &&
+          res.priceHistory.byPostalCode.H1W.pork_loin_lean.length >= 1,
+        'Expected H1W.pork_loin_lean price observation in price_history.json'
+      );
+    },
+  },
+  {
+    id: 'T1-F16-02',
+    tier: 1,
+    feature: 'F16',
+    channel: 'CLI/FS',
+    requiresBrowser: false,
+    title: 'Multi-week Flipp runs accumulate observations and prune entries older than 52 weeks (>364d)',
+    async run({ rootDir }) {
+      const baseDate = '2026-11-12';
+      const staleDate = shiftIsoDate(baseDate, -400);
+      const validOldDate = shiftIsoDate(baseDate, -350);
+      const initialPriceHistory = makePriceHistoryJson({
+        byPostalCode: {
+          H1W: {
+            pork_loin_lean: [
+              { observedAt: staleDate, store: 'Maxi', cadPer100g: 0.45, itemName: 'Stale Pork', subcategory: 'pork' },
+              { observedAt: validOldDate, store: 'Maxi', cadPer100g: 0.95, itemName: 'Recent Pork', subcategory: 'pork' },
+            ],
+          },
+        },
+      });
+      const steps = [0, 7, 14, 21, 28].map((delta, i) => {
+        const d = shiftIsoDate(baseDate, delta);
+        return {
+          nowIso: `${d}T13:00:00Z`,
+          postalCode: 'H1W',
+          flippScenario: makeDatedFlippCatalog({
+            validFromDate: d,
+            maxiDeals: [
+              {
+                name: 'LONGE DE PORC DESOSSEE',
+                current_price: Number((4.5 + i * 0.1).toFixed(2)),
+                post_price_text: '/lb',
+                _queries: ['pork', 'porc', 'longe de porc'],
+              },
+            ],
+          }),
+        };
+      });
+      const lastIso = steps[steps.length - 1].nowIso;
+      const res = await runUpdatePlanSequence({
+        rootDir,
+        initialPriceHistory,
+        steps,
+      });
+      assert.equal(res.exitCode, 0);
+      assert.ok(res.priceHistory, 'Expected price_history.json output');
+      assertPriceHistorySchema(res.priceHistory, { expectedPostalKeys: ['H1W'], maxAgeDays: 364, nowIso: lastIso });
+      const porkObs = res.priceHistory.byPostalCode.H1W.pork_loin_lean || [];
+      assert.equal(
+        porkObs.some((e) => e.observedAt === staleDate),
+        false,
+        `Expected >364d entry (${staleDate}) to be pruned`
+      );
+      assert.ok(porkObs.length >= 5, `Expected accumulated weekly observations, got ${porkObs.length}`);
+    },
+  },
+  {
+    id: 'T1-F16-03',
+    tier: 1,
+    feature: 'F16',
+    channel: 'CLI/FS',
+    requiresBrowser: false,
+    title: 'Self-calibrating HISTORIC LOW derives 52-week minimum from price_history.json over static constants',
+    async run({ rootDir }) {
+      const baseDate = '2026-11-12';
+      // Seed 5 weeks of high pork prices ($1.15 - $1.35/100g), then offer $0.80/100g ($8.00/kg)
+      // $0.80/100g is HIGHER than static baseline low ($0.39/$0.66), so HISTORIC LOW proves history calibration.
+      const seedEntries = [-35, -28, -21, -14, -7].map((delta, i) => ({
+        observedAt: shiftIsoDate(baseDate, delta),
+        store: 'Maxi',
+        cadPer100g: Number((1.15 + i * 0.05).toFixed(2)),
+        itemName: 'Longe de porc',
+        subcategory: 'pork',
+      }));
+      const res = await runUpdatePlanSequence({
+        rootDir,
+        initialPriceHistory: makePriceHistoryJson({
+          byPostalCode: { H1W: { pork_loin_lean: seedEntries } },
+        }),
+        steps: [
+          {
+            nowIso: `${baseDate}T13:00:00Z`,
+            postalCode: 'H1W',
+            flippScenario: makeDatedFlippCatalog({
+              validFromDate: baseDate,
+              maxiDeals: [
+                {
+                  name: 'LONGE DE PORC DESOSSEE',
+                  current_price: 8.0,
+                  post_price_text: '/kg',
+                  _queries: ['pork', 'porc', 'longe de porc'],
+                },
+              ],
+            }),
+          },
+        ],
+      });
+      assert.equal(res.exitCode, 0);
+      const porkPrice = res.finalDataJson.nutritionDb.pork_loin_lean.price;
+      assert.equal(
+        porkPrice.radarTag,
+        'HISTORIC LOW',
+        `Expected history-calibrated HISTORIC LOW at $0.80/100g, got ${JSON.stringify(porkPrice)}`
+      );
+      assert.ok(Math.abs(porkPrice.historicalLowCadPer100g - 0.8) <= 0.02);
+    },
+  },
+  {
+    id: 'T1-F16-04',
+    tier: 1,
+    feature: 'F16',
+    channel: 'CLI/FS',
+    requiresBrowser: false,
+    title: 'Self-calibrating HOT DEAL derives regular reference from 52-week history',
+    async run({ rootDir }) {
+      const baseDate = '2026-11-12';
+      // Seed 5 weeks of chicken_breast around $2.00/100g + one low $1.00/100g, then offer $1.40/100g ($14.00/kg).
+      // Compared to static $1.49-$1.65 regular, $1.40 would only be 6-15% (FLYER DEAL); against $2.00 history regular it is 30% -> HOT DEAL.
+      const seedEntries = [
+        { observedAt: shiftIsoDate(baseDate, -42), store: 'Maxi', cadPer100g: 1.0, itemName: 'Poitrine', subcategory: 'chicken' },
+        { observedAt: shiftIsoDate(baseDate, -35), store: 'Maxi', cadPer100g: 2.0, itemName: 'Poitrine', subcategory: 'chicken' },
+        { observedAt: shiftIsoDate(baseDate, -28), store: 'Maxi', cadPer100g: 2.05, itemName: 'Poitrine', subcategory: 'chicken' },
+        { observedAt: shiftIsoDate(baseDate, -21), store: 'Super C', cadPer100g: 2.1, itemName: 'Poitrine', subcategory: 'chicken' },
+        { observedAt: shiftIsoDate(baseDate, -14), store: 'Maxi', cadPer100g: 1.98, itemName: 'Poitrine', subcategory: 'chicken' },
+        { observedAt: shiftIsoDate(baseDate, -7), store: 'Maxi', cadPer100g: 2.02, itemName: 'Poitrine', subcategory: 'chicken' },
+      ];
+      const res = await runUpdatePlanSequence({
+        rootDir,
+        initialPriceHistory: makePriceHistoryJson({
+          byPostalCode: { H1W: { chicken_breast: seedEntries } },
+        }),
+        steps: [
+          {
+            nowIso: `${baseDate}T13:00:00Z`,
+            postalCode: 'H1W',
+            flippScenario: makeDatedFlippCatalog({
+              validFromDate: baseDate,
+              maxiDeals: [
+                {
+                  name: 'POITRINE DE POULET DESOSSEE',
+                  current_price: 14.0,
+                  post_price_text: '/kg',
+                  _queries: ['chicken', 'poulet', 'chicken breast', 'poitrine'],
+                },
+              ],
+            }),
+          },
+        ],
+      });
+      assert.equal(res.exitCode, 0);
+      const chickenPrice = res.finalDataJson.nutritionDb.chicken_breast.price;
+      assert.equal(
+        chickenPrice.radarTag,
+        'HOT DEAL',
+        `Expected history-calibrated HOT DEAL at $1.40/100g vs ~$2.00 history regular, got ${JSON.stringify(chickenPrice)}`
+      );
+      assert.ok(chickenPrice.savingsPct >= 25);
+    },
+  },
+  {
+    id: 'T1-F16-05',
+    tier: 1,
+    feature: 'F16',
+    channel: 'CLI/FS',
+    requiresBrowser: false,
+    title: 'Postal FSA keys isolate M5V vs H1W histories without cross-contamination',
+    async run({ rootDir }) {
+      const baseDate = '2026-11-12';
+      const res = await runUpdatePlanSequence({
+        rootDir,
+        initialPriceHistory: makePriceHistoryJson({
+          byPostalCode: {
+            M5V: {
+              pork_loin_lean: [
+                { observedAt: shiftIsoDate(baseDate, -28), store: 'Maxi', cadPer100g: 0.4, itemName: 'Pork', subcategory: 'pork' },
+                { observedAt: shiftIsoDate(baseDate, -21), store: 'Maxi', cadPer100g: 0.42, itemName: 'Pork', subcategory: 'pork' },
+                { observedAt: shiftIsoDate(baseDate, -14), store: 'Maxi', cadPer100g: 0.44, itemName: 'Pork', subcategory: 'pork' },
+                { observedAt: shiftIsoDate(baseDate, -7), store: 'Maxi', cadPer100g: 0.45, itemName: 'Pork', subcategory: 'pork' },
+              ],
+            },
+            H1W: {
+              pork_loin_lean: [
+                { observedAt: shiftIsoDate(baseDate, -28), store: 'Maxi', cadPer100g: 1.2, itemName: 'Pork', subcategory: 'pork' },
+                { observedAt: shiftIsoDate(baseDate, -21), store: 'Maxi', cadPer100g: 1.25, itemName: 'Pork', subcategory: 'pork' },
+                { observedAt: shiftIsoDate(baseDate, -14), store: 'Maxi', cadPer100g: 1.3, itemName: 'Pork', subcategory: 'pork' },
+                { observedAt: shiftIsoDate(baseDate, -7), store: 'Maxi', cadPer100g: 1.22, itemName: 'Pork', subcategory: 'pork' },
+              ],
+            },
+          },
+        }),
+        steps: [
+          {
+            nowIso: `${baseDate}T13:00:00Z`,
+            postalCode: 'M5V2T6',
+            flippScenario: makeDatedFlippCatalog({
+              validFromDate: baseDate,
+              maxiDeals: [
+                { name: 'LONGE DE PORC', current_price: 8.0, post_price_text: '/kg', _queries: ['pork', 'porc', 'longe de porc'] },
+              ],
+            }),
+          },
+          {
+            nowIso: `${baseDate}T14:00:00Z`,
+            postalCode: 'H1W1A1',
+            flippScenario: makeDatedFlippCatalog({
+              validFromDate: baseDate,
+              maxiDeals: [
+                { name: 'LONGE DE PORC', current_price: 8.0, post_price_text: '/kg', _queries: ['pork', 'porc', 'longe de porc'] },
+              ],
+            }),
+          },
+        ],
+      });
+      assert.equal(res.exitCode, 0);
+      assertPriceHistorySchema(res.priceHistory, { expectedPostalKeys: ['M5V', 'H1W'], nowIso: `${baseDate}T14:00:00Z` });
+      assertDataJsonSchema(res.runs[0].dataJson, { expectedPostalDisplay: 'M5V', expectedPostalQuery: 'M5V2T6' });
+      assertDataJsonSchema(res.runs[1].dataJson, { expectedPostalDisplay: 'H1W', expectedPostalQuery: 'H1W1A1' });
+      // M5V saw $0.40 low so $0.80 is NOT historic low; H1W saw $1.20+ so $0.80 IS historic low
+      assert.notEqual(res.runs[0].dataJson.nutritionDb.pork_loin_lean.price.radarTag, 'HISTORIC LOW');
+      assert.equal(res.runs[1].dataJson.nutritionDb.pork_loin_lean.price.radarTag, 'HISTORIC LOW');
+    },
+  },
+
+  // ==================== F17 (R2): Prep Timer Wake Lock & SW Notifications ====================
+  {
+    id: 'T1-F17-01',
+    tier: 1,
+    feature: 'F17',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'Starting a Prep timer acquires Screen Wake Lock and requests Notification permission',
+    async run({ rootDir, browser }) {
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser, {
+        installPrepApiMocks: {
+          wakeLockMode: 'supported',
+          notificationMode: 'supported',
+          initialPermission: 'default',
+          grantPermissionOnRequest: 'granted',
+        },
+      });
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        await switchTab(iso.page, /Prep/i);
+        const card = getPrepStepCards(iso.page).first();
+        await getPrepTimerAction(card, /^(?:Start|Resume)\b/i).click();
+        await iso.page.waitForTimeout(100);
+
+        const spy = await iso.page.evaluate(() => window.__e2ePrepSpy);
+        const reqs = spy.wakeLock.filter((e) => e.action === 'request');
+        assert.equal(reqs.length, 1, `Expected 1 wakeLock.request('screen') call, got ${JSON.stringify(spy.wakeLock)}`);
+        assert.equal(reqs[0].type, 'screen');
+        assert.equal(spy.activeSentinels, 1);
+        assert.ok(
+          spy.notifications.permissionRequests.length >= 1,
+          'Expected Notification.requestPermission() on Start gesture'
+        );
+        iso.assertNoUncaughtErrors();
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+  {
+    id: 'T1-F17-02',
+    tier: 1,
+    feature: 'F17',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'Pausing or Resetting the sole running Prep timer releases the Screen Wake Lock sentinel',
+    async run({ rootDir, browser }) {
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser, {
+        installPrepApiMocks: { wakeLockMode: 'supported', initialPermission: 'granted' },
+      });
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        await switchTab(iso.page, /Prep/i);
+        const card = getPrepStepCards(iso.page).first();
+        await getPrepTimerAction(card, /^(?:Start|Resume)\b/i).click();
+        await iso.page.waitForTimeout(80);
+        await getPrepTimerAction(card, /^Pause\b/i).click();
+        await iso.page.waitForTimeout(80);
+
+        let spy = await iso.page.evaluate(() => window.__e2ePrepSpy);
+        assert.equal(spy.activeSentinels, 0, 'Expected sentinel released on Pause');
+        assert.ok(spy.wakeLock.some((e) => e.action === 'release'), 'Expected release event on Pause');
+
+        await getPrepTimerAction(card, /^(?:Start|Resume)\b/i).click();
+        await iso.page.waitForTimeout(80);
+        await getPrepTimerAction(card, /^Reset\b/i).click();
+        await iso.page.waitForTimeout(80);
+
+        spy = await iso.page.evaluate(() => window.__e2ePrepSpy);
+        assert.equal(spy.activeSentinels, 0, 'Expected sentinel released on Reset');
+        assert.equal(spy.wakeLock.filter((e) => e.action === 'release').length, 2);
+        iso.assertNoUncaughtErrors();
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+  {
+    id: 'T1-F17-03',
+    tier: 1,
+    feature: 'F17',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'Concurrent timers share Wake Lock and release only when the last running timer stops',
+    async run({ rootDir, browser }) {
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser, {
+        installPrepApiMocks: { wakeLockMode: 'supported', initialPermission: 'granted' },
+      });
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        await switchTab(iso.page, /Prep/i);
+        const cards = getPrepStepCards(iso.page);
+        assert.ok((await cards.count()) >= 2, 'Expected >= 2 Prep timer cards');
+
+        await getPrepTimerAction(cards.nth(0), /^(?:Start|Resume)\b/i).click();
+        await iso.page.waitForTimeout(80);
+        await getPrepTimerAction(cards.nth(1), /^(?:Start|Resume)\b/i).click();
+        await iso.page.waitForTimeout(80);
+
+        let spy = await iso.page.evaluate(() => window.__e2ePrepSpy);
+        assert.equal(spy.activeSentinels, 1, 'Expected single shared Wake Lock sentinel across 2 running timers');
+        assert.equal(spy.wakeLock.filter((e) => e.action === 'request').length, 1);
+
+        // Pause Timer 1 while Timer 2 still runs -> lock MUST remain held
+        await getPrepTimerAction(cards.nth(0), /^Pause\b/i).click();
+        await iso.page.waitForTimeout(80);
+        spy = await iso.page.evaluate(() => window.__e2ePrepSpy);
+        assert.equal(spy.activeSentinels, 1, 'Wake Lock released prematurely while Timer 2 still running');
+
+        // Pause Timer 2 -> lock MUST now release
+        await getPrepTimerAction(cards.nth(1), /^Pause\b/i).click();
+        await iso.page.waitForTimeout(80);
+        spy = await iso.page.evaluate(() => window.__e2ePrepSpy);
+        assert.equal(spy.activeSentinels, 0, 'Expected Wake Lock released when last timer paused');
+        iso.assertNoUncaughtErrors();
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+  {
+    id: 'T1-F17-04',
+    tier: 1,
+    feature: 'F17',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'visibilitychange re-acquires Wake Lock when returning visible with a running timer and skips when idle',
+    async run({ rootDir, browser }) {
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser, {
+        installPrepApiMocks: { wakeLockMode: 'supported', initialPermission: 'granted' },
+      });
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        await switchTab(iso.page, /Prep/i);
+        const card = getPrepStepCards(iso.page).first();
+        await getPrepTimerAction(card, /^(?:Start|Resume)\b/i).click();
+        await iso.page.waitForTimeout(80);
+
+        // Simulate browser auto-releasing sentinel when tab/screen hides, then returning visible
+        await triggerVisibilityChange(iso.page, true);
+        let spy = await iso.page.evaluate(() => window.__e2ePrepSpy);
+        assert.equal(spy.activeSentinels, 0);
+
+        await triggerVisibilityChange(iso.page, false);
+        spy = await iso.page.evaluate(() => window.__e2ePrepSpy);
+        assert.equal(spy.activeSentinels, 1, 'Expected Wake Lock re-acquired on visibilitychange when timer running');
+        assert.equal(spy.wakeLock.filter((e) => e.action === 'request').length, 2);
+
+        // Pause timer, toggle visibility -> must NOT acquire while idle
+        await getPrepTimerAction(card, /^Pause\b/i).click();
+        await triggerVisibilityChange(iso.page, true);
+        await triggerVisibilityChange(iso.page, false);
+        spy = await iso.page.evaluate(() => window.__e2ePrepSpy);
+        assert.equal(spy.activeSentinels, 0);
+        assert.equal(spy.wakeLock.filter((e) => e.action === 'request').length, 2);
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+  {
+    id: 'T1-F17-05',
+    tier: 1,
+    feature: 'F17',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'Timer completion releases Wake Lock and dispatches Service Worker local notification',
+    async run({ rootDir, browser }) {
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser, {
+        installPrepApiMocks: {
+          wakeLockMode: 'supported',
+          notificationMode: 'supported',
+          initialPermission: 'granted',
+          enableClockSpy: true,
+        },
+      });
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        await activateServiceWorker(iso.page);
+        await switchTab(iso.page, /Prep/i);
+        const card = getPrepStepCards(iso.page).first();
+        await getPrepTimerAction(card, /^(?:Start|Resume)\b/i).click();
+        await iso.page.waitForTimeout(80);
+
+        await iso.page.evaluate(() => {
+          window.__e2eClockOffsetMs += 2 * 60 * 60 * 1000;
+        });
+        await iso.page.waitForTimeout(1200);
+
+        const spy = await iso.page.evaluate(() => window.__e2ePrepSpy);
+        assert.equal(spy.activeSentinels, 0, 'Expected Wake Lock released upon timer completion');
+        const hasTimerMsg = spy.swMessages.some((m) => m.message && m.message.type === 'TIMER_COMPLETE');
+        const hasDirectNotif = spy.swNotifications.length > 0;
+        assert.ok(
+          hasTimerMsg || hasDirectNotif,
+          `Expected TIMER_COMPLETE SW message or showNotification on timer completion, got ${JSON.stringify(spy)}`
+        );
+        iso.assertNoUncaughtErrors();
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+
+  // ==================== F18 (R3): Per-Slot Macro Distribution Controls ====================
+  {
+    id: 'T1-F18-01',
+    tier: 1,
+    feature: 'F18',
+    channel: 'Node/Engine',
+    requiresBrowser: false,
+    title: 'MacroEngine.solveDailyPortions applies slotSplits while conserving totals, fat ceiling, and zeroAddedOil',
+    async run({ rootDir }) {
+      const me = loadMacroEngine(rootDir);
+      const data = makeSampleDataJson();
+      const equalPlan = me.solveDailyPortions(data, {
+        targets: EXPECTED_GOAL_PRESETS.recomp,
+        slotSplits: { breakfast: 25, lunch: 25, dinner: 25, snack: 25 },
+      });
+      const weightedPlan = me.solveDailyPortions(data, {
+        targets: EXPECTED_GOAL_PRESETS.recomp,
+        slotSplits: { breakfast: 15, lunch: 40, dinner: 35, snack: 10 },
+      });
+      assert.equal(weightedPlan.zeroAddedOil, true);
+      assert.ok(weightedPlan.totals.fat <= EXPECTED_GOAL_PRESETS.recomp.fat + 0.01);
+
+      const getMeal = (plan, id) => plan.meals.find((m) => m.id === id);
+      assert.notEqual(
+        Math.round(getMeal(weightedPlan, 'lunch').totals.calories),
+        Math.round(getMeal(equalPlan, 'lunch').totals.calories),
+        'Expected weighted slotSplits to alter lunch calorie allocation vs equal 25/25/25/25'
+      );
+      assert.ok(
+        getMeal(weightedPlan, 'lunch').totals.protein > getMeal(weightedPlan, 'snack').totals.protein,
+        'Expected 40% lunch split to carry more protein than 10% snack split'
+      );
+
+      let sumCal = 0;
+      let sumPro = 0;
+      for (const m of weightedPlan.meals) {
+        sumCal += m.totals.calories;
+        sumPro += m.totals.protein;
+      }
+      assert.ok(Math.abs(sumCal - weightedPlan.totals.calories) <= 2);
+      assert.ok(Math.abs(sumPro - weightedPlan.totals.protein) <= 1);
+    },
+  },
+  {
+    id: 'T1-F18-02',
+    tier: 1,
+    feature: 'F18',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'Settings tab renders per-slot macro split controls for Breakfast, Lunch, Dinner, and Snack',
+    async run({ rootDir, browser }) {
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser);
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        await switchTab(iso.page, /Settings|Targets/i);
+        const section = await getSlotSplitSection(iso.page);
+        assert.ok((await section.count()) > 0 && (await section.isVisible()), 'Missing R3 per-slot macro split section in Settings');
+
+        for (const slotRe of [/Breakfast/i, /Lunch/i, /Dinner/i, /Snack/i]) {
+          const inp = await getSlotSplitInput(iso.page, slotRe);
+          assert.ok((await inp.count()) > 0 && (await inp.isVisible()), `Missing slot split input for ${slotRe}`);
+        }
+        iso.assertNoUncaughtErrors();
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+  {
+    id: 'T1-F18-03',
+    tier: 1,
+    feature: 'F18',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'Changing per-slot split percentages in Settings updates Meals card allocations',
+    async run({ rootDir, browser }) {
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser);
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        await switchTab(iso.page, /Meals/i);
+        const snackBefore = await (await getMealCard(iso.page, /Snack/i)).innerText();
+
+        await switchTab(iso.page, /Settings|Targets/i);
+        await setInputOrSliderValue(await getSlotSplitInput(iso.page, /Breakfast/i), 15);
+        await setInputOrSliderValue(await getSlotSplitInput(iso.page, /Lunch/i), 25);
+        await setInputOrSliderValue(await getSlotSplitInput(iso.page, /Dinner/i), 25);
+        await setInputOrSliderValue(await getSlotSplitInput(iso.page, /Snack/i), 35);
+
+        await switchTab(iso.page, /Meals/i);
+        const snackAfter = await (await getMealCard(iso.page, /Snack/i)).innerText();
+        assert.notEqual(snackAfter, snackBefore, 'Expected Snack meal card macros/grams to update after split change');
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+  {
+    id: 'T1-F18-04',
+    tier: 1,
+    feature: 'F18',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'Per-slot split percentages persist in localStorage across page.reload()',
+    async run({ rootDir, browser }) {
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser);
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        await switchTab(iso.page, /Settings|Targets/i);
+        await setInputOrSliderValue(await getSlotSplitInput(iso.page, /Breakfast/i), 20);
+        await setInputOrSliderValue(await getSlotSplitInput(iso.page, /Lunch/i), 35);
+        await setInputOrSliderValue(await getSlotSplitInput(iso.page, /Dinner/i), 35);
+        await setInputOrSliderValue(await getSlotSplitInput(iso.page, /Snack/i), 10);
+
+        await iso.page.reload({ waitUntil: 'networkidle' });
+        await switchTab(iso.page, /Settings|Targets/i);
+        const bVal = Number(await (await getSlotSplitInput(iso.page, /Breakfast/i)).inputValue());
+        const lVal = Number(await (await getSlotSplitInput(iso.page, /Lunch/i)).inputValue());
+        assert.equal(bVal, 20);
+        assert.equal(lVal, 35);
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+  {
+    id: 'T1-F18-05',
+    tier: 1,
+    feature: 'F18',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'Meals view displays slot split indicator and preserves valid Groceries CAD totals',
+    async run({ rootDir, browser }) {
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser);
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        await switchTab(iso.page, /Settings|Targets/i);
+        await setInputOrSliderValue(await getSlotSplitInput(iso.page, /Breakfast/i), 20);
+        await setInputOrSliderValue(await getSlotSplitInput(iso.page, /Lunch/i), 35);
+        await setInputOrSliderValue(await getSlotSplitInput(iso.page, /Dinner/i), 35);
+        await setInputOrSliderValue(await getSlotSplitInput(iso.page, /Snack/i), 10);
+
+        await switchTab(iso.page, /Meals/i);
+        const lunchCard = await getMealCard(iso.page, /Lunch/i);
+        const indicator = getMealSlotSplitIndicator(lunchCard);
+        assert.ok((await indicator.count()) > 0, 'Expected slot split % indicator on Lunch meal card');
+
+        await switchTab(iso.page, /Groceries/i);
+        const grocTxt = await iso.page.locator('body').innerText();
+        assert.doesNotMatch(grocTxt, /\bNaN\b/);
+        assert.match(grocTxt, /\$\s*\d+\.\d{2}/);
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+
+  // ==================== F19 (R4): Excluded Scope — No Leftover/Partial Roll-Over ====================
+  {
+    id: 'T1-F19-01',
+    tier: 1,
+    feature: 'F19',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'Groceries tab has zero leftover or partial-package pantry roll-over UI controls or text',
+    async run({ rootDir, browser }) {
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser);
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        await switchTab(iso.page, /Groceries/i);
+        assert.equal(
+          await findLeftoverRolloverUi(iso.page).count(),
+          0,
+          'R4 violation: found leftover/partial-package roll-over UI element in Groceries tab'
+        );
+        assertNoLeftoverRollover(await iso.page.locator('body').innerText(), 'Groceries UI text');
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+  {
+    id: 'T1-F19-02',
+    tier: 1,
+    feature: 'F19',
+    channel: 'Node/Engine',
+    requiresBrowser: false,
+    title: 'scaleToHorizon always computes whole Math.ceil packages with zero partial-package roll-over',
+    async run({ rootDir }) {
+      const me = loadMacroEngine(rootDir);
+      const data = makeSampleDataJson();
+      const daily = me.solveDailyPortions(data, { targets: EXPECTED_GOAL_PRESETS.recomp });
+      const h3 = me.scaleToHorizon(daily, data, { days: 3, haveAtHome: {} });
+      const h7 = me.scaleToHorizon(daily, data, { days: 7, haveAtHome: {} });
+      for (const h of [h3, h7]) {
+        assertNoLeftoverRollover(h, 'scaleToHorizon output');
+        for (const sec of h.groceryListByAisle) {
+          for (const it of sec.items) {
+            if (it.isBulk || !it.packageGrams) {
+              assert.equal(it.packagesNeeded, null);
+              assert.equal(it.remainingPackagesNeeded, null);
+            } else {
+              assert.equal(it.packagesNeeded, Math.ceil(it.totalGramsNeeded / it.packageGrams));
+              assert.equal(it.remainingPackagesNeeded, Math.ceil(it.remainingGrams / it.packageGrams));
+            }
+          }
+        }
+      }
+    },
+  },
+  {
+    id: 'T1-F19-03',
+    tier: 1,
+    feature: 'F19',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'localStorage mealPlanState contains only boolean haveAtHome and integer frozenMealsOnHand (zero roll-over state)',
+    async run({ rootDir, browser }) {
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser);
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        await switchTab(iso.page, /Groceries/i);
+        const rows = await getGroceryRows(iso.page);
+        await (await getCheckboxOrToggle(rows.first(), /Have at Home/i)).click();
+
+        const rawState = await iso.page.evaluate(() => localStorage.getItem('mealPlanState'));
+        assert.ok(rawState, 'Missing localStorage.mealPlanState');
+        const parsed = JSON.parse(rawState);
+        assertNoLeftoverRollover(parsed, 'localStorage.mealPlanState');
+        for (const v of Object.values(parsed.haveAtHome || {})) {
+          assert.equal(typeof v, 'boolean', `Expected boolean haveAtHome value, got ${typeof v}`);
+        }
+        assert.ok(Number.isInteger(parsed.frozenMealsOnHand ?? 0));
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+  {
+    id: 'T1-F19-04',
+    tier: 1,
+    feature: 'F19',
+    channel: 'CLI/FS',
+    requiresBrowser: false,
+    title: 'data.json and schema/nutrition_baseline.json contain zero leftover/partial-package roll-over fields',
+    async run({ rootDir }) {
+      const data = readRootDataJson(rootDir);
+      assertNoLeftoverRollover(data, 'data.json');
+      const schemaPath = path.join(rootDir, 'schema', 'nutrition_baseline.json');
+      if (fs.existsSync(schemaPath)) {
+        const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
+        assertNoLeftoverRollover(schema, 'schema/nutrition_baseline.json');
+      }
+    },
+  },
+  {
+    id: 'T1-F19-05',
+    tier: 1,
+    feature: 'F19',
+    channel: 'Node/Engine',
+    requiresBrowser: false,
+    title: 'frozenMealsOnHand operates strictly as whole-day deductions, not partial-package weight credit',
+    async run({ rootDir }) {
+      const me = loadMacroEngine(rootDir);
+      const data = makeSampleDataJson();
+      const daily = me.solveDailyPortions(data, { targets: EXPECTED_GOAL_PRESETS.recomp });
+      const base7 = me.scaleToHorizon(daily, data, { days: 7, frozenMealsOnHand: 0 });
+      const withFrozen2 = me.scaleToHorizon(daily, data, { days: 7, frozenMealsOnHand: 2 });
+      const base5 = me.scaleToHorizon(daily, data, { days: 5, frozenMealsOnHand: 0 });
+
+      const getMeatGrams = (scaled) =>
+        scaled.groceryListByAisle
+          .find((a) => a.aisle === 'Meat')
+          .items.reduce((acc, it) => acc + it.remainingGrams, 0);
+
+      assert.ok(getMeatGrams(withFrozen2) < getMeatGrams(base7));
+      assert.equal(getMeatGrams(withFrozen2), getMeatGrams(base5));
+    },
+  },
+
+  // ==================== F20 (R5): Pre-Compiled Static CSS & Zero External CDN ====================
+  {
+    id: 'T1-F20-01',
+    tier: 1,
+    feature: 'F20',
+    channel: 'CLI/FS',
+    requiresBrowser: false,
+    title: 'index.html and sw.js contain zero external CDN URLs and index.html links ./css/styles.css',
+    async run({ rootDir }) {
+      const html = fs.readFileSync(path.join(rootDir, 'index.html'), 'utf8');
+      const sw = fs.readFileSync(path.join(rootDir, 'sw.js'), 'utf8');
+      for (const [name, content] of [['index.html', html], ['sw.js', sw]]) {
+        assert.doesNotMatch(content, /cdn\.tailwindcss\.com/i, `${name} still references cdn.tailwindcss.com`);
+        assert.doesNotMatch(content, /fonts\.googleapis\.com|fonts\.gstatic\.com/i, `${name} still references Google Fonts`);
+        assert.doesNotMatch(content, /https:\/\//i, `${name} must contain zero external https:// dependencies`);
+      }
+      assert.match(html, /<link[^>]+rel=["']stylesheet["'][^>]+href=["']\.\/css\/styles\.css["']/i);
+    },
+  },
+  {
+    id: 'T1-F20-02',
+    tier: 1,
+    feature: 'F20',
+    channel: 'CLI/FS',
+    requiresBrowser: false,
+    title: 'css/styles.css exists, is non-empty, and is precached in sw.js CORE_ASSETS',
+    async run({ rootDir }) {
+      const cssPath = path.join(rootDir, 'css', 'styles.css');
+      assert.ok(fs.existsSync(cssPath), 'R5/M4 prerequisite missing: css/styles.css');
+      const css = fs.readFileSync(cssPath, 'utf8');
+      assert.ok(css.length > 500, 'css/styles.css appears empty or stubbed');
+      const sw = fs.readFileSync(path.join(rootDir, 'sw.js'), 'utf8');
+      assert.match(sw, /['"]\.\/css\/styles\.css['"]/);
+    },
+  },
+  {
+    id: 'T1-F20-03',
+    tier: 1,
+    feature: 'F20',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'Initial load and 4-tab navigation make zero external https:// requests and serve ./css/styles.css with 200',
+    async run({ rootDir, browser }) {
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser, { blockExternalRequests: true });
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        for (const tabRe of [/Meals/i, /Prep/i, /Groceries/i, /Settings|Targets/i]) {
+          await switchTab(iso.page, tabRe);
+        }
+        assertZeroExternalRequests(iso);
+        const cssResp = iso.responses.find((r) => r.url.includes('css/styles.css'));
+        assert.ok(cssResp && cssResp.status === 200, `Expected 200 for css/styles.css, got ${JSON.stringify(cssResp)}`);
+        assert.match(cssResp.contentType, /text\/css/i);
+        iso.assertNoUncaughtErrors();
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+  {
+    id: 'T1-F20-04',
+    tier: 1,
+    feature: 'F20',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'Static CSS tokens, bottom-nav layout, and [hidden] tabpanel rules apply across all 4 tabs',
+    async run({ rootDir, browser }) {
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser, { blockExternalRequests: true });
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        await assertLocalStylesheetLoaded(iso.page, 'css/styles.css');
+        const hiddenPanels = iso.page.locator('[role="tabpanel"][hidden]');
+        const count = await hiddenPanels.count();
+        assert.ok(count >= 3);
+        for (let i = 0; i < count; i++) {
+          assert.equal(await hiddenPanels.nth(i).isVisible(), false);
+        }
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+  {
+    id: 'T1-F20-05',
+    tier: 1,
+    feature: 'F20',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'Offline SW reload serves cached ./css/styles.css with Paper-and-Ink styles and 390px layout intact',
+    async run({ rootDir, browser }) {
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser, { blockExternalRequests: true });
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        await activateServiceWorker(iso.page);
+        await iso.context.setOffline(true);
+        await iso.page.reload({ waitUntil: 'domcontentloaded' });
+        await iso.page.waitForTimeout(200);
+        await assertLocalStylesheetLoaded(iso.page, 'css/styles.css');
+        for (const tabRe of [/Meals/i, /Prep/i, /Groceries/i, /Settings|Targets/i]) {
+          await switchTab(iso.page, tabRe);
+          await assertMobileLayout(iso.page, 390);
+        }
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+
+  // ==================== F21 (R6): ES Module Split & Shared Nutrition Schema ====================
+  {
+    id: 'T1-F21-01',
+    tier: 1,
+    feature: 'F21',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'index.html loads ES module entry js/app.js and all split view/state/prompt modules with HTTP 200',
+    async run({ rootDir, browser }) {
+      const html = fs.readFileSync(path.join(rootDir, 'index.html'), 'utf8');
+      assert.match(html, /<script[^>]+type=["']module["'][^>]+src=["']\.\/js\/app\.js["']/i);
+      const expectedMods = [
+        'js/app.js',
+        'js/state.js',
+        'js/geminiPrompts.js',
+        'js/views/mealsView.js',
+        'js/views/prepView.js',
+        'js/views/groceriesView.js',
+        'js/views/settingsView.js',
+        'schema/nutrition_baseline.json',
+      ];
+      for (const rel of expectedMods) {
+        assert.ok(fs.existsSync(path.join(rootDir, rel)), `R6/M5 prerequisite missing: ${rel}`);
+      }
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser);
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        assertEsModulesLoaded(iso, srv.origin, expectedMods);
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+  {
+    id: 'T1-F21-02',
+    tier: 1,
+    feature: 'F21',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'schema/nutrition_baseline.json conforms to shared contract, loads at startup, and is precached in sw.js',
+    async run({ rootDir, browser }) {
+      const schemaPath = path.join(rootDir, 'schema', 'nutrition_baseline.json');
+      assert.ok(fs.existsSync(schemaPath), 'R6/M1 prerequisite missing: schema/nutrition_baseline.json');
+      const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
+      assertNutritionBaselineSchema(schema);
+      const sw = fs.readFileSync(path.join(rootDir, 'sw.js'), 'utf8');
+      assert.match(sw, /schema\/nutrition_baseline\.json/);
+
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser);
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        assertEsModulesLoaded(iso, srv.origin, ['schema/nutrition_baseline.json']);
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+  {
+    id: 'T1-F21-03',
+    tier: 1,
+    feature: 'F21',
+    channel: 'CLI/FS',
+    requiresBrowser: false,
+    title: 'Python update_plan.py, JS MacroEngine, and schema/nutrition_baseline.json match on all 25 items and presets',
+    async run({ rootDir }) {
+      const schemaPath = path.join(rootDir, 'schema', 'nutrition_baseline.json');
+      assert.ok(fs.existsSync(schemaPath), 'R6/M1 prerequisite missing: schema/nutrition_baseline.json');
+      const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
+      assertNutritionBaselineSchema(schema);
+
+      const me = loadMacroEngine(rootDir);
+      assert.deepEqual(me.AISLE_ORDER, schema.aisleOrder);
+      assert.deepEqual(me.GOAL_PRESETS, schema.goalPresets);
+
+      const pyRes = await runUpdatePlanIsolated({ rootDir, flippScenario: makeFlippCatalog() });
+      assert.equal(pyRes.exitCode, 0);
+      assert.deepEqual(pyRes.dataJson.goalPresets, schema.goalPresets);
+
+      for (const id of REQUIRED_NUTRITION_IDS) {
+        const sItem = schema.nutritionDb[id];
+        const jsItem = me.DEFAULT_NUTRITION_DB[id];
+        const pyItem = pyRes.dataJson.nutritionDb[id];
+        assert.deepEqual(jsItem.per100g, sItem.per100g, `JS per100g mismatch on ${id}`);
+        assert.deepEqual(pyItem.per100g, sItem.per100g, `Python per100g mismatch on ${id}`);
+        assert.equal(jsItem.cookedYield, sItem.cookedYield, `JS cookedYield mismatch on ${id}`);
+        assert.equal(pyItem.cookedYield, sItem.cookedYield, `Python cookedYield mismatch on ${id}`);
+        assert.equal(jsItem.packageGrams, sItem.packageGrams, `JS packageGrams mismatch on ${id}`);
+        assert.equal(pyItem.packageGrams, sItem.packageGrams, `Python packageGrams mismatch on ${id}`);
+      }
+    },
+  },
+  {
+    id: 'T1-F21-04',
+    tier: 1,
+    feature: 'F21',
+    channel: 'Browser/390px',
+    requiresBrowser: true,
+    title: 'Offline SW reload serves split ES modules and nutrition_baseline.json with full 4-tab interactivity',
+    async run({ rootDir, browser }) {
+      const srv = await startStaticServer({ rootDir });
+      const iso = await createIsolatedContext(browser, { blockExternalRequests: true });
+      try {
+        await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
+        await activateServiceWorker(iso.page);
+        await iso.context.setOffline(true);
+        await iso.page.reload({ waitUntil: 'domcontentloaded' });
+        await iso.page.waitForTimeout(250);
+
+        for (const tabRe of [/Meals/i, /Prep/i, /Groceries/i, /Settings|Targets/i]) {
+          await switchTab(iso.page, tabRe);
+          await assertMobileLayout(iso.page, 390);
+        }
+        await switchTab(iso.page, /Meals/i);
+        assert.match(await iso.page.locator('body').innerText(), /Eggs\s*&\s*Crispy\s*Grelot\s*Potatoes/i);
+        iso.assertNoUncaughtErrors(['Failed to fetch', 'net::ERR_INTERNET_DISCONNECTED']);
+      } finally {
+        await iso.close();
+        await srv.close();
+      }
+    },
+  },
+  {
+    id: 'T1-F21-05',
+    tier: 1,
+    feature: 'F21',
+    channel: 'CLI/FS',
+    requiresBrowser: false,
+    title: 'Python and JS load baseline nutrition from schema/nutrition_baseline.json with no duplicated 25-item DB',
+    async run({ rootDir }) {
+      const schemaPath = path.join(rootDir, 'schema', 'nutrition_baseline.json');
+      assert.ok(fs.existsSync(schemaPath), 'R6/M1 prerequisite missing: schema/nutrition_baseline.json');
+      const pySrc = fs.readFileSync(path.join(rootDir, 'scripts', 'update_plan.py'), 'utf8');
+      const jsSrc = fs.readFileSync(path.join(rootDir, 'js', 'macroEngine.js'), 'utf8');
+      assert.match(pySrc, /nutrition_baseline\.json/);
+      assert.match(jsSrc, /nutrition_baseline\.json|setBaselineData/);
+      assert.doesNotMatch(pySrc, /"whey_isolate"\s*:\s*\{[\s\S]*"calories"\s*:\s*370/, 'update_plan.py still hardcodes inline nutritionDb');
+      assert.doesNotMatch(jsSrc, /whey_isolate:\s*makeDbEntry/, 'macroEngine.js still hardcodes inline nutritionDb');
     },
   },
 ];

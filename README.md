@@ -4,18 +4,22 @@
 
 ## Overview
 
-- **Weekly Store Selection (Canadian Postal Code, Maxi vs. Super C)**: Every Thursday, `scripts/update_plan.py` queries the Flipp backend API (`locale=en-ca`, normalizing any 3-char FSA or 6-char Canadian postal code), compares **Maxi** and **Super C** across a weighted grocery basket (**65% core lean proteins**: pork shoulder/loin, chicken thighs/breasts, canned tuna/sardines, eggs; **35% staple carbs & produce**: potatoes, rice, cabbage, cucumbers, tomatoes, carrots, white beans), selects **one** winning store for the week, assigns **Price Radar** tags (`HISTORIC LOW`, `HOT DEAL`, `FLYER DEAL`, `REGULAR`), and writes identical `public/data.json` and `./data.json`.
+- **Weekly Store Selection & Rolling 52-Week Price History (Canadian Postal Code, Maxi vs. Super C)**: Every Thursday, `scripts/update_plan.py` queries the Flipp backend API (`locale=en-ca`, normalizing any 3-char FSA or 6-char Canadian postal code), compares **Maxi** and **Super C** across a weighted grocery basket (**65% core lean proteins**: pork shoulder/loin, chicken thighs/breasts, canned tuna/sardines, eggs; **35% staple carbs & produce**: potatoes, rice, cabbage, cucumbers, tomatoes, carrots, white beans), selects **one** winning store for the week, logs observations per postal FSA into a rolling 52-week `price_history.json` to self-calibrate **Price Radar** tags (`HISTORIC LOW`, `HOT DEAL`, `FLYER DEAL`, `REGULAR`), and writes identical `public/data.json` and `./data.json`.
 - **Customizable User Profile & Postal Code**: In the **Settings / Targets** tab, users can customize their **Profile Description** and **Canadian Postal Code** (saved privately in local device storage). You can also set a repository variable `POSTAL_CODE` (or pass `postal_code` in manual `workflow_dispatch`) for the automated GitHub Actions pipeline.
-- **Zero Added Cooking Oil & Deterministic Macro Scaling**: All meal templates enforce a strict zero-added-cooking-oil rule (dry-sear, air-fry, or braise in natural rendered juices, broth, or water). Client-side `js/macroEngine.js` (`solveDailyPortions`, `scaleToHorizon`) uses verified raw-basis per-100g nutrition data across:
-  - **Goal Presets**: *Aggressive Cut* (`1,900 kcal / 200g P / 50g F / 160g C`), *Body Recomp* (`2,400 kcal / 175g P / 80g F / 245g C`), *Maintenance* (`2,800 kcal / 190g P / 85g F / 315g C`), plus live custom sliders with a strict fat-ceiling guard.
+- **Zero Added Cooking Oil, Shared Schema & Per-Slot Macro Scaling**: All meal templates enforce a strict zero-added-cooking-oil rule (dry-sear, air-fry, or braise in natural rendered juices, broth, or water). Both Python and `js/macroEngine.js` (`solveDailyPortions`, `scaleToHorizon`) load from the canonical `schema/nutrition_baseline.json` single source of truth across:
+  - **Goal Presets & Per-Meal Macro Distribution (Slot Splits %)**: *Aggressive Cut* (`1,900 kcal / 200g P / 50g F / 160g C`), *Body Recomp* (`2,400 kcal / 175g P / 80g F / 245g C`), *Maintenance* (`2,800 kcal / 190g P / 85g F / 315g C`), live custom macro sliders with a strict fat-ceiling guard, and customizable per-slot split weights (`Breakfast`, `Lunch`, `Dinner`, `Snack`).
   - **Prep Horizon & Storage Splits**: `3 Days`, `7 Days`, `14 Days`, or Custom Days with automatic **Fridge (Days 1–4)** vs. **Freezer (Day 5+)** batch splits, 24-hour **"When to Thaw"** alerts, aisle-ordered grocery lists (`Produce → Meat → Dairy/Eggs → Pantry/Canned → Frozen`), **"Have at Home"** deductions, and 0%-tax CAD checkout totals.
-- **Offline-First 4-Tab Mobile UI**: `Meals`, `Prep` (parallel Build-System cooking timeline + embedded timers), `Groceries`, and `Settings / Targets`, backed by `localStorage` persistence and a Stale-While-Revalidate Service Worker (`sw.js`).
+- **Zero-CDN Offline-First 4-Tab Mobile UI**: `Meals`, `Prep` (parallel Build-System cooking timeline + embedded timers with **Screen Wake Lock API** and **Service Worker local notifications**), `Groceries`, and `Settings / Targets`, built with pre-compiled static CSS (`css/styles.css`), modular ES modules (`js/app.js`, `js/state.js`, `js/geminiPrompts.js`, `js/views/*`), `localStorage` persistence, and a Stale-While-Revalidate Service Worker (`sw.js`).
 
 ### Project Layout
 
 ```text
 .
 ├── .github/workflows/weekly_flyer_sync.yml
+├── css/
+│   └── styles.css
+├── schema/
+│   └── nutrition_baseline.json
 ├── scripts/
 │   ├── update_plan.py
 │   └── requirements.txt
@@ -26,13 +30,22 @@
 │   └── icon-512.png
 ├── js/
 │   ├── macroEngine.js
-│   └── app.js
+│   ├── state.js
+│   ├── geminiPrompts.js
+│   ├── app.js
+│   └── views/
+│       ├── mealsView.js
+│       ├── prepView.js
+│       ├── groceriesView.js
+│       └── settingsView.js
 ├── public/
 │   └── data.json
 ├── tests/
 │   ├── test_update_plan.py
-│   └── macroEngine.test.js
+│   ├── macroEngine.test.js
+│   └── e2e/
 ├── data.json
+├── price_history.json
 ├── index.html
 ├── manifest.json
 ├── sw.js

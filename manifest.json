@@ -8,7 +8,7 @@
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#0f172a",
-  "theme_color": "#059669",
+  "theme_color": "#F6F3EC",
   "lang": "en-CA",
   "dir": "ltr",
   "categories": ["food", "health", "lifestyle"],
