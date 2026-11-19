@@ -1,6 +1,145 @@
 {
   "schemaVersion": "1.0.0",
   "windowWeeks": 52,
-  "updatedAt": "2026-11-18T14:00:00Z",
-  "byPostalCode": {}
+  "updatedAt": "2026-11-19T21:03:54Z",
+  "byPostalCode": {
+    "H1W": {
+      "pork_shoulder": [
+        {
+          "observedAt": "2026-11-19",
+          "store": "Maxi",
+          "cadPer100g": 0.4387,
+          "itemName": "ÉPAULE DE PORC PICNIC ENTIÈRE FRAÎCHE, EMBALLAGE SOUS-VIDE",
+          "subcategory": "pork"
+        }
+      ],
+      "chicken_breast": [
+        {
+          "observedAt": "2026-11-19",
+          "store": "Maxi",
+          "cadPer100g": 1.4308,
+          "itemName": "POITRINES DE POULET",
+          "subcategory": "chicken"
+        },
+        {
+          "observedAt": "2026-11-19",
+          "store": "Super C",
+          "cadPer100g": 2.1867,
+          "itemName": "poitrine de poulet marinée Irresistible | Irrésistible marinated chicken breast",
+          "subcategory": "chicken"
+        }
+      ],
+      "tuna_water": [
+        {
+          "observedAt": "2026-11-19",
+          "store": "Maxi",
+          "cadPer100g": 7.2125,
+          "itemName": "Thon Rio Mare",
+          "subcategory": "canned_fish"
+        },
+        {
+          "observedAt": "2026-11-19",
+          "store": "Super C",
+          "cadPer100g": 1.1566,
+          "itemName": "thon pâle entier Unico",
+          "subcategory": "canned_fish"
+        }
+      ],
+      "rice_dry": [
+        {
+          "observedAt": "2026-11-19",
+          "store": "Maxi",
+          "cadPer100g": 0.2752,
+          "itemName": "RIZ BASMATI QUALITY, 3,63 KG",
+          "subcategory": "rice"
+        }
+      ],
+      "cabbage": [
+        {
+          "observedAt": "2026-11-19",
+          "store": "Maxi",
+          "cadPer100g": 0.1653,
+          "itemName": "CHOU VERT",
+          "subcategory": "cabbage"
+        }
+      ],
+      "cucumber": [
+        {
+          "observedAt": "2026-11-19",
+          "store": "Maxi",
+          "cadPer100g": 0.5,
+          "itemName": "MINI CONCOMBRES DÉLICES DU MARCHÉ, 6 UN.",
+          "subcategory": "cucumbers"
+        }
+      ],
+      "pico": [
+        {
+          "observedAt": "2026-11-19",
+          "store": "Maxi",
+          "cadPer100g": 0.6592,
+          "itemName": "TOMATES SUR VIGNE | TOMATOES ON THE VINE",
+          "subcategory": "tomatoes"
+        },
+        {
+          "observedAt": "2026-11-19",
+          "store": "Super C",
+          "cadPer100g": 1.0274,
+          "itemName": "tomates cerises | tomatoes",
+          "subcategory": "tomatoes"
+        }
+      ],
+      "carrots": [
+        {
+          "observedAt": "2026-11-19",
+          "store": "Maxi",
+          "cadPer100g": 0.147,
+          "itemName": "CAROTTES OU OIGNONS JAUNES DÉLICES DU MARCHÉ, SAC DE 3 LB",
+          "subcategory": "carrots"
+        },
+        {
+          "observedAt": "2026-11-19",
+          "store": "Super C",
+          "cadPer100g": 0.0635,
+          "itemName": "carottes, oignons, betteraves ou rutabagas | carrots, onions, beets or rutabagas",
+          "subcategory": "carrots"
+        }
+      ],
+      "white_beans_cnd": [
+        {
+          "observedAt": "2026-11-19",
+          "store": "Maxi",
+          "cadPer100g": 0.4211,
+          "itemName": "FÈVES, POIS OU LENTILLES MENU BLEU PC 900 G OU COUSCOUS ZINDA, 907 G",
+          "subcategory": "white_beans"
+        }
+      ],
+      "pork_loin_lean": [
+        {
+          "observedAt": "2026-11-19",
+          "store": "Super C",
+          "cadPer100g": 0.6504,
+          "itemName": "rôti de longe de porc bout de côtes | pork loin roast, rib end",
+          "subcategory": "pork"
+        }
+      ],
+      "potatoes_raw": [
+        {
+          "observedAt": "2026-11-19",
+          "store": "Super C",
+          "cadPer100g": 0.088,
+          "itemName": "pommes de terre Russet | Russet potatoes",
+          "subcategory": "potatoes"
+        }
+      ],
+      "diced_tomatoes": [
+        {
+          "observedAt": "2026-11-19",
+          "store": "Super C",
+          "cadPer100g": 0.2198,
+          "itemName": "tomates en dés Selection",
+          "subcategory": "tomatoes"
+        }
+      ]
+    }
+  }
 }

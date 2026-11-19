@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "generatedAt": "2026-11-17T15:04:15Z",
+  "generatedAt": "2026-11-19T21:03:54Z",
   "source": "fallback+flipp",
   "location": {
     "postalCodeDisplay": "H1W",
@@ -11,21 +11,21 @@
   },
   "winningStore": "Super C",
   "flyerPeriod": {
-    "validFrom": "2026-11-12",
-    "validTo": "2026-11-18"
+    "validFrom": "2026-11-19",
+    "validTo": "2026-11-25"
   },
   "storeComparison": {
     "Maxi": {
-      "weightedScore": 0.6734,
-      "proteinScore": 0.648,
-      "carbProduceScore": 0.7207,
-      "matchedDeals": 7
+      "weightedScore": 1.5405,
+      "proteinScore": 1.9086,
+      "carbProduceScore": 0.8568,
+      "matchedDeals": 9
     },
     "Super C": {
-      "weightedScore": 0.6666,
-      "proteinScore": 0.6316,
-      "carbProduceScore": 0.7317,
-      "matchedDeals": 10
+      "weightedScore": 0.7123,
+      "proteinScore": 0.7068,
+      "carbProduceScore": 0.7224,
+      "matchedDeals": 6
     }
   },
   "userProfile": {
@@ -72,18 +72,18 @@
       },
       "cookedYield": 0.9,
       "packageGrams": 600,
-      "unitLabel": "dozen",
+      "unitLabel": "carton (12)",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.49,
-        "cadPerPackage": 2.94,
+        "cadPer100g": 0.67,
+        "cadPerPackage": 4.02,
         "regularCadPer100g": 0.67,
         "historicalLowCadPer100g": 0.49,
-        "savingsPct": 27,
-        "radarTag": "HISTORIC LOW",
-        "flyerItemName": "oeufs blancs Selection | Selection white eggs",
-        "onFlyer": true
+        "savingsPct": 0,
+        "radarTag": "REGULAR",
+        "flyerItemName": null,
+        "onFlyer": false
       }
     },
     "egg_whites": {
@@ -97,7 +97,7 @@
       },
       "cookedYield": 0.9,
       "packageGrams": 500,
-      "unitLabel": "carton",
+      "unitLabel": "carton (500g)",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
@@ -107,7 +107,7 @@
         "historicalLowCadPer100g": 0.65,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "Montreal H1W Regular Baseline",
+        "flyerItemName": null,
         "onFlyer": false
       }
     },
@@ -132,7 +132,7 @@
         "historicalLowCadPer100g": 0.15,
         "savingsPct": 69,
         "radarTag": "HISTORIC LOW",
-        "flyerItemName": "pommes de terre Russet | Russet Potatoes",
+        "flyerItemName": "pommes de terre Russet | Russet potatoes",
         "onFlyer": true
       }
     },
@@ -157,7 +157,7 @@
         "historicalLowCadPer100g": 0.79,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "Montreal H1W Regular Baseline",
+        "flyerItemName": null,
         "onFlyer": false
       }
     },
@@ -176,14 +176,14 @@
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.85,
-        "cadPerPackage": 3.4,
+        "cadPer100g": 1.03,
+        "cadPerPackage": 4.12,
         "regularCadPer100g": 0.85,
         "historicalLowCadPer100g": 0.55,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "Montreal H1W Regular Baseline",
-        "onFlyer": false
+        "flyerItemName": "tomates cerises | tomatoes",
+        "onFlyer": true
       }
     },
     "berries": {
@@ -197,7 +197,7 @@
       },
       "cookedYield": 1.0,
       "packageGrams": 600,
-      "unitLabel": "bag",
+      "unitLabel": "bag (600g)",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
@@ -207,7 +207,7 @@
         "historicalLowCadPer100g": 0.58,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "Montreal H1W Regular Baseline",
+        "flyerItemName": null,
         "onFlyer": false
       }
     },
@@ -221,18 +221,18 @@
         "carbs": 22.8
       },
       "cookedYield": 1.0,
-      "packageGrams": 600,
-      "unitLabel": "bunch",
+      "packageGrams": 500,
+      "unitLabel": "kg",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
         "cadPer100g": 0.22,
-        "cadPerPackage": 1.32,
+        "cadPerPackage": 1.1,
         "regularCadPer100g": 0.22,
         "historicalLowCadPer100g": 0.15,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "Montreal H1W Regular Baseline",
+        "flyerItemName": null,
         "onFlyer": false
       }
     },
@@ -247,7 +247,7 @@
       },
       "cookedYield": 0.75,
       "packageGrams": 454,
-      "unitLabel": "pack",
+      "unitLabel": "pack (454g)",
       "requiresThaw": true,
       "pantryDefault": false,
       "price": {
@@ -257,7 +257,7 @@
         "historicalLowCadPer100g": 0.99,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "Walmart Great Value Baseline (454g)",
+        "flyerItemName": null,
         "onFlyer": false
       }
     },
@@ -270,9 +270,9 @@
         "fat": 0.8,
         "carbs": 0.0
       },
-      "cookedYield": 0.95,
+      "cookedYield": 1.0,
       "packageGrams": 120,
-      "unitLabel": "can",
+      "unitLabel": "can (170g)",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
@@ -282,7 +282,7 @@
         "historicalLowCadPer100g": 0.83,
         "savingsPct": 6,
         "radarTag": "FLYER DEAL",
-        "flyerItemName": "thon pâle entier Unico | Unico whole light tuna",
+        "flyerItemName": "thon pâle entier Unico",
         "onFlyer": true
       }
     },
@@ -297,7 +297,7 @@
       },
       "cookedYield": 1.0,
       "packageGrams": 85,
-      "unitLabel": "can",
+      "unitLabel": "can (106g)",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
@@ -307,7 +307,7 @@
         "historicalLowCadPer100g": 1.47,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "Montreal H1W Regular Baseline",
+        "flyerItemName": null,
         "onFlyer": false
       }
     },
@@ -322,18 +322,18 @@
       },
       "cookedYield": 0.75,
       "packageGrams": 1000,
-      "unitLabel": "kg pack",
+      "unitLabel": "kg",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 1.1,
-        "cadPerPackage": 11.0,
+        "cadPer100g": 0.65,
+        "cadPerPackage": 6.5,
         "regularCadPer100g": 1.1,
         "historicalLowCadPer100g": 0.66,
-        "savingsPct": 0,
-        "radarTag": "REGULAR",
-        "flyerItemName": "Montreal H1W Regular Baseline",
-        "onFlyer": false
+        "savingsPct": 41,
+        "radarTag": "HISTORIC LOW",
+        "flyerItemName": "rôti de longe de porc bout de côtes | pork loin roast, rib end",
+        "onFlyer": true
       }
     },
     "pork_shoulder": {
@@ -346,19 +346,19 @@
         "carbs": 0.0
       },
       "cookedYield": 0.72,
-      "packageGrams": 1500,
-      "unitLabel": "roast",
+      "packageGrams": 1000,
+      "unitLabel": "kg",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.39,
-        "cadPerPackage": 5.85,
+        "cadPer100g": 0.77,
+        "cadPerPackage": 7.7,
         "regularCadPer100g": 0.77,
         "historicalLowCadPer100g": 0.44,
-        "savingsPct": 49,
-        "radarTag": "HISTORIC LOW",
-        "flyerItemName": "épaule picnic de porc frais | fresh pork picnic shoulder, bone-in, econo pack",
-        "onFlyer": true
+        "savingsPct": 0,
+        "radarTag": "REGULAR",
+        "flyerItemName": null,
+        "onFlyer": false
       }
     },
     "chicken_breast": {
@@ -372,17 +372,17 @@
       },
       "cookedYield": 0.75,
       "packageGrams": 1000,
-      "unitLabel": "kg pack",
+      "unitLabel": "kg",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.99,
-        "cadPerPackage": 9.9,
+        "cadPer100g": 2.19,
+        "cadPerPackage": 21.9,
         "regularCadPer100g": 1.43,
         "historicalLowCadPer100g": 0.99,
-        "savingsPct": 31,
-        "radarTag": "HISTORIC LOW",
-        "flyerItemName": "poitrines de poulet frais avec dos | fresh chicken breasts with back",
+        "savingsPct": 0,
+        "radarTag": "REGULAR",
+        "flyerItemName": "poitrine de poulet marinée Irresistible | Irrésistible marinated chicken breast",
         "onFlyer": true
       }
     },
@@ -397,18 +397,18 @@
       },
       "cookedYield": 1.0,
       "packageGrams": 340,
-      "unitLabel": "can",
+      "unitLabel": "can (540ml)",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.25,
-        "cadPerPackage": 0.85,
+        "cadPer100g": 0.5,
+        "cadPerPackage": 1.7,
         "regularCadPer100g": 0.5,
         "historicalLowCadPer100g": 0.29,
-        "savingsPct": 50,
-        "radarTag": "HISTORIC LOW",
-        "flyerItemName": "légumineuses Cedar | Cedar legumes",
-        "onFlyer": true
+        "savingsPct": 0,
+        "radarTag": "REGULAR",
+        "flyerItemName": null,
+        "onFlyer": false
       }
     },
     "diced_tomatoes": {
@@ -422,17 +422,17 @@
       },
       "cookedYield": 0.9,
       "packageGrams": 796,
-      "unitLabel": "can",
+      "unitLabel": "can (796ml)",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.38,
-        "cadPerPackage": 3.02,
+        "cadPer100g": 0.22,
+        "cadPerPackage": 1.75,
         "regularCadPer100g": 0.25,
         "historicalLowCadPer100g": 0.16,
-        "savingsPct": 0,
-        "radarTag": "REGULAR",
-        "flyerItemName": "coulis de tomates Aurora | Aurora strained tomatoes",
+        "savingsPct": 12,
+        "radarTag": "FLYER DEAL",
+        "flyerItemName": "tomates en dés Selection",
         "onFlyer": true
       }
     },
@@ -451,14 +451,14 @@
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.12,
-        "cadPerPackage": 2.4,
+        "cadPer100g": 0.3,
+        "cadPerPackage": 6.0,
         "regularCadPer100g": 0.3,
         "historicalLowCadPer100g": 0.2,
-        "savingsPct": 60,
-        "radarTag": "HISTORIC LOW",
-        "flyerItemName": "Cedar long grain rice | Cedar long grain rice",
-        "onFlyer": true
+        "savingsPct": 0,
+        "radarTag": "REGULAR",
+        "flyerItemName": null,
+        "onFlyer": false
       }
     },
     "cabbage": {
@@ -472,7 +472,7 @@
       },
       "cookedYield": 1.0,
       "packageGrams": 900,
-      "unitLabel": "head",
+      "unitLabel": "kg",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
@@ -482,7 +482,7 @@
         "historicalLowCadPer100g": 0.14,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "Montreal H1W Regular Baseline",
+        "flyerItemName": null,
         "onFlyer": false
       }
     },
@@ -497,18 +497,18 @@
       },
       "cookedYield": 1.0,
       "packageGrams": 350,
-      "unitLabel": "each",
+      "unitLabel": "unit (~350g)",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.75,
-        "cadPerPackage": 2.62,
+        "cadPer100g": 0.57,
+        "cadPerPackage": 2.0,
         "regularCadPer100g": 0.57,
         "historicalLowCadPer100g": 0.28,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "mini concombres | baby cucumbers",
-        "onFlyer": true
+        "flyerItemName": null,
+        "onFlyer": false
       }
     },
     "carrots": {
@@ -526,13 +526,13 @@
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.22,
-        "cadPerPackage": 2.0,
+        "cadPer100g": 0.06,
+        "cadPerPackage": 0.54,
         "regularCadPer100g": 0.28,
         "historicalLowCadPer100g": 0.14,
-        "savingsPct": 21,
-        "radarTag": "FLYER DEAL",
-        "flyerItemName": "carottes ou oignons jaunes | carrots or yellow onions",
+        "savingsPct": 79,
+        "radarTag": "HISTORIC LOW",
+        "flyerItemName": "carottes, oignons, betteraves ou rutabagas | carrots, onions, beets or rutabagas",
         "onFlyer": true
       }
     },
@@ -547,7 +547,7 @@
       },
       "cookedYield": 1.0,
       "packageGrams": 400,
-      "unitLabel": "bag",
+      "unitLabel": "bag (400g)",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
@@ -557,7 +557,7 @@
         "historicalLowCadPer100g": 0.62,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "Montreal H1W Regular Baseline",
+        "flyerItemName": null,
         "onFlyer": false
       }
     },
@@ -571,18 +571,18 @@
         "carbs": 19.0
       },
       "cookedYield": 1.0,
-      "packageGrams": 500,
-      "unitLabel": "bag",
+      "packageGrams": 750,
+      "unitLabel": "bag (750g)",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
         "cadPer100g": 0.5,
-        "cadPerPackage": 2.5,
+        "cadPerPackage": 3.75,
         "regularCadPer100g": 0.5,
         "historicalLowCadPer100g": 0.35,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "Montreal H1W Regular Baseline",
+        "flyerItemName": null,
         "onFlyer": false
       }
     },
@@ -607,7 +607,7 @@
         "historicalLowCadPer100g": 0.65,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "Montreal H1W Regular Baseline",
+        "flyerItemName": null,
         "onFlyer": false
       }
     },
@@ -621,18 +621,18 @@
         "carbs": 4.0
       },
       "cookedYield": 1.0,
-      "packageGrams": 750,
-      "unitLabel": "tub",
+      "packageGrams": 650,
+      "unitLabel": "tub (650g)",
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
         "cadPer100g": 0.8,
-        "cadPerPackage": 6.0,
+        "cadPerPackage": 5.2,
         "regularCadPer100g": 0.8,
         "historicalLowCadPer100g": 0.53,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "Montreal H1W Regular Baseline",
+        "flyerItemName": null,
         "onFlyer": false
       }
     },
@@ -646,18 +646,18 @@
         "carbs": 3.3
       },
       "cookedYield": 1.0,
-      "packageGrams": 900,
-      "unitLabel": "tub",
+      "packageGrams": 907,
+      "unitLabel": "tub (907g)",
       "requiresThaw": false,
       "pantryDefault": true,
       "price": {
         "cadPer100g": 3.89,
-        "cadPerPackage": 35.01,
+        "cadPerPackage": 35.28,
         "regularCadPer100g": 3.89,
         "historicalLowCadPer100g": 2.99,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "Pantry Protein Tub Baseline",
+        "flyerItemName": null,
         "onFlyer": false
       }
     },
@@ -671,18 +671,18 @@
         "carbs": 0.0
       },
       "cookedYield": 1.0,
-      "packageGrams": 250,
-      "unitLabel": "bundle",
+      "packageGrams": 100,
+      "unitLabel": "pantry",
       "requiresThaw": false,
       "pantryDefault": true,
       "price": {
-        "cadPer100g": 0.4,
-        "cadPerPackage": 1.0,
-        "regularCadPer100g": 0.4,
-        "historicalLowCadPer100g": 0.25,
+        "cadPer100g": 0.0,
+        "cadPerPackage": 0.0,
+        "regularCadPer100g": 0.0,
+        "historicalLowCadPer100g": 0.0,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "Aromatics & Broth Baseline",
+        "flyerItemName": null,
         "onFlyer": false
       }
     }
@@ -693,7 +693,7 @@
         "id": "ground_chicken",
         "label": "Extra-Lean Ground Chicken",
         "shortLabel": "Ground Chicken",
-        "style": "Seared Chicken & Rice Bowl",
+        "style": "Poulet Rouge / Boustan Bowl",
         "primaryIngredient": "ground_chicken"
       },
       {
@@ -716,36 +716,36 @@
         "id": "pork_loin_lean",
         "label": "Trimmed Lean Pork Loin",
         "shortLabel": "Pork Loin",
-        "style": "Braised Pork & White Beans",
+        "style": "Henakisoa sy Tsaramaso",
         "primaryIngredient": "pork_loin_lean"
       },
       {
         "id": "pork_shoulder",
         "label": "Trimmed Pork Shoulder",
         "shortLabel": "Pork Shoulder",
-        "style": "Slow-Braised Pork & Beans",
+        "style": "Traditional Henakisoa",
         "primaryIngredient": "pork_shoulder"
       },
       {
         "id": "chicken_breast",
         "label": "Lean Chicken Breast",
         "shortLabel": "Chicken Breast",
-        "style": "Braised Chicken & White Beans",
+        "style": "Malagasy Chili Twist",
         "primaryIngredient": "chicken_breast"
       }
     ]
   },
   "mealTemplates": {
-    "weeklyTheme": "Baseline High-Protein Meal Prep (Paste Gemini JSON for Custom Menu)",
-    "produceRotationNote": "Crisp green cabbage slaw, diced cucumber, and carrots.",
-    "fruitRotationNote": "Pair breakfast with thawed mixed berries and post-workout snack with ripe banana.",
+    "weeklyTheme": "Boustan-Inspired Citrus & Herb Week — Malagasy Chili & Crispy Grelots (Super C flyer highlights: rôti de longe de porc bout de côtes | pork loin roast, rib end, croquettes de poulet, thon pâle entier Unico)",
+    "produceRotationNote": "Feature ribboned carrots, crisp cucumber coins, and tangy lime-scented pico.",
+    "fruitRotationNote": "Alternate frozen blueberries in breakfast bowls and sliced banana in skyr.",
     "meals": [
       {
         "id": "breakfast",
         "slot": "Breakfast",
         "title": "Eggs & Crispy Grelot Potatoes",
         "cookingMethod": "Non-stick dry skillet scramble with splash of water/broth (0g oil) + air-fried crispy potatoes + berries",
-        "seasoningTwist": "Oregano, cracked black pepper, lemon zest, and fresh green onions",
+        "seasoningTwist": "Fresh chives, parsley, crushed red pepper, and black pepper",
         "swappable": false,
         "baseIngredients": [
           "whole_egg",
@@ -761,7 +761,7 @@
         "slot": "Lunch",
         "title": "Seared Protein & Jasmine Rice Bowl",
         "cookingMethod": "Dry-seared in natural juices or air-fried (0g oil) over steamed rice with crunchy slaw",
-        "seasoningTwist": "Smoked paprika, sumac, garlic powder, cumin, and lemon juice",
+        "seasoningTwist": "Lebanese 7-spice, lemon zest, dried mint, and roasted garlic powder",
         "swappable": true,
         "baseIngredients": [
           "ground_chicken",
@@ -780,7 +780,7 @@
         "slot": "Dinner",
         "title": "Braised Protein & White Beans",
         "cookingMethod": "Trimmed meat braised slowly in diced tomatoes, ginger, garlic, onion, and broth (0g oil), topped with 0% skyr dollop",
-        "seasoningTwist": "Fresh grated ginger, crushed garlic, thyme, and mild chili flakes",
+        "seasoningTwist": "Malagasy ginger-scallion base, crushed tomatoes, bay leaf, and white pepper",
         "swappable": true,
         "baseIngredients": [
           "pork_loin_lean",
@@ -796,7 +796,7 @@
         "slot": "Snack",
         "title": "0% Skyr & Whey Fruit Bowl",
         "cookingMethod": "Whipped cold 0% skyr with whey isolate and fresh/thawed fruit",
-        "seasoningTwist": "Cinnamon and pure vanilla extract",
+        "seasoningTwist": "Ground cardamom and unsweetened cocoa powder",
         "swappable": false,
         "baseIngredients": [
           "skyr_0",
@@ -816,7 +816,7 @@
       "startMinute": 0,
       "durationMinutes": 40,
       "timerSeconds": 2400,
-      "parallelNote": "Rinse jasmine rice and start cooker; sear trimmed pork in hot dry pot, deglaze with diced tomatoes, ginger, garlic, and white beans.",
+      "parallelNote": "Start rice cooker first; simmer pork with bay leaf, grated ginger, garlic, diced tomatoes, and white beans.",
       "zeroOilNote": "Sear meat in its own natural moisture and deglaze with tomato juices and broth (0g oil)."
     },
     {
@@ -827,7 +827,7 @@
       "startMinute": 5,
       "durationMinutes": 22,
       "timerSeconds": 1320,
-      "parallelNote": "While dinner simmers, halve grelot potatoes, season with smoked paprika and garlic powder, and air-fry at 200C shaking halfway.",
+      "parallelNote": "Air-fry seasoned grelot potatoes at 200C in a single layer until golden and crisp.",
       "zeroOilNote": "Mist lightly with water or broth before seasoning so spices adhere with zero added cooking oil."
     },
     {
@@ -838,7 +838,7 @@
       "startMinute": 10,
       "durationMinutes": 12,
       "timerSeconds": 720,
-      "parallelNote": "Brown lunch ground chicken with cumin and sumac (or air-fry spiced tuna-potato patties) while potatoes crisp.",
+      "parallelNote": "Dry-sear lunch protein with Lebanese 7-spice and a splash of lemon-infused broth.",
       "zeroOilNote": "Cook in natural meat juices with a 2 tbsp splash of water or low-sodium broth (0g oil)."
     },
     {
@@ -849,7 +849,7 @@
       "startMinute": 18,
       "durationMinutes": 15,
       "timerSeconds": 900,
-      "parallelNote": "Shred green cabbage and carrots and dice English cucumber into crisp meal-prep containers.",
+      "parallelNote": "Julienne carrots, shred cabbage finely, and toss fresh tomato-onion lasary with lime juice.",
       "zeroOilNote": "Dress slaw with lemon or lime juice, salt, and scallion with zero added oil."
     },
     {
@@ -860,7 +860,7 @@
       "startMinute": 35,
       "durationMinutes": 15,
       "timerSeconds": 900,
-      "parallelNote": "Weigh cooked portions; place Days 1-4 in fridge and freeze Day 5+ containers with 24h thaw reminders.",
+      "parallelNote": "Cool hot meals briefly before sealing Days 1-4 fridge tubs and Day 5+ freezer packs.",
       "zeroOilNote": "Store broth-rich braises cleanly with zero added fats for clean reheating."
     }
   ]
