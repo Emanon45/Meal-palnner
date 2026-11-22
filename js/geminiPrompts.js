@@ -3,13 +3,60 @@ import {
   getAppData,
   getAppState,
   getCurrentDailyPlan,
+  getEffectiveAppData,
   getEngine,
   hasBaselineNutrition
 } from './state.js';
 
+export function buildHomeStockPromptBlock(appState, appData, dbSource) {
+  const stockLines = [];
+  const seenIds = Object.create(null);
+  const stockList = (appState && Array.isArray(appState.pantryStock)) ? appState.pantryStock : [];
+  const horizonDays = (appState && Number(appState.horizonDays)) || 7;
+
+  stockList.forEach((item) => {
+    if (!item || !item.id || !(Number(item.gramsOnHand) > 0)) return;
+    seenIds[item.id] = true;
+    const brandSuffix = item.brand ? (' (' + item.brand + ')') : '';
+    const barcodeSuffix = item.barcode ? (' [Barcode: ' + item.barcode + ']') : '';
+    const per = item.per100g || {};
+    const dailyApprox = Math.round((Number(item.gramsOnHand) / horizonDays) * 10) / 10;
+    stockLines.push(
+      '- `' + item.id + '`: ' + item.name + brandSuffix + barcodeSuffix +
+      ' — ' + item.gramsOnHand + 'g total at home (~' + dailyApprox + 'g/day across ' + horizonDays + 'd) | Macros per 100g: ' +
+      (Number(per.calories) || 0) + ' kcal, ' + (Number(per.protein) || 0) + 'g P, ' +
+      (Number(per.fat) || 0) + 'g F, ' + (Number(per.carbs) || 0) + 'g C (Aisle: ' + (item.aisle || 'Pantry/Canned') + ')'
+    );
+  });
+
+  const haveAtHome = (appState && appState.haveAtHome && typeof appState.haveAtHome === 'object') ? appState.haveAtHome : {};
+  Object.keys(haveAtHome).forEach((id) => {
+    if (!haveAtHome[id] || seenIds[id] || id === 'aromatics_zero') return;
+    const entry = (dbSource && dbSource[id]) || (appData && appData.nutritionDb && appData.nutritionDb[id]);
+    if (!entry || !entry.name) return;
+    seenIds[id] = true;
+    const per = entry.per100g || {};
+    const perText = entry.per100g
+      ? (' | Macros per 100g: ' + (Number(per.calories) || 0) + ' kcal, ' + (Number(per.protein) || 0) + 'g P, ' + (Number(per.fat) || 0) + 'g F, ' + (Number(per.carbs) || 0) + 'g C')
+      : '';
+    stockLines.push('- `' + id + '`: ' + entry.name + ' — already marked at home' + perText);
+  });
+
+  if (stockLines.length === 0) return '';
+
+  return [
+    '',
+    'PRIORITY HOME STOCK TO EMPTY FIRST (ALREADY AT HOME — $0 COST, ' + horizonDays + '-DAY PREP):',
+    stockLines.join('\n'),
+    '',
+    'STOCK-FIRST RULE:',
+    'You MUST prioritize using my PRIORITY HOME STOCK items above across Breakfast, Lunch, Dinner, or Snack so I empty my stock first before buying extra items! Use their exact IDs (`stock_...` or built-in IDs) in the meal ingredients list, include any `stock_*` items you use inside `customIngredients` with `"cadPerPackage": 0` (keeping their exact per100g macros above), and only buy store items for what is still needed to hit my daily macro targets.'
+  ].join('\n');
+}
+
 export function buildGeminiMealPrompt() {
   const appState = getAppState();
-  const appData = getAppData();
+  const appData = getEffectiveAppData ? getEffectiveAppData() : getAppData();
   const engine = getEngine();
 
   const disliked = [];
@@ -68,6 +115,7 @@ export function buildGeminiMealPrompt() {
     ? dataDb
     : ((engine && engine.DEFAULT_NUTRITION_DB) || {});
   Object.keys(dbSource).forEach((k) => {
+    if (k.indexOf('stock_') === 0) return;
     const item = dbSource[k];
     if (!item || !item.name) return;
     const tag = (item.price && item.price.onFlyer && item.price.radarTag && item.price.radarTag !== 'REGULAR')
@@ -76,11 +124,13 @@ export function buildGeminiMealPrompt() {
     allDbLines.push('   * `' + k + '`: ' + item.name + tag);
   });
 
+  const homeStockBlock = buildHomeStockPromptBlock(appState, appData, dbSource);
+
   if (!isCustomMode) {
     return [
       'Generate a fresh weekly meal prep menu & parallel cooking timeline for my Meal Plan app.',
       'Active Macro Targets: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.',
-      'Winning Grocery Store: ' + (appData.winningStore || 'Super C') + ' (' + appState.postalCode + ').' + householdLine + feedbackLine,
+      'Winning Grocery Store: ' + (appData.winningStore || 'Super C') + ' (' + appState.postalCode + ').' + householdLine + feedbackLine + (homeStockBlock ? ('\n' + homeStockBlock) : ''),
       '',
       'STRICT ANTI-HALLUCINATION RULES (FLYER-BASKET LOCKED MODE):',
       '1. Every meal card in my app renders a locked list of grocery ingredients underneath your text. You MUST write each meal\'s "title", "cookingMethod", and "seasoningTwist" using ONLY the exact ingredients assigned to that meal slot below:',
@@ -114,7 +164,7 @@ export function buildGeminiMealPrompt() {
     return [
       'Act as my Montreal (' + appState.postalCode + ') Full-Store Grocery & Macro Meal Planner using your browser.',
       'Target Store Scope: Browse Super C (superc.ca), Maxi (maxi.ca), and Walmart Canada (walmart.ca) for postal code ' + appState.postalCode + '.',
-      'Active Daily Macro Targets: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.' + householdLine + feedbackLine,
+      'Active Daily Macro Targets: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.' + householdLine + feedbackLine + (homeStockBlock ? ('\n' + homeStockBlock) : ''),
       '',
       'ZERO-INFLUENCE FULL-STORE BROWSER HUNT RULES:',
       '1. Start from a completely BLANK SLATE—do NOT copy or assume any prior menu, preset dishes, or flyer-only list.',
@@ -162,7 +212,7 @@ export function buildGeminiMealPrompt() {
   return [
     'Generate a fresh weekly meal prep menu, custom grocery ingredients, & parallel cooking timeline for my Meal Plan app.',
     'Active Macro Targets: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.',
-    'Winning Grocery Store: ' + (appData.winningStore || 'Super C') + ' (' + appState.postalCode + ').' + householdLine + feedbackLine,
+    'Winning Grocery Store: ' + (appData.winningStore || 'Super C') + ' (' + appState.postalCode + ').' + householdLine + feedbackLine + (homeStockBlock ? ('\n' + homeStockBlock) : ''),
     '',
     'CURRENT DEFAULT SLOT INGREDIENTS IN MY APP:',
     exactSlotLines.join('\n'),

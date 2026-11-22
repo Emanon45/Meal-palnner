@@ -1,5 +1,7 @@
 import {
   FALLBACK_META,
+  uiStatus,
+  getEngine,
   getAppState,
   getAppData,
   getCurrentScaledPlan,
@@ -8,10 +10,24 @@ import {
   clampInt,
   formatCad,
   saveState,
-  recomputePlan
+  announcePolite,
+  recomputePlan,
+  upsertPantryStockItem,
+  updatePantryStockGrams,
+  removePantryStockItem
 } from '../state.js';
+import { buildGeminiMealPrompt } from '../geminiPrompts.js';
+import { openStockModal } from './stockModal.js';
 
 let activeCallbacks = {};
+
+function notifyStockChanged() {
+  if (typeof activeCallbacks.onStockChanged === 'function') {
+    activeCallbacks.onStockChanged();
+  } else {
+    renderGroceriesTab();
+  }
+}
 
 function radarBadgeClass(tag) {
   if (tag === 'HISTORIC LOW') return 'badge radar-historic';
@@ -58,6 +74,268 @@ export function updateGrocerySummaryAndRow(summaryEl, rowEl, item) {
   }
 }
 
+function renderStockSubtab(frag, appState, appData) {
+  const stockList = Array.isArray(appState.pantryStock) ? appState.pantryStock : [];
+
+  // Card 1: Scan / Add & Send to Gemini
+  const heroCard = el('div', 'card space-stack');
+  const heroTop = el('div', 'flex-wrap-row justify-between');
+  heroTop.appendChild(el('h2', 'text-base font-bold text-emerald-300', 'My Stock at Home (Use First)'));
+  heroTop.appendChild(el('span', 'badge radar-flyer', stockList.length + (stockList.length === 1 ? ' item' : ' items')));
+  heroCard.appendChild(heroTop);
+  heroCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Scan barcodes or add ingredients already in your kitchen. Gemini uses these items first so you empty your stock before buying more.'));
+
+  const addRow = el('div', 'flex-wrap-row');
+  const scanBtn = el('button', 'btn-primary flex-1', 'Scan Barcode');
+  scanBtn.type = 'button';
+  scanBtn.id = 'open-barcode-scanner-btn';
+  scanBtn.addEventListener('click', () => {
+    openStockModal({ mode: 'scan', onSaved: notifyStockChanged });
+  });
+
+  const manualBtn = el('button', 'btn-secondary flex-1', '+ Add Manually');
+  manualBtn.type = 'button';
+  manualBtn.id = 'open-manual-stock-btn';
+  manualBtn.addEventListener('click', () => {
+    openStockModal({ mode: 'manual', onSaved: notifyStockChanged });
+  });
+
+  addRow.appendChild(scanBtn);
+  addRow.appendChild(manualBtn);
+  heroCard.appendChild(addRow);
+
+  const geminiRow = el('div', 'flex-wrap-row pt-1');
+  const copyPromptBtn = el('button', 'btn-primary flex-1', 'Copy Gemini Prompt (With My Stock)');
+  copyPromptBtn.type = 'button';
+  copyPromptBtn.id = 'stock-copy-gemini-prompt-btn';
+  copyPromptBtn.addEventListener('click', () => {
+    const promptText = buildGeminiMealPrompt();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(promptText).then(() => {
+        uiStatus.stockStatusText = 'Gemini prompt copied with ' + stockList.length + ' stock item(s)! Paste it into Gemini, then tap "Paste Gemini Reply".';
+        const statusEl = document.getElementById('stock-prompt-status');
+        if (statusEl) statusEl.textContent = uiStatus.stockStatusText;
+        announcePolite(uiStatus.stockStatusText);
+      }).catch(() => {
+        uiStatus.stockStatusText = 'Go to Settings and tap "1. Copy Gemini Prompt" to copy from the text box.';
+        const statusEl = document.getElementById('stock-prompt-status');
+        if (statusEl) statusEl.textContent = uiStatus.stockStatusText;
+      });
+    } else {
+      uiStatus.stockStatusText = 'Open Settings to copy the Gemini prompt from the text box.';
+      const statusEl = document.getElementById('stock-prompt-status');
+      if (statusEl) statusEl.textContent = uiStatus.stockStatusText;
+    }
+  });
+
+  const pasteReplyBtn = el('button', 'btn-secondary', 'Paste Gemini Reply');
+  pasteReplyBtn.type = 'button';
+  pasteReplyBtn.id = 'stock-go-settings-json-btn';
+  pasteReplyBtn.addEventListener('click', () => {
+    if (typeof activeCallbacks.onOpenSettingsJson === 'function') {
+      activeCallbacks.onOpenSettingsJson();
+    }
+  });
+
+  geminiRow.appendChild(copyPromptBtn);
+  geminiRow.appendChild(pasteReplyBtn);
+  heroCard.appendChild(geminiRow);
+
+  const promptStatus = el('p', 'text-xs text-emerald-300 wrap-anywhere', uiStatus.stockStatusText || '');
+  promptStatus.id = 'stock-prompt-status';
+  promptStatus.setAttribute('role', 'status');
+  promptStatus.setAttribute('aria-live', 'polite');
+  heroCard.appendChild(promptStatus);
+  frag.appendChild(heroCard);
+
+  // Card 2: Quick Add Built-In Staple
+  const engine = getEngine();
+  const dbSource = (appData && appData.nutritionDb && Object.keys(appData.nutritionDb).length > 0)
+    ? appData.nutritionDb
+    : ((engine && engine.DEFAULT_NUTRITION_DB) || {});
+  const builtInIds = Object.keys(dbSource)
+    .filter((kid) => kid !== 'aromatics_zero' && kid.indexOf('stock_') !== 0 && dbSource[kid] && dbSource[kid].name)
+    .sort((a, b) => {
+      const aisleCmp = String(dbSource[a].aisle || '').localeCompare(String(dbSource[b].aisle || ''), 'en');
+      if (aisleCmp !== 0) return aisleCmp;
+      return String(dbSource[a].name || '').localeCompare(String(dbSource[b].name || ''), 'en');
+    });
+
+  if (builtInIds.length > 0) {
+    const quickCard = el('div', 'card space-y-2');
+    quickCard.appendChild(el('h3', 'text-sm font-bold text-slate-100', 'Quick Add Built-In Staple'));
+
+    const selectLbl = el('label', 'block text-xs font-semibold text-slate-200', 'Choose Staple Ingredient');
+    selectLbl.setAttribute('for', 'stock-builtin-select');
+    const stapleSel = el('select', 'w-full text-sm');
+    stapleSel.id = 'stock-builtin-select';
+    builtInIds.forEach((kid) => {
+      const entry = dbSource[kid];
+      const opt = document.createElement('option');
+      opt.value = kid;
+      opt.textContent = entry.name + ' (' + (entry.aisle || 'Pantry/Canned') + ')';
+      stapleSel.appendChild(opt);
+    });
+    quickCard.appendChild(selectLbl);
+    quickCard.appendChild(stapleSel);
+
+    const qtyRow = el('div', 'flex-wrap-row');
+    const gramsLbl = el('label', 'text-xs font-semibold text-slate-200', 'Grams on Hand');
+    gramsLbl.setAttribute('for', 'stock-builtin-grams');
+    const gramsInp = el('input', 'w-24 text-right');
+    gramsInp.id = 'stock-builtin-grams';
+    gramsInp.type = 'number';
+    gramsInp.min = '1';
+    gramsInp.max = '50000';
+    gramsInp.step = '1';
+    const initialPkg = clampInt(dbSource[builtInIds[0]] && dbSource[builtInIds[0]].packageGrams, 1, 20000, 500);
+    gramsInp.value = String(initialPkg);
+
+    stapleSel.addEventListener('change', () => {
+      const picked = dbSource[stapleSel.value];
+      gramsInp.value = String(clampInt(picked && picked.packageGrams, 1, 20000, 500));
+    });
+
+    const addBuiltInBtn = el('button', 'btn-secondary flex-1', 'Add to Stock');
+    addBuiltInBtn.type = 'button';
+    addBuiltInBtn.id = 'stock-builtin-add-btn';
+    addBuiltInBtn.addEventListener('click', () => {
+      const pickedId = stapleSel.value;
+      const entry = dbSource[pickedId];
+      if (!entry) return;
+      const pkgG = clampInt(entry.packageGrams, 1, 20000, 500);
+      const gramsVal = clampInt(gramsInp.value, 1, 50000, pkgG);
+      const saved = upsertPantryStockItem({
+        id: pickedId,
+        name: entry.name,
+        brand: '',
+        aisle: entry.aisle || 'Pantry/Canned',
+        gramsOnHand: gramsVal,
+        packageGrams: pkgG,
+        cookedYield: entry.cookedYield || 1.0,
+        per100g: entry.per100g || { calories: 0, protein: 0, fat: 0, carbs: 0 },
+        source: 'builtin'
+      });
+      if (saved) {
+        uiStatus.stockStatusText = 'Added ' + saved.name + ' (' + saved.gramsOnHand + 'g) to My Stock.';
+        announcePolite(uiStatus.stockStatusText);
+        notifyStockChanged();
+      }
+    });
+
+    qtyRow.appendChild(gramsLbl);
+    qtyRow.appendChild(gramsInp);
+    qtyRow.appendChild(addBuiltInBtn);
+    quickCard.appendChild(qtyRow);
+    frag.appendChild(quickCard);
+  }
+
+  // Card 3: Current Stock Items List
+  const listCard = el('section', 'card space-stack');
+  listCard.setAttribute('aria-label', 'Current stock items');
+  listCard.appendChild(el('h3', 'text-base font-bold text-emerald-300', 'Current Stock Items (' + stockList.length + ')'));
+
+  if (stockList.length === 0) {
+    listCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'No ingredients in stock yet. Tap "Scan Barcode" or "+ Add Manually" above to add what is already in your fridge, freezer, or pantry.'));
+  } else {
+    const ul = el('ul', 'space-y-3 list-none p-0 m-0');
+    stockList.forEach((item) => {
+      const li = el('li', 'subcard stock-item-card space-y-2');
+      li.setAttribute('data-stock-item', item.id);
+
+      const top = el('div', 'flex-wrap-row justify-between');
+      const titleText = item.brand ? (item.name + ' — ' + item.brand) : item.name;
+      top.appendChild(el('span', 'text-sm font-bold text-slate-100 wrap-anywhere', titleText));
+      const badgeWrap = el('div', 'flex-wrap-row');
+      badgeWrap.appendChild(el('span', 'badge radar-flyer', item.aisle || 'Pantry/Canned'));
+      if (item.barcode) {
+        badgeWrap.appendChild(el('span', 'badge radar-regular', 'UPC ' + item.barcode));
+      }
+      top.appendChild(badgeWrap);
+      li.appendChild(top);
+
+      const per = item.per100g || { calories: 0, protein: 0, fat: 0, carbs: 0 };
+      const mult = (Number(item.gramsOnHand) || 0) / 100;
+      li.appendChild(el(
+        'div',
+        'text-xs text-slate-300 wrap-anywhere',
+        'Per 100g: ' + Math.round(per.calories || 0) + ' kcal · ' + (per.protein || 0) + 'g P · ' + (per.carbs || 0) + 'g C · ' + (per.fat || 0) + 'g F' +
+        '  |  On Hand Total: ' + Math.round((per.calories || 0) * mult) + ' kcal · ' + (Math.round((per.protein || 0) * mult * 10) / 10) + 'g P'
+      ));
+
+      const qtyEditRow = el('div', 'flex-wrap-row justify-between');
+      const gramsCtrl = el('div', 'flex-wrap-row');
+      const gLbl = el('label', 'text-xs font-semibold text-slate-200', 'Grams');
+      const gInpId = 'stock-grams-' + item.id;
+      gLbl.setAttribute('for', gInpId);
+
+      const dec50Btn = el('button', 'btn-secondary text-xs', '-50g');
+      dec50Btn.type = 'button';
+      dec50Btn.setAttribute('aria-label', 'Decrease ' + item.name + ' by 50 grams');
+
+      const gInp = el('input', 'w-24 text-right');
+      gInp.id = gInpId;
+      gInp.type = 'number';
+      gInp.min = '0';
+      gInp.max = '50000';
+      gInp.step = '1';
+      gInp.value = String(item.gramsOnHand);
+
+      const inc50Btn = el('button', 'btn-secondary text-xs', '+50g');
+      inc50Btn.type = 'button';
+      inc50Btn.setAttribute('aria-label', 'Increase ' + item.name + ' by 50 grams');
+
+      dec50Btn.addEventListener('click', () => {
+        const nextVal = Math.max(0, (Number(item.gramsOnHand) || 0) - 50);
+        updatePantryStockGrams(item.id, nextVal);
+        notifyStockChanged();
+      });
+      inc50Btn.addEventListener('click', () => {
+        const nextVal = Math.min(50000, (Number(item.gramsOnHand) || 0) + 50);
+        updatePantryStockGrams(item.id, nextVal);
+        notifyStockChanged();
+      });
+      gInp.addEventListener('change', () => {
+        const parsed = clampInt(gInp.value, 0, 50000, item.gramsOnHand);
+        updatePantryStockGrams(item.id, parsed);
+        notifyStockChanged();
+      });
+
+      gramsCtrl.appendChild(gLbl);
+      gramsCtrl.appendChild(dec50Btn);
+      gramsCtrl.appendChild(gInp);
+      gramsCtrl.appendChild(inc50Btn);
+      qtyEditRow.appendChild(gramsCtrl);
+
+      const actionCtrl = el('div', 'flex-wrap-row');
+      const editBtn = el('button', 'btn-secondary text-xs', 'Edit Macros');
+      editBtn.type = 'button';
+      editBtn.addEventListener('click', () => {
+        openStockModal({ mode: 'edit', item: item, onSaved: notifyStockChanged });
+      });
+
+      const removeBtn = el('button', 'btn-secondary text-xs', 'Used Up');
+      removeBtn.type = 'button';
+      removeBtn.setAttribute('aria-label', 'Remove ' + item.name + ' from stock');
+      removeBtn.addEventListener('click', () => {
+        removePantryStockItem(item.id);
+        uiStatus.stockStatusText = 'Removed ' + item.name + ' from My Stock.';
+        announcePolite(uiStatus.stockStatusText);
+        notifyStockChanged();
+      });
+
+      actionCtrl.appendChild(editBtn);
+      actionCtrl.appendChild(removeBtn);
+      qtyEditRow.appendChild(actionCtrl);
+
+      li.appendChild(qtyEditRow);
+      ul.appendChild(li);
+    });
+    listCard.appendChild(ul);
+  }
+  frag.appendChild(listCard);
+}
+
 export function renderGroceriesTab(callbacks) {
   if (callbacks) activeCallbacks = callbacks;
 
@@ -70,6 +348,48 @@ export function renderGroceriesTab(callbacks) {
   const currentHouseholdPlans = getCurrentHouseholdPlans();
 
   const frag = document.createDocumentFragment();
+  const stockCount = Array.isArray(appState.pantryStock) ? appState.pantryStock.length : 0;
+  const activeSubtab = appState.groceriesSubtab === 'stock' ? 'stock' : 'buy';
+
+  // Subtab Switcher Bar (2 subtabs: Need to Buy | My Stock)
+  const subtabBar = el('div', 'subtab-bar flex-wrap-row');
+  subtabBar.setAttribute('role', 'group');
+  subtabBar.setAttribute('aria-label', 'Groceries view');
+
+  const buySubtabBtn = el('button', 'pill-btn flex-1', 'Need to Buy');
+  buySubtabBtn.type = 'button';
+  buySubtabBtn.id = 'groceries-subtab-buy';
+  buySubtabBtn.setAttribute('aria-pressed', activeSubtab === 'buy' ? 'true' : 'false');
+  buySubtabBtn.addEventListener('click', () => {
+    if (appState.groceriesSubtab !== 'buy') {
+      appState.groceriesSubtab = 'buy';
+      saveState();
+      renderGroceriesTab();
+    }
+  });
+
+  const stockSubtabBtn = el('button', 'pill-btn flex-1', 'My Stock (' + stockCount + ')');
+  stockSubtabBtn.type = 'button';
+  stockSubtabBtn.id = 'groceries-subtab-stock';
+  stockSubtabBtn.setAttribute('aria-pressed', activeSubtab === 'stock' ? 'true' : 'false');
+  stockSubtabBtn.addEventListener('click', () => {
+    if (appState.groceriesSubtab !== 'stock') {
+      appState.groceriesSubtab = 'stock';
+      saveState();
+      renderGroceriesTab();
+    }
+  });
+
+  subtabBar.appendChild(buySubtabBtn);
+  subtabBar.appendChild(stockSubtabBtn);
+  frag.appendChild(subtabBar);
+
+  if (activeSubtab === 'stock') {
+    renderStockSubtab(frag, appState, appData);
+    root.replaceChildren(frag);
+    return;
+  }
+
   const summary = currentScaledPlan.summary;
   const flyer = appData.flyerPeriod || FALLBACK_META.flyerPeriod;
 
@@ -199,6 +519,16 @@ export function renderGroceriesTab(callbacks) {
     });
     aisleCtrlRow.appendChild(resetSwapsBtn);
   }
+  if (stockCount > 0) {
+    const viewStockBtn = el('button', 'btn-secondary text-xs', 'My Stock: ' + stockCount + (stockCount === 1 ? ' item at home' : ' items at home'));
+    viewStockBtn.type = 'button';
+    viewStockBtn.addEventListener('click', () => {
+      appState.groceriesSubtab = 'stock';
+      saveState();
+      renderGroceriesTab();
+    });
+    aisleCtrlRow.appendChild(viewStockBtn);
+  }
   summaryCard.appendChild(aisleCtrlRow);
   frag.appendChild(summaryCard);
 
@@ -317,6 +647,9 @@ export function renderGroceriesTab(callbacks) {
         }
         if (item.pantryDefault) {
           tagsRow.appendChild(el('span', 'badge', 'Pantry staple'));
+        }
+        if (item.stockDeductedGrams > 0 && !item.inStock) {
+          tagsRow.appendChild(el('span', 'badge radar-flyer', 'At Home: -' + item.stockDeductedGrams + 'g'));
         }
       }
       topRow.appendChild(tagsRow);

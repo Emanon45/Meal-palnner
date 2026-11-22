@@ -42,6 +42,16 @@ export function syncSliderVisual(slider) {
   slider.style.setProperty('--slider-pct', pct + '%');
 }
 
+function formatStockSummaryText(appState) {
+  const stockList = Array.isArray(appState.pantryStock) ? appState.pantryStock.filter((it) => it && Number(it.gramsOnHand) > 0) : [];
+  if (stockList.length === 0) {
+    return 'No home stock items added yet — scan or add items so Gemini empties your stock first.';
+  }
+  const names = stockList.slice(0, 3).map((it) => it.name + ' (' + it.gramsOnHand + 'g)').join(', ');
+  const extra = stockList.length > 3 ? (' + ' + (stockList.length - 3) + ' more') : '';
+  return 'Home Stock Included in Prompt (' + stockList.length + '): ' + names + extra;
+}
+
 export function updateSettingsControlsInPlace() {
   if (!uiStatus.settingsBuilt) {
     renderSettingsTab();
@@ -146,6 +156,10 @@ export function updateSettingsControlsInPlace() {
   const shareStatusEl = document.getElementById('share-plan-status');
   if (shareStatusEl && uiStatus.shareStatusText) {
     shareStatusEl.textContent = uiStatus.shareStatusText;
+  }
+  const stockSummaryEl = document.getElementById('settings-stock-summary');
+  if (stockSummaryEl) {
+    stockSummaryEl.textContent = formatStockSummaryText(appState);
   }
 }
 
@@ -703,6 +717,35 @@ export function renderSettingsTab(callbacks) {
   modeRow.appendChild(lockedModeBtn);
   modeRow.appendChild(customModeBtn);
   aiCard.appendChild(modeRow);
+
+  const stockPromptBox = el('div', 'subcard space-y-2');
+  const stockSummaryEl = el('p', 'text-xs text-slate-200 wrap-anywhere', formatStockSummaryText(appState));
+  stockSummaryEl.id = 'settings-stock-summary';
+  stockPromptBox.appendChild(stockSummaryEl);
+
+  const stockActionRow = el('div', 'flex-wrap-row');
+  const scanStockBtn = el('button', 'btn-secondary text-xs flex-1', 'Scan Barcode to Stock');
+  scanStockBtn.type = 'button';
+  scanStockBtn.id = 'settings-scan-stock-btn';
+  scanStockBtn.addEventListener('click', () => {
+    if (typeof activeCallbacks.onOpenStockScanner === 'function') {
+      activeCallbacks.onOpenStockScanner();
+    }
+  });
+
+  const openStockBtn = el('button', 'btn-secondary text-xs flex-1', 'Manage My Stock');
+  openStockBtn.type = 'button';
+  openStockBtn.id = 'settings-open-stock-btn';
+  openStockBtn.addEventListener('click', () => {
+    if (typeof activeCallbacks.onOpenStockSubtab === 'function') {
+      activeCallbacks.onOpenStockSubtab();
+    }
+  });
+
+  stockActionRow.appendChild(scanStockBtn);
+  stockActionRow.appendChild(openStockBtn);
+  stockPromptBox.appendChild(stockActionRow);
+  aiCard.appendChild(stockPromptBox);
 
   const promptBtnRow = el('div', 'flex-wrap-row');
   const copyPromptBtn = el('button', 'btn-secondary flex-1', '1. Copy Gemini Prompt');

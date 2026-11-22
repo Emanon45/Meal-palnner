@@ -1,0 +1,559 @@
+import {
+  DEFAULT_AISLE_ORDER,
+  el,
+  clampInt,
+  clampNum,
+  upsertPantryStockItem,
+  announcePolite
+} from '../state.js';
+import {
+  normalizeBarcode,
+  lookupBarcodeMacros,
+  saveCachedBarcodeProduct,
+  isBarcodeDetectorSupported,
+  startCameraBarcodeScan,
+  detectBarcodeFromImageFile
+} from '../barcodeScanner.js';
+
+let dialogEl = null;
+let activeScannerCtrl = null;
+let currentOnSaved = null;
+let currentEditingId = null;
+let currentSource = 'manual';
+
+let refs = null;
+
+function stopActiveScanner() {
+  if (activeScannerCtrl && typeof activeScannerCtrl.stop === 'function') {
+    try {
+      activeScannerCtrl.stop();
+    } catch (_err) {
+      // Ignore cleanup errors
+    }
+  }
+  activeScannerCtrl = null;
+  if (refs && refs.camToggleBtn) {
+    refs.camToggleBtn.textContent = 'Start Camera';
+    refs.camToggleBtn.setAttribute('aria-pressed', 'false');
+  }
+}
+
+function setScanStatus(msg, isError) {
+  if (!refs || !refs.scanStatusEl) return;
+  refs.scanStatusEl.textContent = msg || '';
+  refs.scanStatusEl.className = isError ? 'text-xs text-red-400 wrap-anywhere' : 'text-xs text-emerald-300 wrap-anywhere';
+}
+
+function updateMacroPreview() {
+  if (!refs) return;
+  const gOnHand = Math.max(0, Number(refs.gramsInput.value) || 0);
+  const kcal100 = Math.max(0, Number(refs.calInput.value) || 0);
+  const prot100 = Math.max(0, Number(refs.protInput.value) || 0);
+  const carbs100 = Math.max(0, Number(refs.carbsInput.value) || 0);
+  const fat100 = Math.max(0, Number(refs.fatInput.value) || 0);
+
+  const mult = gOnHand / 100;
+  const totKcal = Math.round(kcal100 * mult);
+  const totProt = Math.round(prot100 * mult * 10) / 10;
+  const totCarbs = Math.round(carbs100 * mult * 10) / 10;
+  const totFat = Math.round(fat100 * mult * 10) / 10;
+
+  refs.previewPer100El.textContent = 'Per 100g: ' + Math.round(kcal100) + ' kcal · ' + (Math.round(prot100 * 10) / 10) + 'g P · ' + (Math.round(carbs100 * 10) / 10) + 'g C · ' + (Math.round(fat100 * 10) / 10) + 'g F';
+  refs.previewTotalEl.textContent = 'Total for ' + Math.round(gOnHand) + 'g on hand: ' + totKcal + ' kcal · ' + totProt + 'g P · ' + totCarbs + 'g C · ' + totFat + 'g F';
+}
+
+function populateFormFromProduct(product, { keepGrams = false } = {}) {
+  if (!refs || !product) return;
+  if (product.barcode) refs.barcodeInput.value = product.barcode;
+  if (product.name) refs.nameInput.value = product.name;
+  refs.brandInput.value = product.brand || '';
+  if (product.aisle && DEFAULT_AISLE_ORDER.indexOf(product.aisle) !== -1) {
+    refs.aisleSelect.value = product.aisle;
+  }
+  const pkgG = clampInt(product.packageGrams, 1, 20000, 500);
+  refs.pkgInput.value = String(pkgG);
+  if (!keepGrams) {
+    refs.gramsInput.value = String(clampInt(product.gramsOnHand || pkgG, 1, 50000, pkgG));
+  }
+  const per = product.per100g || {};
+  refs.calInput.value = String(Math.round(clampNum(per.calories, 0, 900, 0)));
+  refs.protInput.value = String(Math.round(clampNum(per.protein, 0, 100, 0) * 10) / 10);
+  refs.carbsInput.value = String(Math.round(clampNum(per.carbs, 0, 100, 0) * 10) / 10);
+  refs.fatInput.value = String(Math.round(clampNum(per.fat, 0, 100, 0) * 10) / 10);
+  if (product.source) currentSource = product.source;
+  updateMacroPreview();
+}
+
+async function handleBarcodeLookup(rawCode) {
+  const code = normalizeBarcode(rawCode);
+  if (!code) {
+    setScanStatus('Enter an 8 to 14 digit barcode number (UPC / EAN).', true);
+    if (refs && refs.barcodeInput) refs.barcodeInput.focus();
+    return;
+  }
+  if (refs) refs.barcodeInput.value = code;
+  setScanStatus('Looking up barcode ' + code + ' in Open Food Facts...', false);
+  if (refs && refs.lookupBtn) refs.lookupBtn.disabled = true;
+
+  try {
+    const res = await lookupBarcodeMacros(code);
+    if (res && res.found && res.product) {
+      populateFormFromProduct(res.product, { keepGrams: Boolean(currentEditingId) });
+      const srcNote = res.fromCache ? ' (from device cache)' : ' (from Open Food Facts)';
+      setScanStatus('Loaded "' + res.product.name + '"' + srcNote + '. Check grams on hand and save.', false);
+      announcePolite('Loaded macros for ' + res.product.name);
+    } else if (res && res.reason === 'not_found') {
+      currentSource = 'manual';
+      setScanStatus('Barcode ' + code + ' is not in Open Food Facts yet. Type the name and macros below and it will be saved locally.', true);
+      if (refs && refs.nameInput) refs.nameInput.focus();
+    } else {
+      setScanStatus('Could not reach Open Food Facts (offline or timeout). Enter macros manually below.', true);
+      if (refs && refs.nameInput) refs.nameInput.focus();
+    }
+  } finally {
+    if (refs && refs.lookupBtn) refs.lookupBtn.disabled = false;
+  }
+}
+
+async function startCameraScan() {
+  if (!refs) return;
+  stopActiveScanner();
+  refs.camToggleBtn.textContent = 'Stop Camera';
+  refs.camToggleBtn.setAttribute('aria-pressed', 'true');
+
+  activeScannerCtrl = await startCameraBarcodeScan(refs.videoEl, {
+    onStatus: (msg) => setScanStatus(msg, false),
+    onError: (reason) => {
+      stopActiveScanner();
+      if (reason === 'permission_denied' || reason === 'camera_error') {
+        setScanStatus('Camera unavailable or denied. Use "Scan Photo" or enter the barcode number below.', true);
+      }
+    },
+    onDetected: (code) => {
+      stopActiveScanner();
+      handleBarcodeLookup(code);
+    }
+  });
+}
+
+function createField(id, labelText, inputEl, helpText) {
+  const wrap = el('div', 'space-y-1');
+  const lbl = el('label', 'block text-xs font-semibold text-slate-200', labelText);
+  lbl.setAttribute('for', id);
+  inputEl.id = id;
+  if (!inputEl.name) inputEl.name = id;
+  wrap.appendChild(lbl);
+  wrap.appendChild(inputEl);
+  if (helpText) {
+    const helpId = id + '-help';
+    const help = el('span', 'block text-xs text-slate-400', helpText);
+    help.id = helpId;
+    inputEl.setAttribute('aria-describedby', helpId);
+    wrap.appendChild(help);
+  }
+  return wrap;
+}
+
+function ensureDialogBuilt() {
+  if (dialogEl && document.body.contains(dialogEl)) return dialogEl;
+
+  const dialog = document.createElement('dialog');
+  dialog.id = 'stock-scanner-dialog';
+  dialog.className = 'stock-dialog';
+  dialog.setAttribute('closedby', 'closerequest');
+  dialog.setAttribute('aria-labelledby', 'stock-dialog-title');
+
+  const shell = el('div', 'stock-dialog-shell space-stack');
+
+  // Header
+  const header = el('div', 'flex-wrap-row justify-between pb-2 border-b');
+  const titleEl = el('h2', 'text-lg font-bold text-slate-100', 'Add Stock Ingredient');
+  titleEl.id = 'stock-dialog-title';
+  const closeTopBtn = el('button', 'btn-secondary text-xs', 'Close');
+  closeTopBtn.type = 'button';
+  closeTopBtn.id = 'stock-dialog-close-btn';
+  closeTopBtn.setAttribute('aria-label', 'Close stock ingredient dialog');
+  closeTopBtn.addEventListener('click', () => closeStockModal());
+  header.appendChild(titleEl);
+  header.appendChild(closeTopBtn);
+  shell.appendChild(header);
+
+  // Scanner toggle link (for manual/edit mode)
+  const scannerToggleBtn = el('button', 'btn-secondary text-xs w-full', 'Show Barcode Scanner');
+  scannerToggleBtn.type = 'button';
+  scannerToggleBtn.id = 'stock-toggle-scanner-btn';
+  scannerToggleBtn.hidden = true;
+  shell.appendChild(scannerToggleBtn);
+
+  // Barcode Scanner Section
+  const scannerPanel = el('section', 'subcard space-y-2');
+  scannerPanel.id = 'stock-scanner-panel';
+  scannerPanel.setAttribute('aria-label', 'Barcode scanner');
+
+  const viewport = el('div', 'scanner-viewport');
+  const videoEl = document.createElement('video');
+  videoEl.id = 'stock-scanner-video';
+  videoEl.setAttribute('playsinline', '');
+  videoEl.muted = true;
+  videoEl.autoplay = true;
+  const guideEl = el('div', 'scanner-guide');
+  guideEl.setAttribute('aria-hidden', 'true');
+  viewport.appendChild(videoEl);
+  viewport.appendChild(guideEl);
+  scannerPanel.appendChild(viewport);
+
+  const camActionRow = el('div', 'flex-wrap-row');
+  const camToggleBtn = el('button', 'btn-secondary text-xs flex-1', 'Start Camera');
+  camToggleBtn.type = 'button';
+  camToggleBtn.id = 'stock-cam-toggle-btn';
+  camToggleBtn.setAttribute('aria-pressed', 'false');
+
+  const photoInput = document.createElement('input');
+  photoInput.type = 'file';
+  photoInput.id = 'stock-photo-input';
+  photoInput.accept = 'image/*';
+  photoInput.setAttribute('capture', 'environment');
+  photoInput.className = 'visually-hidden';
+
+  const photoBtn = el('button', 'btn-secondary text-xs flex-1', 'Scan Photo');
+  photoBtn.type = 'button';
+  photoBtn.id = 'stock-scan-photo-btn';
+  photoBtn.addEventListener('click', () => photoInput.click());
+
+  camActionRow.appendChild(camToggleBtn);
+  camActionRow.appendChild(photoBtn);
+  camActionRow.appendChild(photoInput);
+  scannerPanel.appendChild(camActionRow);
+
+  // Manual Barcode Number Lookup
+  const barcodeWrap = el('div', 'space-y-1');
+  const barcodeLbl = el('label', 'block text-xs font-semibold text-slate-200', 'Barcode Number (UPC / EAN)');
+  barcodeLbl.setAttribute('for', 'stock-barcode-input');
+  const barcodeRow = el('div', 'flex-wrap-row');
+  const barcodeInput = el('input', 'flex-1');
+  barcodeInput.id = 'stock-barcode-input';
+  barcodeInput.name = 'barcode';
+  barcodeInput.type = 'text';
+  barcodeInput.setAttribute('inputmode', 'numeric');
+  barcodeInput.setAttribute('autocorrect', 'off');
+  barcodeInput.setAttribute('autocapitalize', 'none');
+  barcodeInput.setAttribute('spellcheck', 'false');
+  barcodeInput.setAttribute('enterkeyhint', 'search');
+  barcodeInput.placeholder = 'e.g. 060383001483';
+
+  const lookupBtn = el('button', 'btn-primary text-xs', 'Look Up');
+  lookupBtn.type = 'button';
+  lookupBtn.id = 'stock-barcode-lookup-btn';
+
+  barcodeRow.appendChild(barcodeInput);
+  barcodeRow.appendChild(lookupBtn);
+  barcodeWrap.appendChild(barcodeLbl);
+  barcodeWrap.appendChild(barcodeRow);
+  scannerPanel.appendChild(barcodeWrap);
+
+  const scanStatusEl = el('p', 'text-xs text-slate-300 wrap-anywhere min-h-[1rem]', '');
+  scanStatusEl.id = 'stock-scan-status';
+  scanStatusEl.setAttribute('role', 'status');
+  scanStatusEl.setAttribute('aria-live', 'polite');
+  scannerPanel.appendChild(scanStatusEl);
+
+  shell.appendChild(scannerPanel);
+
+  // Live Macro Preview Banner
+  const previewBox = el('div', 'ok-banner space-y-1');
+  previewBox.id = 'stock-macro-preview';
+  const previewPer100El = el('div', 'text-xs font-bold', 'Per 100g: 0 kcal · 0g P · 0g C · 0g F');
+  const previewTotalEl = el('div', 'text-xs', 'Total for 0g on hand: 0 kcal · 0g P · 0g C · 0g F');
+  previewBox.appendChild(previewPer100El);
+  previewBox.appendChild(previewTotalEl);
+  shell.appendChild(previewBox);
+
+  // Form
+  const form = document.createElement('form');
+  form.id = 'stock-item-form';
+  form.className = 'space-stack';
+
+  const nameInput = el('input', 'w-full');
+  nameInput.type = 'text';
+  nameInput.required = true;
+  nameInput.maxLength = 80;
+  nameInput.placeholder = 'e.g. Selection White Kidney Beans or Chicken Breast';
+  form.appendChild(createField('stock-name-input', 'Ingredient Name *', nameInput));
+
+  const twoColTop = el('div', 'stock-form-grid');
+  const brandInput = el('input', 'w-full');
+  brandInput.type = 'text';
+  brandInput.maxLength = 50;
+  brandInput.placeholder = 'Optional brand';
+  twoColTop.appendChild(createField('stock-brand-input', 'Brand', brandInput));
+
+  const aisleSelect = el('select', 'w-full');
+  DEFAULT_AISLE_ORDER.forEach((aisleName) => {
+    const opt = document.createElement('option');
+    opt.value = aisleName;
+    opt.textContent = aisleName;
+    aisleSelect.appendChild(opt);
+  });
+  aisleSelect.value = 'Pantry/Canned';
+  twoColTop.appendChild(createField('stock-aisle-select', 'Aisle', aisleSelect));
+  form.appendChild(twoColTop);
+
+  const qtyGrid = el('div', 'stock-form-grid');
+  const gramsInput = el('input', 'w-full');
+  gramsInput.type = 'number';
+  gramsInput.min = '1';
+  gramsInput.max = '50000';
+  gramsInput.step = '1';
+  gramsInput.required = true;
+  gramsInput.value = '500';
+  qtyGrid.appendChild(createField('stock-grams-input', 'Grams on Hand *', gramsInput));
+
+  const pkgInput = el('input', 'w-full');
+  pkgInput.type = 'number';
+  pkgInput.min = '1';
+  pkgInput.max = '20000';
+  pkgInput.step = '1';
+  pkgInput.value = '500';
+  qtyGrid.appendChild(createField('stock-package-input', 'Package Size (g)', pkgInput));
+  form.appendChild(qtyGrid);
+
+  const macroFieldset = el('fieldset', 'subcard space-y-2');
+  macroFieldset.appendChild(el('legend', 'text-xs font-bold text-slate-200', 'Macros per 100g'));
+  const macroGrid = el('div', 'stock-form-grid');
+
+  const calInput = el('input', 'w-full');
+  calInput.type = 'number';
+  calInput.min = '0';
+  calInput.max = '900';
+  calInput.step = '1';
+  calInput.required = true;
+  calInput.value = '0';
+  macroGrid.appendChild(createField('stock-cal-input', 'Calories (kcal)', calInput));
+
+  const protInput = el('input', 'w-full');
+  protInput.type = 'number';
+  protInput.min = '0';
+  protInput.max = '100';
+  protInput.step = '0.1';
+  protInput.required = true;
+  protInput.value = '0';
+  macroGrid.appendChild(createField('stock-prot-input', 'Protein (g)', protInput));
+
+  const carbsInput = el('input', 'w-full');
+  carbsInput.type = 'number';
+  carbsInput.min = '0';
+  carbsInput.max = '100';
+  carbsInput.step = '0.1';
+  carbsInput.required = true;
+  carbsInput.value = '0';
+  macroGrid.appendChild(createField('stock-carbs-input', 'Carbs (g)', carbsInput));
+
+  const fatInput = el('input', 'w-full');
+  fatInput.type = 'number';
+  fatInput.min = '0';
+  fatInput.max = '100';
+  fatInput.step = '0.1';
+  fatInput.required = true;
+  fatInput.value = '0';
+  macroGrid.appendChild(createField('stock-fat-input', 'Fat (g)', fatInput));
+
+  macroFieldset.appendChild(macroGrid);
+  form.appendChild(macroFieldset);
+
+  const btnRow = el('div', 'flex-wrap-row pt-1');
+  const saveBtn = el('button', 'btn-primary flex-1', 'Save to My Stock');
+  saveBtn.type = 'submit';
+  saveBtn.id = 'stock-save-btn';
+
+  const cancelBtn = el('button', 'btn-secondary', 'Cancel');
+  cancelBtn.type = 'button';
+  cancelBtn.id = 'stock-cancel-btn';
+  cancelBtn.addEventListener('click', () => closeStockModal());
+
+  btnRow.appendChild(saveBtn);
+  btnRow.appendChild(cancelBtn);
+  form.appendChild(btnRow);
+
+  shell.appendChild(form);
+  dialog.appendChild(shell);
+  document.body.appendChild(dialog);
+
+  refs = {
+    dialog,
+    titleEl,
+    scannerToggleBtn,
+    scannerPanel,
+    videoEl,
+    camToggleBtn,
+    photoInput,
+    barcodeInput,
+    lookupBtn,
+    scanStatusEl,
+    previewPer100El,
+    previewTotalEl,
+    form,
+    nameInput,
+    brandInput,
+    aisleSelect,
+    gramsInput,
+    pkgInput,
+    calInput,
+    protInput,
+    carbsInput,
+    fatInput
+  };
+
+  scannerToggleBtn.addEventListener('click', () => {
+    const isHidden = scannerPanel.hidden;
+    scannerPanel.hidden = !isHidden;
+    scannerToggleBtn.textContent = isHidden ? 'Hide Barcode Scanner' : 'Show Barcode Scanner';
+    if (!isHidden) stopActiveScanner();
+  });
+
+  camToggleBtn.addEventListener('click', () => {
+    if (activeScannerCtrl) {
+      stopActiveScanner();
+      setScanStatus('Camera paused. You can tap Start Camera or enter a barcode below.', false);
+    } else {
+      startCameraScan();
+    }
+  });
+
+  lookupBtn.addEventListener('click', () => {
+    handleBarcodeLookup(barcodeInput.value);
+  });
+
+  barcodeInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.isComposing) {
+      event.preventDefault();
+      handleBarcodeLookup(barcodeInput.value);
+    }
+  });
+
+  photoInput.addEventListener('change', async () => {
+    const file = photoInput.files && photoInput.files[0];
+    photoInput.value = '';
+    if (!file) return;
+    setScanStatus('Reading barcode from photo...', false);
+    const code = await detectBarcodeFromImageFile(file);
+    if (code) {
+      await handleBarcodeLookup(code);
+    } else {
+      setScanStatus('No barcode detected in that photo. Try a sharper photo or type the numbers below.', true);
+    }
+  });
+
+  [gramsInput, calInput, protInput, carbsInput, fatInput].forEach((inp) => {
+    inp.addEventListener('input', updateMacroPreview);
+  });
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const cleanName = nameInput.value.trim();
+    if (!cleanName) {
+      nameInput.focus();
+      return;
+    }
+    const cleanBarcode = normalizeBarcode(barcodeInput.value);
+    const pkgGrams = clampInt(pkgInput.value, 1, 20000, 500);
+    const payload = {
+      id: currentEditingId || undefined,
+      barcode: cleanBarcode,
+      name: cleanName,
+      brand: brandInput.value.trim(),
+      aisle: aisleSelect.value,
+      gramsOnHand: clampInt(gramsInput.value, 1, 50000, pkgGrams),
+      packageGrams: pkgGrams,
+      per100g: {
+        calories: Math.round(clampNum(calInput.value, 0, 900, 0)),
+        protein: Math.round(clampNum(protInput.value, 0, 100, 0) * 10) / 10,
+        carbs: Math.round(clampNum(carbsInput.value, 0, 100, 0) * 10) / 10,
+        fat: Math.round(clampNum(fatInput.value, 0, 100, 0) * 10) / 10
+      },
+      source: currentSource
+    };
+
+    const saved = upsertPantryStockItem(payload);
+    if (saved) {
+      if (cleanBarcode) {
+        saveCachedBarcodeProduct(cleanBarcode, saved);
+      }
+      const cb = currentOnSaved;
+      closeStockModal();
+      announcePolite('Saved ' + saved.name + ' (' + saved.gramsOnHand + 'g) to My Stock.');
+      if (typeof cb === 'function') cb(saved);
+    }
+  });
+
+  dialog.addEventListener('close', () => {
+    stopActiveScanner();
+    dialog.returnValue = '';
+  });
+
+  dialogEl = dialog;
+  return dialog;
+}
+
+export function closeStockModal() {
+  stopActiveScanner();
+  if (dialogEl && dialogEl.open) {
+    dialogEl.close();
+  }
+}
+
+export function openStockModal({ mode = 'scan', item = null, onSaved = null } = {}) {
+  const dialog = ensureDialogBuilt();
+  currentOnSaved = typeof onSaved === 'function' ? onSaved : null;
+  currentEditingId = item && item.id ? item.id : null;
+  currentSource = (item && item.source) ? item.source : 'manual';
+
+  refs.form.reset();
+  refs.barcodeInput.value = '';
+  refs.nameInput.value = '';
+  refs.brandInput.value = '';
+  refs.aisleSelect.value = 'Pantry/Canned';
+  refs.gramsInput.value = '500';
+  refs.pkgInput.value = '500';
+  refs.calInput.value = '0';
+  refs.protInput.value = '0';
+  refs.carbsInput.value = '0';
+  refs.fatInput.value = '0';
+
+  if (mode === 'edit' && item) {
+    refs.titleEl.textContent = 'Edit Stock Ingredient';
+    populateFormFromProduct(item, { keepGrams: false });
+    refs.scannerPanel.hidden = true;
+    refs.scannerToggleBtn.hidden = false;
+    refs.scannerToggleBtn.textContent = 'Show Barcode Scanner';
+    setScanStatus('', false);
+  } else if (mode === 'manual') {
+    refs.titleEl.textContent = 'Add Ingredient to My Stock';
+    refs.scannerPanel.hidden = true;
+    refs.scannerToggleBtn.hidden = false;
+    refs.scannerToggleBtn.textContent = 'Show Barcode Scanner';
+    setScanStatus('', false);
+  } else {
+    refs.titleEl.textContent = 'Scan Barcode & Add Stock';
+    refs.scannerPanel.hidden = false;
+    refs.scannerToggleBtn.hidden = true;
+    if (isBarcodeDetectorSupported()) {
+      setScanStatus('Starting camera or enter barcode number below...', false);
+    } else {
+      setScanStatus('Type the barcode digits below (or use Scan Photo) to load macros from Open Food Facts.', false);
+    }
+  }
+
+  updateMacroPreview();
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+
+  if (mode === 'scan') {
+    refs.barcodeInput.focus();
+    if (isBarcodeDetectorSupported()) {
+      startCameraScan();
+    }
+  } else {
+    refs.nameInput.focus();
+  }
+}

@@ -23,6 +23,7 @@ import { renderMealsTab } from './views/mealsView.js';
 import { tickTimers, syncWakeLock, renderPrepTab } from './views/prepView.js';
 import { renderGroceriesTab } from './views/groceriesView.js';
 import { invalidateSettings, updateSettingsControlsInPlace, renderSettingsTab } from './views/settingsView.js';
+import { openStockModal } from './views/stockModal.js';
 
 let timerIntervalId = null;
 
@@ -77,6 +78,20 @@ const groceriesCallbacks = {
   onSwapsChanged: () => {
     renderMealsTab(mealsCallbacks);
     renderPrepTab();
+  },
+  onStockChanged: () => {
+    renderMealsTab(mealsCallbacks);
+    renderPrepTab();
+    renderGroceriesTab(groceriesCallbacks);
+    updateSettingsControlsInPlace();
+  },
+  onOpenSettingsJson: () => {
+    selectTab('settings', false);
+    const jsonBox = document.getElementById('custom-meal-json-input');
+    if (jsonBox) {
+      if (jsonBox.scrollIntoView) jsonBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      jsonBox.focus();
+    }
   }
 };
 
@@ -106,6 +121,24 @@ const settingsCallbacks = {
   },
   onPostalChanged: () => {
     renderGroceriesTab(groceriesCallbacks);
+  },
+  onOpenStockSubtab: () => {
+    const appState = getAppState();
+    appState.groceriesSubtab = 'stock';
+    saveState();
+    selectTab('groceries', false);
+    renderGroceriesTab(groceriesCallbacks);
+  },
+  onOpenStockScanner: () => {
+    openStockModal({
+      mode: 'scan',
+      onSaved: () => {
+        renderMealsTab(mealsCallbacks);
+        renderPrepTab();
+        renderGroceriesTab(groceriesCallbacks);
+        updateSettingsControlsInPlace();
+      }
+    });
   },
   onSyncFlyer: manualSyncFlyerData
 };

@@ -1392,3 +1392,36 @@ test('Suite 9: Per-slot macro solver weighting (options.slotSplits) invariants, 
     assert.equal(/\b(?:pantryRollover|partialPackage|leftoverGrams|rolloverGrams|partialPackageCredit)\b/i.test(engineSrc), false);
   });
 });
+
+test('Suite 10: stockGramsOnHand partial and full stock deductions in scaleToHorizon', () => {
+  const plan = solveDailyPortions(null, { preset: 'cut' });
+  const baseScaled = scaleToHorizon(plan, null, { days: 7 });
+  const riceBase = baseScaled.groceryListByAisle.flatMap((a) => a.items).find((i) => i.id === 'rice_dry');
+  assert.ok(riceBase && riceBase.totalGramsNeeded > 300);
+
+  // Partial stock deduction (300g on hand)
+  const partialScaled = scaleToHorizon(plan, null, {
+    days: 7,
+    stockGramsOnHand: { rice_dry: 300 }
+  });
+  const ricePartial = partialScaled.groceryListByAisle.flatMap((a) => a.items).find((i) => i.id === 'rice_dry');
+  assert.equal(ricePartial.stockOnHandGrams, 300);
+  assert.equal(ricePartial.stockDeductedGrams, 300);
+  assert.equal(ricePartial.remainingGrams, Math.round((riceBase.totalGramsNeeded - 300) * 10) / 10);
+  assert.equal(ricePartial.inStock, false);
+  assert.ok(partialScaled.summary.remainingCostCad <= baseScaled.summary.totalCostCad);
+
+  // Full stock deduction (>= totalGramsNeeded)
+  const fullGrams = Math.ceil(riceBase.totalGramsNeeded + 250);
+  const fullScaled = scaleToHorizon(plan, null, {
+    days: 7,
+    stockGramsOnHand: { rice_dry: fullGrams }
+  });
+  const riceFull = fullScaled.groceryListByAisle.flatMap((a) => a.items).find((i) => i.id === 'rice_dry');
+  assert.equal(riceFull.stockOnHandGrams, fullGrams);
+  assert.equal(riceFull.stockDeductedGrams, riceBase.totalGramsNeeded);
+  assert.equal(riceFull.remainingGrams, 0);
+  assert.equal(riceFull.remainingPackagesNeeded, 0);
+  assert.equal(riceFull.remainingCostCad, 0);
+  assert.ok(fullScaled.summary.savedByPantryCad >= riceBase.costCad - 0.01);
+});

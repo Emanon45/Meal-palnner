@@ -700,6 +700,10 @@ input[type="number"] {
   padding-top: 0.5rem;
 }
 
+.pb-2 {
+  padding-bottom: 0.5rem;
+}
+
 .px-2\.5 {
   padding-left: 0.625rem;
   padding-right: 0.625rem;
@@ -819,6 +823,10 @@ input[type="number"] {
   border-top-width: 1px;
 }
 
+.border-b {
+  border-bottom-width: 1px;
+}
+
 .list-disc {
   list-style-type: disc;
 }
@@ -882,6 +890,78 @@ input[type="number"] {
   padding: 0 !important;
   border: 0 !important;
   white-space: nowrap !important;
+}
+
+/* Groceries 2-Subtab Switcher & My Stock Scanner Dialog */
+.subtab-bar {
+  padding-block: 0.25rem 0.5rem;
+  border-block-end: 1px solid var(--border);
+}
+
+.stock-item-card {
+  border-color: var(--border-strong);
+}
+
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  background: rgba(27, 25, 23, 0.55);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+dialog.stock-dialog {
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-main);
+  inline-size: min(420px, calc(100vw - 1.25rem));
+  max-inline-size: calc(100vw - 1.25rem);
+  max-block-size: calc(100dvh - 2rem);
+  overflow-y: auto;
+}
+
+dialog.stock-dialog[open] {
+  display: block;
+}
+
+.stock-dialog-shell {
+  padding: 0.875rem;
+}
+
+.scanner-viewport {
+  position: relative;
+  inline-size: 100%;
+  block-size: 11.5rem;
+  background: #1B1917;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.scanner-viewport video {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.scanner-guide {
+  position: absolute;
+  inset-inline: 12%;
+  inset-block: 26%;
+  border: 2px solid #E7EFEA;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.stock-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
 }
 
 @media (prefers-reduced-motion: reduce) {

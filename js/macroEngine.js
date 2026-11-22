@@ -2657,8 +2657,9 @@
       }
     }
 
-    // Deductions: frozenMealsOnHand + explicit haveAtHome
+    // Deductions: frozenMealsOnHand + explicit haveAtHome + stockGramsOnHand
     var haveAtHome = (safeOpts.haveAtHome && typeof safeOpts.haveAtHome === 'object') ? safeOpts.haveAtHome : {};
+    var stockGramsMap = (safeOpts.stockGramsOnHand && typeof safeOpts.stockGramsOnHand === 'object') ? safeOpts.stockGramsOnHand : {};
     var frozenPortionsApplied = Math.min(days, Math.max(0, Math.floor(Number(safeOpts.frozenMealsOnHand) || 0)));
 
     var suppliedAisleOrder = sanitizeAisleOrder(safeData.aisleOrder);
@@ -2700,7 +2701,15 @@
       var afterFrozenGrams = round1(Math.max(0, totalGramsNeeded - frozenDeducted));
 
       var inStock = hasOwn(haveAtHome, gid) ? Boolean(haveAtHome[gid]) : false;
-      var remainingGrams = inStock ? 0 : afterFrozenGrams;
+      var stockOnHandGrams = (!inStock && hasOwn(stockGramsMap, gid))
+        ? round1(Math.max(0, Number(stockGramsMap[gid]) || 0))
+        : 0;
+      var stockDeductedGrams = inStock
+        ? afterFrozenGrams
+        : round1(Math.min(afterFrozenGrams, stockOnHandGrams));
+      var remainingGrams = inStock
+        ? 0
+        : round1(Math.max(0, afterFrozenGrams - stockDeductedGrams));
 
       var packagesNeeded = null;
       var remainingPackagesNeeded = null;
@@ -2756,6 +2765,8 @@
         costCad: costCents / 100,
         remainingCostCad: remCostCents / 100,
         inStock: inStock,
+        stockOnHandGrams: stockOnHandGrams,
+        stockDeductedGrams: stockDeductedGrams,
         radarTag: gItem.price.radarTag,
         onFlyer: gItem.price.onFlyer
       });

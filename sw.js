@@ -1,7 +1,7 @@
 'use strict';
 
 const CACHE_PREFIX = 'meal-plan-';
-const CACHE_VERSION = 'v7';
+const CACHE_VERSION = 'v8';
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 
 const CORE_ASSETS = [
@@ -11,11 +11,13 @@ const CORE_ASSETS = [
   './css/styles.css',
   './schema/nutrition_baseline.json',
   './js/macroEngine.js',
+  './js/barcodeScanner.js',
   './js/state.js',
   './js/geminiPrompts.js',
   './js/views/mealsView.js',
   './js/views/prepView.js',
   './js/views/groceriesView.js',
+  './js/views/stockModal.js',
   './js/views/settingsView.js',
   './js/app.js',
   './data.json',

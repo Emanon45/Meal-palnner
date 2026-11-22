@@ -169,7 +169,63 @@ export function normalizePostalCode(raw) {
 }
 
 export function getEngine() {
-  return window.MacroEngine;
+  if (typeof globalThis !== 'undefined' && globalThis.MacroEngine) return globalThis.MacroEngine;
+  if (typeof window !== 'undefined' && window.MacroEngine) return window.MacroEngine;
+  return null;
+}
+
+export function sanitizePantryStockItem(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+  const rawBarcode = String(entry.barcode || '').replace(/\D+/g, '');
+  const barcode = (rawBarcode.length >= 8 && rawBarcode.length <= 14) ? rawBarcode : '';
+  const name = typeof entry.name === 'string' ? entry.name.trim().slice(0, 80) : '';
+  const safeName = name || (barcode ? ('Product ' + barcode) : '');
+  if (!safeName) return null;
+
+  let rawId = typeof entry.id === 'string' ? entry.id.trim() : '';
+  if (!rawId || rawId === '__proto__' || rawId === 'constructor' || rawId === 'prototype') {
+    rawId = makeStockItemId(barcode, safeName);
+  }
+  const per = (entry.per100g && typeof entry.per100g === 'object') ? entry.per100g : {};
+  const rawAisle = typeof entry.aisle === 'string' ? entry.aisle.trim() : '';
+  const aisle = DEFAULT_AISLE_ORDER.indexOf(rawAisle) !== -1 ? rawAisle : 'Pantry/Canned';
+  const rawSource = typeof entry.source === 'string' ? entry.source.trim() : '';
+  const source = (rawSource === 'openfoodfacts' || rawSource === 'builtin' || rawSource === 'manual') ? rawSource : 'manual';
+
+  return {
+    id: rawId,
+    barcode: barcode,
+    name: safeName,
+    brand: typeof entry.brand === 'string' ? entry.brand.trim().slice(0, 50) : '',
+    aisle: aisle,
+    gramsOnHand: clampInt(entry.gramsOnHand, 0, 50000, 0),
+    packageGrams: clampInt(entry.packageGrams, 1, 20000, 500),
+    cookedYield: clampNum(entry.cookedYield, 0.2, 4.0, 1.0),
+    per100g: {
+      calories: Math.round(clampNum(per.calories, 0, 900, 0)),
+      protein: Math.round(clampNum(per.protein, 0, 100, 0) * 10) / 10,
+      fat: Math.round(clampNum(per.fat, 0, 100, 0) * 10) / 10,
+      carbs: Math.round(clampNum(per.carbs, 0, 100, 0) * 10) / 10
+    },
+    source: source
+  };
+}
+
+export function makeStockItemId(barcode, name) {
+  const digits = String(barcode || '').replace(/\D+/g, '');
+  if (digits.length >= 8 && digits.length <= 14) {
+    return 'stock_' + digits;
+  }
+  const slug = String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 32);
+  const candidate = slug ? ('stock_' + slug) : ('stock_item_' + Date.now());
+  if (candidate === '__proto__' || candidate === 'constructor' || candidate === 'prototype') {
+    return 'stock_item_' + Date.now();
+  }
+  return candidate;
 }
 
 export function getGoalPresets(data) {
@@ -290,6 +346,8 @@ export function buildDefaultState() {
     },
     haveAtHome: {},
     inCart: {},
+    groceriesSubtab: 'buy',
+    pantryStock: [],
     frozenMealsOnHand: 0,
     postalCode: 'H1W',
     profileDescription: 'High-Protein Batch Prep',
@@ -446,6 +504,20 @@ export function validateState(raw) {
     feedback: feedback,
     haveAtHome: haveAtHome,
     inCart: inCart,
+    groceriesSubtab: raw.groceriesSubtab === 'stock' ? 'stock' : 'buy',
+    pantryStock: (() => {
+      if (!Array.isArray(raw.pantryStock)) return [];
+      const seenIds = Object.create(null);
+      const out = [];
+      for (let i = 0; i < raw.pantryStock.length && out.length < 100; i++) {
+        const clean = sanitizePantryStockItem(raw.pantryStock[i]);
+        if (clean && !seenIds[clean.id]) {
+          seenIds[clean.id] = true;
+          out.push(clean);
+        }
+      }
+      return out;
+    })(),
     frozenMealsOnHand: clampInt(raw.frozenMealsOnHand, 0, horizonDays, 0),
     postalCode: normalizePostalCode(raw.postalCode),
     profileDescription: (typeof raw.profileDescription === 'string' && raw.profileDescription.trim())
@@ -505,7 +577,11 @@ export function validateState(raw) {
 
 export function safeStorageGet(key) {
   try {
-    const raw = window.localStorage.getItem(key);
+    const store = (typeof globalThis !== 'undefined' && globalThis.localStorage)
+      ? globalThis.localStorage
+      : ((typeof window !== 'undefined' && window.localStorage) ? window.localStorage : null);
+    if (!store) return null;
+    const raw = store.getItem(key);
     if (!raw) return null;
     return JSON.parse(raw);
   } catch (_err) {
@@ -515,7 +591,11 @@ export function safeStorageGet(key) {
 
 export function safeStorageSet(key, value) {
   try {
-    window.localStorage.setItem(key, JSON.stringify(value));
+    const store = (typeof globalThis !== 'undefined' && globalThis.localStorage)
+      ? globalThis.localStorage
+      : ((typeof window !== 'undefined' && window.localStorage) ? window.localStorage : null);
+    if (!store) return;
+    store.setItem(key, JSON.stringify(value));
   } catch (_err) {
     // Ignore storage quota or private-mode errors
   }
@@ -533,6 +613,7 @@ export const uiStatus = {
   customJsonStatusText: '',
   shareStatusText: '',
   lastTimerStatusText: '',
+  stockStatusText: '',
   settingsBuilt: false
 };
 
@@ -768,9 +849,9 @@ export function applyCustomMealJsonOverlay(targetData, rawJsonStr) {
       if (!cid || cid === '__proto__' || cid === 'constructor' || cid === 'prototype') return;
       if (!ci || typeof ci !== 'object') return;
       const per = (ci.per100g && typeof ci.per100g === 'object') ? ci.per100g : ci;
-      const pkgG = clampNum(ci.packageGrams, 20, 20000, 500);
-      const cadPkg = clampNum(ci.cadPerPackage !== undefined ? ci.cadPerPackage : (ci.price && ci.price.cadPerPackage), 0.25, 250, 4.99);
-      const cad100 = clampNum(ci.cadPer100g !== undefined ? ci.cadPer100g : (ci.price && ci.price.cadPer100g), 0.05, 50, Math.round((cadPkg / (pkgG / 100)) * 100) / 100);
+      const pkgG = clampNum(ci.packageGrams, 1, 20000, 500);
+      const cadPkg = clampNum(ci.cadPerPackage !== undefined ? ci.cadPerPackage : (ci.price && ci.price.cadPerPackage), 0, 250, 4.99);
+      const cad100 = clampNum(ci.cadPer100g !== undefined ? ci.cadPer100g : (ci.price && ci.price.cadPer100g), 0, 50, Math.round((cadPkg / (pkgG / 100)) * 100) / 100);
       const storeName = typeof ci.store === 'string' && ci.store.trim() ? ci.store.trim() : '';
       targetData.nutritionDb[cid] = {
         name: typeof ci.name === 'string' && ci.name.trim() ? ci.name.trim() : cid,
@@ -990,12 +1071,136 @@ export function getDayEatenMap(day) {
   return appState.eatenByDay[key];
 }
 
+export function buildStockGramsMap(pantryStock) {
+  const list = Array.isArray(pantryStock) ? pantryStock : (appState.pantryStock || []);
+  const map = {};
+  list.forEach((item) => {
+    if (!item || !item.id || item.id === '__proto__' || item.id === 'constructor' || item.id === 'prototype') return;
+    const g = Number(item.gramsOnHand);
+    if (Number.isFinite(g) && g > 0) {
+      map[item.id] = (map[item.id] || 0) + g;
+    }
+  });
+  return map;
+}
+
+export function upsertPantryStockItem(rawItem) {
+  if (!rawItem || typeof rawItem !== 'object') return null;
+  if (!Array.isArray(appState.pantryStock)) appState.pantryStock = [];
+
+  const candidateDigits = String(rawItem.barcode || '').replace(/\D+/g, '');
+  const cleanBarcode = (candidateDigits.length >= 8 && candidateDigits.length <= 14) ? candidateDigits : '';
+
+  let existingIdx = -1;
+  if (typeof rawItem.id === 'string' && rawItem.id.trim()) {
+    const targetId = rawItem.id.trim();
+    existingIdx = appState.pantryStock.findIndex((it) => it && it.id === targetId);
+  }
+  if (existingIdx === -1 && cleanBarcode) {
+    existingIdx = appState.pantryStock.findIndex((it) => it && it.barcode === cleanBarcode);
+  }
+
+  let resolvedId = typeof rawItem.id === 'string' ? rawItem.id.trim() : '';
+  if (existingIdx !== -1) {
+    resolvedId = appState.pantryStock[existingIdx].id;
+  } else if (!resolvedId) {
+    const baseId = makeStockItemId(cleanBarcode, rawItem.name);
+    resolvedId = baseId;
+    if (!cleanBarcode) {
+      let suffix = 2;
+      while (appState.pantryStock.some((it) => it && it.id === resolvedId) && suffix < 100) {
+        resolvedId = baseId + '_' + suffix;
+        suffix++;
+      }
+    }
+  }
+
+  const sanitized = sanitizePantryStockItem(Object.assign({}, rawItem, { id: resolvedId, barcode: cleanBarcode }));
+  if (!sanitized) return null;
+
+  if (existingIdx !== -1) {
+    appState.pantryStock[existingIdx] = sanitized;
+  } else if (appState.pantryStock.length < 100) {
+    appState.pantryStock.push(sanitized);
+  } else {
+    return null;
+  }
+
+  saveState();
+  recomputePlan();
+  return sanitized;
+}
+
+export function updatePantryStockGrams(id, grams) {
+  if (!Array.isArray(appState.pantryStock) || !id) return null;
+  const idx = appState.pantryStock.findIndex((it) => it && it.id === id);
+  if (idx === -1) return null;
+  const nextGrams = clampInt(grams, 0, 50000, appState.pantryStock[idx].gramsOnHand);
+  appState.pantryStock[idx].gramsOnHand = nextGrams;
+  saveState();
+  recomputePlan();
+  return appState.pantryStock[idx];
+}
+
+export function removePantryStockItem(id) {
+  if (!Array.isArray(appState.pantryStock) || !id) return false;
+  const beforeLen = appState.pantryStock.length;
+  appState.pantryStock = appState.pantryStock.filter((it) => it && it.id !== id);
+  if (appState.pantryStock.length === beforeLen) return false;
+  saveState();
+  recomputePlan();
+  return true;
+}
+
 export function getEffectiveAppData() {
   const swaps = appState.grocerySwaps || {};
   const swapKeys = Object.keys(swaps);
-  if (swapKeys.length === 0) return appData;
+  const stockList = Array.isArray(appState.pantryStock) ? appState.pantryStock : [];
+  if (swapKeys.length === 0 && stockList.length === 0) return appData;
 
   const cloned = Object.assign({}, appData);
+
+  if (stockList.length > 0) {
+    const nextDb = (appData.nutritionDb && typeof appData.nutritionDb === 'object')
+      ? Object.assign({}, appData.nutritionDb)
+      : {};
+    stockList.forEach((item) => {
+      if (!item || !item.id || item.id === '__proto__' || item.id === 'constructor' || item.id === 'prototype') return;
+      const existsInDb = Boolean(nextDb[item.id]);
+      if (!existsInDb || item.id.indexOf('stock_') === 0) {
+        const pkgG = clampInt(item.packageGrams, 1, 20000, 500);
+        nextDb[item.id] = {
+          name: item.brand ? (item.name + ' (' + item.brand + ')') : item.name,
+          aisle: item.aisle || 'Pantry/Canned',
+          per100g: {
+            calories: Number(item.per100g && item.per100g.calories) || 0,
+            protein: Number(item.per100g && item.per100g.protein) || 0,
+            fat: Number(item.per100g && item.per100g.fat) || 0,
+            carbs: Number(item.per100g && item.per100g.carbs) || 0
+          },
+          cookedYield: clampNum(item.cookedYield, 0.2, 4.0, 1.0),
+          packageGrams: pkgG,
+          unitLabel: 'pack (' + pkgG + 'g)',
+          requiresThaw: item.aisle === 'Frozen',
+          pantryDefault: false,
+          price: {
+            cadPer100g: 0,
+            cadPerPackage: 0,
+            regularCadPer100g: 0,
+            historicalLowCadPer100g: 0,
+            savingsPct: 0,
+            radarTag: 'AT HOME',
+            flyerItemName: 'Current Stock at Home',
+            onFlyer: false
+          }
+        };
+      }
+    });
+    cloned.nutritionDb = nextDb;
+  }
+
+  if (swapKeys.length === 0) return cloned;
+
   const srcMeals = (appData.mealTemplates && Array.isArray(appData.mealTemplates.meals))
     ? appData.mealTemplates.meals
     : [
@@ -1087,6 +1292,7 @@ export function recomputePlan() {
       secondaryDays: activeAltPlan ? Math.floor(appState.horizonDays / 2) : 0,
       householdPlans: currentHouseholdPlans.length > 1 ? currentHouseholdPlans : null,
       haveAtHome: appState.haveAtHome,
+      stockGramsOnHand: buildStockGramsMap(appState.pantryStock),
       frozenMealsOnHand: Math.min(appState.horizonDays, appState.frozenMealsOnHand)
     });
   } catch (_err) {
@@ -1146,6 +1352,7 @@ export function computeSwapDeltaMap(slotId) {
       const scaled = engine.scaleToHorizon(daily, appData, {
         days: appState.horizonDays,
         haveAtHome: appState.haveAtHome,
+        stockGramsOnHand: buildStockGramsMap(appState.pantryStock),
         frozenMealsOnHand: Math.min(appState.horizonDays, appState.frozenMealsOnHand)
       });
       const cost = scaled.summary.remainingCostCad;
