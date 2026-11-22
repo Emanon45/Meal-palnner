@@ -760,10 +760,12 @@ export function renderGroceriesTab(callbacks) {
   summaryCard.id = 'grocery-summary-card';
   let totalItems = 0;
   let cartCount = 0;
+  let haveAtHomeCount = 0;
   currentScaledPlan.groceryListByAisle.forEach((sec) => {
     sec.items.forEach((it) => {
       totalItems++;
       if (appState.inCart[it.id]) cartCount++;
+      if (appState.haveAtHome[it.id]) haveAtHomeCount++;
     });
   });
 
@@ -836,6 +838,17 @@ export function renderGroceriesTab(callbacks) {
       renderGroceriesTab();
     });
     aisleCtrlRow.appendChild(clearCartBtn);
+  }
+  if (haveAtHomeCount > 0) {
+    const clearHomeBtn = el('button', 'btn-secondary text-xs', 'Clear Have at Home');
+    clearHomeBtn.type = 'button';
+    clearHomeBtn.addEventListener('click', () => {
+      appState.haveAtHome = {};
+      saveState();
+      recomputePlan();
+      renderGroceriesTab();
+    });
+    aisleCtrlRow.appendChild(clearHomeBtn);
   }
   if (appState.grocerySwaps && Object.keys(appState.grocerySwaps).length > 0) {
     const resetSwapsBtn = el('button', 'btn-secondary text-xs', 'Reset Ingredient Swaps');

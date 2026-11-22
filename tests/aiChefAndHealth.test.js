@@ -457,4 +457,144 @@ test('Health Warnings, AI Chef Prompts, Store Barcode Swap, Preview & Undo', asy
     stateMod.clearPantryStaples();
     assert.deepEqual(appState.pantryStapleMeta, {});
   });
+
+  await t.test('New week plan resets stale inCart/haveAtHome/swaps, stops haveAtHome prompt leakage, and parses unit-formatted grams & slot aliases', () => {
+    const appState = stateMod.getAppState();
+    appState.pantryStock = [];
+    appState.inCart = { whole_egg: true, pork_loin_lean: true };
+    appState.haveAtHome = { pork_loin_lean: true, rice_dry: true };
+    appState.grocerySwaps = { chicken_breast: 'swap_old_123' };
+    appState.customSwapItems = {
+      swap_old_123: {
+        id: 'swap_old_123',
+        name: 'Old Swapped Turkey',
+        aisle: 'Meat',
+        packageGrams: 500,
+        gramsOnHand: 500,
+        per100g: { calories: 130, protein: 20, fat: 5, carbs: 0 }
+      }
+    };
+    appState.eatenByDay = { '1': { breakfast: true } };
+
+    // 1. haveAtHome checkboxes must NOT leak into buildHomeStockPromptBlock when pantryStock is empty
+    const promptNoLeak = promptsMod.buildGeminiMealPrompt();
+    assert.doesNotMatch(promptNoLeak, /PERISHABLES AT HOME — USE FIRST/);
+    assert.doesNotMatch(promptNoLeak, /already marked at home/);
+
+    // 2. Resilient slot matching (id: "meal_1", slot: "Breakfast") and string grams/prices ("180g", "$7.99")
+    const geminiNeonJson = JSON.stringify({
+      weeklyTheme: 'Neon Clean Week',
+      winningStore: 'Super C',
+      targetCalories: '1900 kcal',
+      customIngredients: {
+        salmon_sc: {
+          name: 'Wild Pink Salmon',
+          store: 'Super C',
+          aisle: 'Meat',
+          per100g: { calories: '142 kcal', protein: '21.5g', fat: '5.4g', carbs: '0g' },
+          packageGrams: '454g',
+          cadPerPackage: '$7.99'
+        },
+        quinoa_sc: {
+          name: 'Tri-Color Quinoa',
+          store: 'Super C',
+          aisle: 'Pantry/Canned',
+          per100g: { calories: 368, protein: 14, fat: 6, carbs: 64 },
+          packageGrams: '900 g',
+          cadPerPackage: '$6.49'
+        }
+      },
+      meals: [
+        {
+          id: 'meal_1',
+          slot: 'Breakfast',
+          title: 'Salmon & Egg Scramble',
+          cookingMethod: 'Pan scramble',
+          seasoningTwist: 'Dill & lemon',
+          ingredients: [
+            { id: 'whole_egg', grams: '150g' },
+            { id: 'salmon_sc', grams: '120 g' }
+          ]
+        },
+        {
+          id: 'meal_2',
+          slot: 'Lunch',
+          title: 'Salmon Quinoa Bowl',
+          cookingMethod: 'Steamed quinoa + seared salmon',
+          seasoningTwist: 'Garlic & herbs',
+          ingredients: [
+            { id: 'salmon_sc', grams: '180g' },
+            { id: 'quinoa_sc', grams: '90g' }
+          ]
+        },
+        {
+          id: 'meal_3',
+          slot: 'Dinner',
+          title: 'Herbed Salmon Plate',
+          cookingMethod: 'Oven baked',
+          seasoningTwist: 'Paprika',
+          ingredients: [
+            { id: 'salmon_sc', grams: '200 grams' },
+            { id: 'quinoa_sc', grams: '80g' }
+          ]
+        },
+        {
+          id: 'meal_4',
+          slot: 'Snack',
+          title: 'Skyr Berry Cup',
+          cookingMethod: 'Chilled',
+          seasoningTwist: 'Cinnamon',
+          ingredients: [
+            { id: 'skyr_0', grams: '250g' }
+          ]
+        }
+      ]
+    });
+
+    const targetData = stateMod.mergeWithFallbackData(null);
+    assert.equal(stateMod.applyCustomMealJsonOverlay(targetData, geminiNeonJson), true);
+    assert.equal(targetData.nutritionDb.salmon_sc.packageGrams, 454);
+    assert.equal(targetData.nutritionDb.salmon_sc.price.cadPerPackage, 7.99);
+    assert.equal(targetData.mealTemplates.meals[0].title, 'Salmon & Egg Scramble');
+    assert.equal(targetData.mealTemplates.meals[1].title, 'Salmon Quinoa Bowl');
+    assert.equal(targetData.mealTemplates.meals[2].title, 'Herbed Salmon Plate');
+    assert.equal(targetData.mealTemplates.meals[3].title, 'Skyr Berry Cup');
+
+    const solved = globalThis.MacroEngine.solveDailyPortions(targetData, { preset: 'cut' });
+    assert.ok(solved.ingredientGrams.salmon_sc > 0);
+    assert.ok(solved.ingredientGrams.quinoa_sc > 0);
+    // Default pork_loin_lean & ground_chicken should NOT appear when all 4 slots matched custom ingredients
+    assert.equal(solved.ingredientGrams.pork_loin_lean, undefined);
+    assert.equal(solved.ingredientGrams.ground_chicken, undefined);
+
+    // 3. resetWeeklyShoppingState clears inCart, haveAtHome, grocerySwaps, customSwapItems, and eatenByDay
+    appState.customMealJsonRaw = geminiNeonJson;
+    stateMod.resetWeeklyShoppingState();
+    assert.deepEqual(appState.inCart, {});
+    assert.deepEqual(appState.haveAtHome, {});
+    assert.deepEqual(appState.grocerySwaps, {});
+    assert.deepEqual(appState.customSwapItems, {});
+    assert.deepEqual(appState.eatenByDay, {});
+    assert.equal(appState.activePlanStamp, stateMod.computePlanStamp(geminiNeonJson));
+
+    // 4. validateState auto-clears legacy unstamped custom plans while preserving stamped cart state
+    const legacyUnstamped = stateMod.validateState({
+      customMealJsonRaw: geminiNeonJson,
+      inCart: { whole_egg: true },
+      haveAtHome: { whole_egg: true },
+      grocerySwaps: { whole_egg: 'egg_whites' }
+    });
+    assert.deepEqual(legacyUnstamped.inCart, {});
+    assert.deepEqual(legacyUnstamped.haveAtHome, {});
+    assert.deepEqual(legacyUnstamped.grocerySwaps, {});
+
+    const currentStamped = stateMod.validateState({
+      customMealJsonRaw: geminiNeonJson,
+      activePlanStamp: stateMod.computePlanStamp(geminiNeonJson),
+      inCart: { salmon_sc: true },
+      haveAtHome: { skyr_0: true }
+    });
+    assert.equal(currentStamped.inCart.salmon_sc, true);
+    assert.equal(currentStamped.haveAtHome.skyr_0, true);
+  });
 });

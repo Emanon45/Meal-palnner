@@ -1416,6 +1416,7 @@ export function closeStockModal() {
 
 export function openStockModal({
   mode = 'scan',
+  manualOnly = false,
   item = null,
   swapTarget = null,
   defaultCategory = '',
@@ -1465,7 +1466,7 @@ export function openStockModal({
   const isBatchMode = mode === 'batch_scan';
   const isStoreLookupMode = mode === 'swap' || mode === 'adjust_scan';
   const isStapleMode = mode === 'staple_scan';
-  const showScannerByDefault = mode === 'scan' || mode === 'swap' || mode === 'adjust_scan' || isStapleMode || isBatchMode;
+  const showScannerByDefault = !manualOnly && (mode === 'scan' || mode === 'swap' || mode === 'adjust_scan' || isStapleMode || isBatchMode);
 
   const resolvedBucket = (defaultBucket === 'perishable' || defaultBucket === 'non_perishable' || defaultBucket === 'spice')
     ? defaultBucket
@@ -1544,16 +1545,23 @@ export function openStockModal({
       false
     );
   } else if (mode === 'adjust_scan') {
-    refs.titleEl.textContent = 'Scan Item Found at Maxi / Super C';
+    refs.titleEl.textContent = manualOnly
+      ? 'Add Store Item to Plan Adjustment'
+      : 'Scan Item Found at Maxi / Super C';
     refs.saveBtn.textContent = 'Add to Plan Adjustment';
-    refs.scannerPanel.hidden = false;
-    refs.scannerToggleBtn.hidden = true;
-    setScanStatus(
-      isBarcodeDetectorSupported()
-        ? 'Scan item barcode at Maxi/Super C (or enter barcode / name below).'
-        : 'Type the barcode digits below (or enter details) to add to your adjustment prompt.',
-      false
-    );
+    refs.scannerPanel.hidden = Boolean(manualOnly);
+    refs.scannerToggleBtn.hidden = !manualOnly;
+    if (manualOnly) {
+      refs.scannerToggleBtn.textContent = 'Show Barcode Scanner';
+      setScanStatus('', false);
+    } else {
+      setScanStatus(
+        isBarcodeDetectorSupported()
+          ? 'Scan item barcode at Maxi/Super C (or enter barcode / name below).'
+          : 'Type the barcode digits below (or enter details) to add to your adjustment prompt.',
+        false
+      );
+    }
   } else if (isStapleMode) {
     refs.titleEl.textContent = 'Scan Spice, Oil or Condiment';
     refs.saveBtn.textContent = 'Save to Spices & Condiments';

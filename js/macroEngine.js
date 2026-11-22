@@ -701,10 +701,39 @@
       ? data.mealTemplates.meals
       : [];
 
+    function resolveTemplateSlotId(mealObj, idx, totalLen) {
+      var cands = [mealObj.slot, mealObj.id, mealObj.mealSlot, mealObj.type];
+      for (var c = 0; c < cands.length; c++) {
+        var raw = typeof cands[c] === 'string' ? cands[c].trim().toLowerCase() : '';
+        if (!raw) continue;
+        if (hasOwn(out, raw)) return raw;
+        if (raw.indexOf('breakfast') !== -1 || raw.indexOf('déjeuner') !== -1 || raw.indexOf('dejeuner') !== -1) return 'breakfast';
+        if (raw.indexOf('lunch') !== -1 || raw === 'midi') return 'lunch';
+        if (raw.indexOf('dinner') !== -1 || raw.indexOf('supper') !== -1 || raw.indexOf('souper') !== -1) return 'dinner';
+        if (raw.indexOf('snack') !== -1 || raw.indexOf('collation') !== -1) return 'snack';
+      }
+      if (totalLen === 4 && idx >= 0 && idx < 4) {
+        return slotIds[idx];
+      }
+      return '';
+    }
+
+    function parseTemplateGrams(rawVal) {
+      if (typeof rawVal === 'string') {
+        var trimmed = rawVal.trim().replace(/,/g, '.');
+        var mMatch = trimmed.match(/^([0-9]+(?:\.[0-9]+)?)\s*(?:g|gr|gram|grams|ml)?$/i);
+        if (mMatch) {
+          var parsedN = Number(mMatch[1]);
+          if (Number.isFinite(parsedN) && parsedN >= 0) return parsedN;
+        }
+      }
+      return sanitizeNonNegNumber(rawVal, 0);
+    }
+
     for (i = 0; i < rawMeals.length; i++) {
       var m = rawMeals[i];
       if (!m || typeof m !== 'object') continue;
-      var idKey = typeof m.id === 'string' ? m.id.toLowerCase() : (typeof m.slot === 'string' ? m.slot.toLowerCase() : '');
+      var idKey = resolveTemplateSlotId(m, i, rawMeals.length);
       if (!hasOwn(out, idKey)) continue;
 
       var baseT = DEFAULT_MEAL_TEMPLATES[idKey];
@@ -713,7 +742,7 @@
         for (var caIdx = 0; caIdx < m.customAddons.length; caIdx++) {
           var ca = m.customAddons[caIdx];
           if (ca && typeof ca === 'object' && typeof ca.id === 'string' && ca.id.trim() && ca.id !== '__proto__') {
-            var caGrams = sanitizeNonNegNumber(ca.grams !== undefined ? ca.grams : (ca.rawGrams !== undefined ? ca.rawGrams : ca.weightGrams), 0);
+            var caGrams = parseTemplateGrams(ca.grams !== undefined ? ca.grams : (ca.rawGrams !== undefined ? ca.rawGrams : (ca.weightGrams !== undefined ? ca.weightGrams : ca.amount)));
             if (caGrams > 0) {
               customAddons.push({ id: ca.id.trim(), grams: Math.round(caGrams) });
             }
@@ -725,7 +754,7 @@
         for (var ciIdx = 0; ciIdx < m.ingredients.length; ciIdx++) {
           var ci = m.ingredients[ciIdx];
           if (ci && typeof ci === 'object' && typeof ci.id === 'string' && ci.id.trim() && ci.id !== '__proto__') {
-            var ciGrams = sanitizeNonNegNumber(ci.grams !== undefined ? ci.grams : (ci.rawGrams !== undefined ? ci.rawGrams : ci.weightGrams), 0);
+            var ciGrams = parseTemplateGrams(ci.grams !== undefined ? ci.grams : (ci.rawGrams !== undefined ? ci.rawGrams : (ci.weightGrams !== undefined ? ci.weightGrams : (ci.dailyGrams !== undefined ? ci.dailyGrams : ci.amount))));
             if (ciGrams > 0) {
               customIngredients.push({ id: ci.id.trim(), grams: Math.round(ciGrams) });
             }

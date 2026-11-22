@@ -67,31 +67,13 @@ export function buildHomeStockPromptBlock(appState, appData, dbSource) {
   const horizonDays = (appState && Number(appState.horizonDays)) || 7;
 
   stockList.forEach((item) => {
-    if (!item || !item.id || !(Number(item.gramsOnHand) > 0)) return;
+    if (!item || !item.id || !(Number(item.gramsOnHand) > 0) || seenIds[item.id]) return;
     seenIds[item.id] = true;
     const cat = (item.category === 'perishable' || item.category === 'non_perishable')
       ? item.category
       : inferStockCategory(item.aisle);
     const line = formatStockEntryLine(item, horizonDays);
     if (cat === 'perishable') {
-      perishableLines.push(line);
-    } else {
-      nonPerishableLines.push(line);
-    }
-  });
-
-  const haveAtHome = (appState && appState.haveAtHome && typeof appState.haveAtHome === 'object') ? appState.haveAtHome : {};
-  Object.keys(haveAtHome).forEach((id) => {
-    if (!haveAtHome[id] || seenIds[id] || id === 'aromatics_zero') return;
-    const entry = (dbSource && dbSource[id]) || (appData && appData.nutritionDb && appData.nutritionDb[id]);
-    if (!entry || !entry.name) return;
-    seenIds[id] = true;
-    const per = entry.per100g || {};
-    const perText = entry.per100g
-      ? (' | Macros per 100g: ' + (Number(per.calories) || 0) + ' kcal, ' + (Number(per.protein) || 0) + 'g P, ' + (Number(per.fat) || 0) + 'g F, ' + (Number(per.carbs) || 0) + 'g C')
-      : '';
-    const line = '- `' + id + '`: ' + entry.name + ' — already marked at home' + perText + formatHealthSuffix(entry);
-    if (inferStockCategory(entry.aisle) === 'perishable') {
       perishableLines.push(line);
     } else {
       nonPerishableLines.push(line);
@@ -244,7 +226,7 @@ function buildFlyerDealsSummaryLines(appData, storeChoice) {
       storeLines.push('   * [' + storeName + '] ' + deal.name + pricePart + catPart);
     });
 
-    if (storeName === winningStore) {
+    if (storeList.length === 0 && storeName === winningStore) {
       Object.keys(db).forEach((k) => {
         if (k === 'ground_chicken' || k.indexOf('stock_') === 0 || k === 'aromatics_zero') return;
         const item = db[k];

@@ -226,6 +226,17 @@ export function clampNum(val, min, max, fallback) {
   return n;
 }
 
+export function computePlanStamp(rawJson) {
+  const s = typeof rawJson === 'string' ? rawJson.trim() : '';
+  if (!s) return 'default';
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return 'custom:' + s.length + ':' + (h >>> 0).toString(36);
+}
+
 export function normalizePostalCode(raw) {
   const s = String(raw || '').trim().toUpperCase().replace(/\s+/g, ' ');
   return s || 'H1W';
@@ -464,6 +475,7 @@ export function buildDefaultState() {
     pendingAdjustments: { nilStockIds: [], scannedAdditions: [] },
     grocerySwaps: {},
     customMealJsonRaw: '',
+    activePlanStamp: 'default',
     timers: {},
     lastSyncedAt: null
   };
@@ -606,8 +618,16 @@ export function validateState(raw) {
     };
   });
 
+  const cleanCustomJsonRaw = typeof raw.customMealJsonRaw === 'string' ? raw.customMealJsonRaw : '';
+  const currentPlanStamp = computePlanStamp(cleanCustomJsonRaw);
+  const incomingPlanStamp = typeof raw.activePlanStamp === 'string' ? raw.activePlanStamp : '';
+  const shouldResetWeekBoundShopping = Boolean(
+    (cleanCustomJsonRaw.trim() && !incomingPlanStamp) ||
+    (incomingPlanStamp && incomingPlanStamp !== currentPlanStamp)
+  );
+
   const haveAtHome = {};
-  if (raw.haveAtHome && typeof raw.haveAtHome === 'object' && !Array.isArray(raw.haveAtHome)) {
+  if (!shouldResetWeekBoundShopping && raw.haveAtHome && typeof raw.haveAtHome === 'object' && !Array.isArray(raw.haveAtHome)) {
     Object.keys(raw.haveAtHome).forEach((id) => {
       if (id !== '__proto__' && id !== 'constructor' && id !== 'prototype') {
         haveAtHome[id] = Boolean(raw.haveAtHome[id]);
@@ -616,7 +636,7 @@ export function validateState(raw) {
   }
 
   const inCart = {};
-  if (raw.inCart && typeof raw.inCart === 'object' && !Array.isArray(raw.inCart)) {
+  if (!shouldResetWeekBoundShopping && raw.inCart && typeof raw.inCart === 'object' && !Array.isArray(raw.inCart)) {
     Object.keys(raw.inCart).forEach((id) => {
       if (id !== '__proto__' && id !== 'constructor' && id !== 'prototype') {
         inCart[id] = Boolean(raw.inCart[id]);
@@ -673,7 +693,7 @@ export function validateState(raw) {
     dinnerSwapAlt: dinnerSwapAlt,
     hideInCart: Boolean(raw.hideInCart),
     compactAisleMode: raw.compactAisleMode === undefined ? true : Boolean(raw.compactAisleMode),
-    eatenByDay: eatenByDay,
+    eatenByDay: shouldResetWeekBoundShopping ? {} : eatenByDay,
     feedback: feedback,
     haveAtHome: haveAtHome,
     inCart: inCart,
@@ -775,7 +795,7 @@ export function validateState(raw) {
     })(),
     customSwapItems: (() => {
       const csi = {};
-      if (raw.customSwapItems && typeof raw.customSwapItems === 'object' && !Array.isArray(raw.customSwapItems)) {
+      if (!shouldResetWeekBoundShopping && raw.customSwapItems && typeof raw.customSwapItems === 'object' && !Array.isArray(raw.customSwapItems)) {
         const keys = Object.keys(raw.customSwapItems);
         let count = 0;
         for (let i = 0; i < keys.length && count < 50; i++) {
@@ -820,7 +840,7 @@ export function validateState(raw) {
     })(),
     grocerySwaps: (() => {
       const gs = {};
-      if (raw.grocerySwaps && typeof raw.grocerySwaps === 'object' && !Array.isArray(raw.grocerySwaps)) {
+      if (!shouldResetWeekBoundShopping && raw.grocerySwaps && typeof raw.grocerySwaps === 'object' && !Array.isArray(raw.grocerySwaps)) {
         Object.keys(raw.grocerySwaps).forEach((k) => {
           if (k === '__proto__' || k === 'constructor' || k === 'prototype') return;
           if (typeof raw.grocerySwaps[k] === 'string' && raw.grocerySwaps[k].trim()) {
@@ -830,7 +850,8 @@ export function validateState(raw) {
       }
       return gs;
     })(),
-    customMealJsonRaw: typeof raw.customMealJsonRaw === 'string' ? raw.customMealJsonRaw : '',
+    customMealJsonRaw: cleanCustomJsonRaw,
+    activePlanStamp: currentPlanStamp,
     timers: timers,
     lastSyncedAt: typeof raw.lastSyncedAt === 'string' ? raw.lastSyncedAt : null
   };
@@ -1087,6 +1108,41 @@ function normalizeSingleStoreName(raw) {
   return '';
 }
 
+function parseLooseNumber(val) {
+  if (typeof val === 'number') return Number.isFinite(val) ? val : NaN;
+  if (typeof val === 'string') {
+    const cleaned = val.trim().replace(/,/g, '.');
+    const m = cleaned.match(/(-?[0-9]+(?:\.[0-9]+)?)/);
+    if (m) return Number(m[1]);
+  }
+  return NaN;
+}
+
+function clampLooseNum(val, min, max, fallback) {
+  const n = parseLooseNumber(val);
+  if (!Number.isFinite(n)) return fallback;
+  if (n < min) return min;
+  if (n > max) return max;
+  return n;
+}
+
+function resolveCanonicalMealSlotId(cm, idx, totalMeals) {
+  if (!cm || typeof cm !== 'object') return '';
+  const candidates = [cm.slot, cm.id, cm.mealSlot, cm.type];
+  for (let i = 0; i < candidates.length; i++) {
+    const raw = String(candidates[i] || '').trim().toLowerCase();
+    if (!raw) continue;
+    if (raw === 'breakfast' || raw.indexOf('breakfast') !== -1 || raw.indexOf('déjeuner') !== -1 || raw.indexOf('dejeuner') !== -1) return 'breakfast';
+    if (raw === 'lunch' || raw.indexOf('lunch') !== -1 || raw === 'midi') return 'lunch';
+    if (raw === 'dinner' || raw.indexOf('dinner') !== -1 || raw.indexOf('supper') !== -1 || raw.indexOf('souper') !== -1) return 'dinner';
+    if (raw === 'snack' || raw.indexOf('snack') !== -1 || raw.indexOf('collation') !== -1) return 'snack';
+  }
+  if (totalMeals === 4 && idx >= 0 && idx < 4) {
+    return ['breakfast', 'lunch', 'dinner', 'snack'][idx];
+  }
+  return '';
+}
+
 function parseOverlayJsonObject(rawJsonStr) {
   const cleaned = rawJsonStr.trim()
     .replace(/^```(?:json)?\s*/i, '')
@@ -1122,9 +1178,9 @@ export function applyCustomMealJsonOverlay(targetData, rawJsonStr) {
       if (!cid || cid === '__proto__' || cid === 'constructor' || cid === 'prototype') return;
       if (!ci || typeof ci !== 'object') return;
       const per = (ci.per100g && typeof ci.per100g === 'object') ? ci.per100g : ci;
-      const pkgG = clampNum(ci.packageGrams, 1, 20000, 500);
-      const cadPkg = clampNum(ci.cadPerPackage !== undefined ? ci.cadPerPackage : (ci.price && ci.price.cadPerPackage), 0, 250, 4.99);
-      const cad100 = clampNum(ci.cadPer100g !== undefined ? ci.cadPer100g : (ci.price && ci.price.cadPer100g), 0, 50, Math.round((cadPkg / (pkgG / 100)) * 100) / 100);
+      const pkgG = clampLooseNum(ci.packageGrams, 1, 20000, 500);
+      const cadPkg = clampLooseNum(ci.cadPerPackage !== undefined ? ci.cadPerPackage : (ci.price && ci.price.cadPerPackage), 0, 250, 4.99);
+      const cad100 = clampLooseNum(ci.cadPer100g !== undefined ? ci.cadPer100g : (ci.price && ci.price.cadPer100g), 0, 50, Math.round((cadPkg / (pkgG / 100)) * 100) / 100);
       const storeName = typeof ci.store === 'string' && ci.store.trim() ? ci.store.trim() : '';
       const normStore = normalizeSingleStoreName(storeName);
       if (normStore && cadPkg > 0) {
@@ -1135,12 +1191,12 @@ export function applyCustomMealJsonOverlay(targetData, rawJsonStr) {
         name: typeof ci.name === 'string' && ci.name.trim() ? ci.name.trim() : cid,
         aisle: typeof ci.aisle === 'string' ? ci.aisle : 'Produce',
         per100g: {
-          calories: clampNum(per.calories, 0, 900, 100),
-          protein: clampNum(per.protein, 0, 100, 5),
-          fat: clampNum(per.fat, 0, 100, 2),
-          carbs: clampNum(per.carbs, 0, 100, 10)
+          calories: clampLooseNum(per.calories, 0, 900, 100),
+          protein: clampLooseNum(per.protein, 0, 100, 5),
+          fat: clampLooseNum(per.fat, 0, 100, 2),
+          carbs: clampLooseNum(per.carbs, 0, 100, 10)
         },
-        cookedYield: clampNum(ci.cookedYield, 0.2, 4.0, 1.0),
+        cookedYield: clampLooseNum(ci.cookedYield, 0.2, 4.0, 1.0),
         packageGrams: pkgG,
         unitLabel: typeof ci.unitLabel === 'string' && ci.unitLabel.trim() ? ci.unitLabel.trim() : ('pack (' + pkgG + 'g)'),
         requiresThaw: Boolean(ci.requiresThaw),
@@ -1211,9 +1267,9 @@ export function applyCustomMealJsonOverlay(targetData, rawJsonStr) {
           { id: 'snack', slot: 'Snack', title: '0% Skyr & Whey Fruit Bowl', cookingMethod: 'Chilled skyr with whey isolate & fruit', seasoningTwist: 'Cinnamon & vanilla', swappable: false }
         ];
       }
-      customMeals.forEach((cm) => {
+      customMeals.forEach((cm, cmIdx) => {
         if (!cm || typeof cm !== 'object') return;
-        const cmSlotId = String(cm.id || cm.slot || '').trim().toLowerCase();
+        const cmSlotId = resolveCanonicalMealSlotId(cm, cmIdx, customMeals.length);
         if (!cmSlotId) return;
         const defDb = (getEngine() && getEngine().DEFAULT_NUTRITION_DB) || {};
         const ensureIngInDb = (ingObj) => {
@@ -1233,15 +1289,32 @@ export function applyCustomMealJsonOverlay(targetData, rawJsonStr) {
             if (typeof cm.title === 'string' && cm.title.trim()) tm.title = cm.title.trim();
             if (typeof cm.cookingMethod === 'string' && cm.cookingMethod.trim()) tm.cookingMethod = cm.cookingMethod.trim();
             if (typeof cm.seasoningTwist === 'string' && cm.seasoningTwist.trim()) tm.seasoningTwist = cm.seasoningTwist.trim();
-            if (Array.isArray(cm.customAddons)) tm.customAddons = cm.customAddons;
+            if (Array.isArray(cm.customAddons)) {
+              tm.customAddons = cm.customAddons.map((caItem) => {
+                if (!caItem || typeof caItem !== 'object') return caItem;
+                const caVal = caItem.grams !== undefined
+                  ? caItem.grams
+                  : (caItem.rawGrams !== undefined ? caItem.rawGrams : (caItem.weightGrams !== undefined ? caItem.weightGrams : caItem.amount));
+                return { id: String(caItem.id || '').trim(), grams: clampLooseNum(caVal, 0, 10000, 0) };
+              }).filter((caItem) => caItem && caItem.id && caItem.grams > 0);
+            }
             if (Array.isArray(cm.ingredients) && cm.ingredients.length > 0) {
-              tm.ingredients = cm.ingredients.map((ingItem) => {
-                if (!ingItem || typeof ingItem !== 'object') return ingItem;
-                const gVal = ingItem.grams !== undefined ? ingItem.grams : (ingItem.rawGrams !== undefined ? ingItem.rawGrams : ingItem.weightGrams);
-                return { id: String(ingItem.id || '').trim(), grams: Number(gVal) || 0 };
+              const parsedIngredients = cm.ingredients.map((ingItem) => {
+                if (!ingItem || typeof ingItem !== 'object') return null;
+                const gVal = ingItem.grams !== undefined
+                  ? ingItem.grams
+                  : (ingItem.rawGrams !== undefined
+                    ? ingItem.rawGrams
+                    : (ingItem.weightGrams !== undefined
+                      ? ingItem.weightGrams
+                      : (ingItem.dailyGrams !== undefined ? ingItem.dailyGrams : ingItem.amount)));
+                return { id: String(ingItem.id || '').trim(), grams: clampLooseNum(gVal, 0, 10000, 0) };
               }).filter((ingItem) => ingItem && ingItem.id && ingItem.grams > 0);
-              tm.targetCalories = clampNum(parsed.targetCalories !== undefined ? parsed.targetCalories : srcTemplates.targetCalories, 500, 5000, appState.targets.calories);
-              tm.swappable = false;
+              if (parsedIngredients.length > 0) {
+                tm.ingredients = parsedIngredients;
+                tm.targetCalories = clampLooseNum(parsed.targetCalories !== undefined ? parsed.targetCalories : srcTemplates.targetCalories, 500, 5000, appState.targets.calories);
+                tm.swappable = false;
+              }
             }
             if (cm.ingredientSwaps && typeof cm.ingredientSwaps === 'object') tm.ingredientSwaps = cm.ingredientSwaps;
             if (typeof cm.primaryProteinId === 'string' && cm.primaryProteinId.trim()) {
@@ -1772,6 +1845,27 @@ export function clearPendingAdjustments() {
   saveState();
 }
 
+export function resetWeeklyShoppingState() {
+  appState.inCart = {};
+  appState.haveAtHome = {};
+  appState.grocerySwaps = {};
+  appState.customSwapItems = {};
+  appState.eatenByDay = {};
+  appState.selectedDay = 1;
+  appState.completedSteps = {};
+  appState.timers = {};
+  appState.feedback = {
+    breakfast: { rating: null, note: '' },
+    lunch: { rating: null, note: '' },
+    dinner: { rating: null, note: '' },
+    snack: { rating: null, note: '' }
+  };
+  appState.pendingAdjustments = { nilStockIds: [], scannedAdditions: [] };
+  appState.chefAdjustNote = '';
+  appState.activePlanStamp = computePlanStamp(appState.customMealJsonRaw);
+  saveState();
+}
+
 export function pushCurrentPlanToHistory() {
   if (!Array.isArray(appState.planHistory)) appState.planHistory = [];
   const curRaw = appState.customMealJsonRaw || '';
@@ -1798,7 +1892,7 @@ export function restorePlanFromHistory(index) {
   const entry = appState.planHistory[index];
   if (!entry || typeof entry !== 'object') return false;
   appState.customMealJsonRaw = typeof entry.customMealJsonRaw === 'string' ? entry.customMealJsonRaw : '';
-  saveState();
+  resetWeeklyShoppingState();
   refreshAppDataFromStorage();
   recomputePlan();
   return true;
@@ -1905,9 +1999,14 @@ export function previewCustomMealJson(rawStr) {
     return { ok: false, error: 'Nutrition engine is still loading.' };
   }
 
+  const isAdjustMode = appState.chefViewMode === 'adjust';
   const stockList = Array.isArray(appState.pantryStock) ? appState.pantryStock : [];
   const activeStock = stockList.filter((it) => it && Number(it.gramsOnHand) > 0);
-  base.nutritionDb = buildInjectedNutritionDb(base.nutritionDb, stockList, appState.customSwapItems);
+  base.nutritionDb = buildInjectedNutritionDb(
+    base.nutritionDb,
+    stockList,
+    isAdjustMode ? appState.customSwapItems : {}
+  );
 
   try {
     const members = Array.isArray(appState.householdMembers) && appState.householdMembers.length > 0
@@ -1932,7 +2031,7 @@ export function previewCustomMealJson(rawStr) {
     const scaled = engine.scaleToHorizon(activeDaily, base, {
       days: appState.horizonDays,
       householdPlans: hPlans.length > 1 ? hPlans : null,
-      haveAtHome: appState.haveAtHome,
+      haveAtHome: isAdjustMode ? appState.haveAtHome : {},
       stockGramsOnHand: buildStockGramsMap(stockList),
       frozenMealsOnHand: Math.min(appState.horizonDays, appState.frozenMealsOnHand)
     });

@@ -18,6 +18,8 @@ import {
   addAdjustScannedItem,
   removeAdjustScannedItem,
   clearPendingAdjustments,
+  resetWeeklyShoppingState,
+  computePlanStamp,
   inferStockCategory,
   removeLikedMeal,
   formatCad,
@@ -439,8 +441,8 @@ export function renderChefTab(callbacks) {
     scanStockBtn.id = 'chef-scan-stock-btn';
     scanStockBtn.addEventListener('click', () => {
       openStockModal({
-        mode: 'scan',
-        defaultCategory: 'perishable',
+        mode: 'batch_scan',
+        defaultBucket: 'perishable',
         onSaved: () => notifyPlanUpdated()
       });
     });
@@ -683,6 +685,7 @@ export function renderChefTab(callbacks) {
     addManualAdjBtn.addEventListener('click', () => {
       openStockModal({
         mode: 'adjust_scan',
+        manualOnly: true,
         defaultStore: effectiveData.winningStore === 'Maxi' ? 'Maxi' : 'Super C',
         onSaved: (payload) => {
           addAdjustScannedItem(payload);
@@ -847,18 +850,30 @@ export function renderChefTab(callbacks) {
     appState.customMealJsonRaw = cleanStr;
     draftJsonBuffer = cleanStr;
 
-    // Reset stale meal feedback from previous menu
-    appState.feedback = {
-      breakfast: { rating: null, note: '' },
-      lunch: { rating: null, note: '' },
-      dinner: { rating: null, note: '' },
-      snack: { rating: null, note: '' }
-    };
-    appState.pendingAdjustments = { nilStockIds: [], scannedAdditions: [] };
-    appState.chefAdjustNote = '';
-    saveState();
-
-    uiStatus.customJsonStatusText = 'New meals, grocery items & prep timeline applied!';
+    if (appState.chefViewMode === 'adjust') {
+      const nilIdsToClear = (appState.pendingAdjustments && Array.isArray(appState.pendingAdjustments.nilStockIds))
+        ? appState.pendingAdjustments.nilStockIds
+        : [];
+      nilIdsToClear.forEach((nid) => {
+        if (appState.inCart && Object.prototype.hasOwnProperty.call(appState.inCart, nid)) {
+          delete appState.inCart[nid];
+        }
+        if (appState.haveAtHome && Object.prototype.hasOwnProperty.call(appState.haveAtHome, nid)) {
+          delete appState.haveAtHome[nid];
+        }
+        if (appState.grocerySwaps && Object.prototype.hasOwnProperty.call(appState.grocerySwaps, nid)) {
+          delete appState.grocerySwaps[nid];
+        }
+      });
+      appState.pendingAdjustments = { nilStockIds: [], scannedAdditions: [] };
+      appState.chefAdjustNote = '';
+      appState.activePlanStamp = computePlanStamp(cleanStr);
+      saveState();
+      uiStatus.customJsonStatusText = 'Adjusted meal plan & grocery items applied!';
+    } else {
+      resetWeeklyShoppingState();
+      uiStatus.customJsonStatusText = 'New week applied! Cart, old swaps & last week checkboxes cleared.';
+    }
     recomputePlan();
     announcePolite(uiStatus.customJsonStatusText);
     notifyPlanUpdated();
@@ -928,9 +943,9 @@ export function renderChefTab(callbacks) {
       appState.customMealJsonRaw = '';
       draftJsonBuffer = '';
       jsonArea.value = '';
-      saveState();
+      resetWeeklyShoppingState();
       setAppData(mergeWithFallbackData(safeStorageGet(STORAGE_DATA_KEY)));
-      uiStatus.customJsonStatusText = 'Restored default weekly meal templates.';
+      uiStatus.customJsonStatusText = 'Restored default weekly meal templates and cleared old cart checkboxes.';
       recomputePlan();
       notifyPlanUpdated();
     });
