@@ -5,6 +5,7 @@ import {
   clampNum,
   inferStockCategory,
   upsertPantryStockItem,
+  addCustomPantryStaple,
   announcePolite
 } from '../state.js';
 import {
@@ -27,6 +28,7 @@ let currentEditingId = null;
 let currentSource = 'manual';
 let currentModalMode = 'scan';
 let categoryManuallyOverridden = false;
+let currentQuantityDetected = true;
 let currentHealthExtra = { novaGroup: null, nutriScore: '', nutrientLevels: null };
 
 let refs = null;
@@ -126,7 +128,9 @@ function populateFormFromProduct(product, { keepGrams = false } = {}) {
   if (product.barcode) refs.barcodeInput.value = product.barcode;
   if (product.name) refs.nameInput.value = product.name;
   refs.brandInput.value = product.brand || '';
-  if (product.aisle && DEFAULT_AISLE_ORDER.indexOf(product.aisle) !== -1) {
+  if (currentModalMode === 'staple_scan') {
+    refs.aisleSelect.value = 'Pantry/Canned';
+  } else if (product.aisle && DEFAULT_AISLE_ORDER.indexOf(product.aisle) !== -1) {
     refs.aisleSelect.value = product.aisle;
   }
   if (product.category === 'perishable' || product.category === 'non_perishable') {
@@ -134,6 +138,7 @@ function populateFormFromProduct(product, { keepGrams = false } = {}) {
   } else if (!categoryManuallyOverridden) {
     refs.categorySelect.value = inferStockCategory(refs.aisleSelect.value);
   }
+  currentQuantityDetected = product.quantityDetected !== false;
   const pkgG = clampInt(product.packageGrams, 1, 20000, 500);
   refs.pkgInput.value = String(pkgG);
   if (refs.pkgHelpEl) {
@@ -193,7 +198,9 @@ async function handleBarcodeLookup(rawCode) {
     if (res && res.found && res.product) {
       populateFormFromProduct(res.product, { keepGrams: Boolean(currentEditingId) });
       const srcNote = res.fromCache ? ' (from device cache)' : ' (from Open Food Facts)';
-      if (res.product.quantityDetected === false) {
+      if (currentModalMode === 'staple_scan') {
+        setScanStatus('Loaded "' + res.product.name + '"' + srcNote + '. Check macros & health watch below, then save.', false);
+      } else if (res.product.quantityDetected === false) {
         setScanStatus(
           'Loaded "' + res.product.name + '"' + srcNote + ' — package size not listed in Open Food Facts (defaulted to 500g; edit Package Size & Grams below).',
           false
@@ -404,7 +411,9 @@ function ensureDialogBuilt() {
     aisleSelect.appendChild(opt);
   });
   aisleSelect.value = 'Pantry/Canned';
-  twoColTop.appendChild(createField('stock-aisle-select', 'Aisle', aisleSelect));
+  const aisleWrap = createField('stock-aisle-select', 'Aisle', aisleSelect);
+  aisleWrap.id = 'stock-aisle-wrap';
+  twoColTop.appendChild(aisleWrap);
   form.appendChild(twoColTop);
 
   const categorySelect = el('select', 'w-full');
@@ -441,6 +450,7 @@ function ensureDialogBuilt() {
   pkgInput.step = '1';
   pkgInput.value = '500';
   const pkgWrap = createField('stock-package-input', 'Package Size (g)', pkgInput);
+  pkgWrap.id = 'stock-package-wrap';
   const pkgHelpEl = el('span', 'block text-xs text-slate-400', '');
   pkgHelpEl.id = 'stock-package-help';
   pkgInput.setAttribute('aria-describedby', 'stock-package-help');
@@ -586,12 +596,16 @@ function ensureDialogBuilt() {
     healthWarnBadgesEl,
     form,
     nameInput,
+    twoColTop,
     brandInput,
+    aisleWrap,
     aisleSelect,
     categoryWrap,
     categorySelect,
+    qtyGrid,
     gramsWrap,
     gramsInput,
+    pkgWrap,
     pkgInput,
     pkgHelpEl,
     storeRow,
@@ -693,6 +707,7 @@ function ensureDialogBuilt() {
     const cleanBarcode = normalizeBarcode(barcodeInput.value);
     const pkgGrams = clampInt(pkgInput.value, 1, 20000, 500);
     const isStoreLookupMode = currentModalMode === 'swap' || currentModalMode === 'adjust_scan';
+    const isStapleMode = currentModalMode === 'staple_scan';
     const healthMeta = readFormHealthMeta();
 
     const payload = {
@@ -700,11 +715,11 @@ function ensureDialogBuilt() {
       barcode: cleanBarcode,
       name: cleanName,
       brand: brandInput.value.trim(),
-      aisle: aisleSelect.value,
-      category: categorySelect.value === 'perishable' ? 'perishable' : 'non_perishable',
-      gramsOnHand: isStoreLookupMode ? pkgGrams : clampInt(gramsInput.value, 1, 50000, pkgGrams),
+      aisle: isStapleMode ? 'Pantry/Canned' : aisleSelect.value,
+      category: (isStapleMode || categorySelect.value !== 'perishable') ? 'non_perishable' : 'perishable',
+      gramsOnHand: (isStoreLookupMode || isStapleMode) ? pkgGrams : clampInt(gramsInput.value, 1, 50000, pkgGrams),
       packageGrams: pkgGrams,
-      quantityDetected: true,
+      quantityDetected: isStapleMode ? currentQuantityDetected : true,
       per100g: {
         calories: Math.round(clampNum(calInput.value, 0, 900, 0)),
         protein: Math.round(clampNum(protInput.value, 0, 100, 0) * 10) / 10,
@@ -723,6 +738,27 @@ function ensureDialogBuilt() {
 
     if (cleanBarcode) {
       saveCachedBarcodeProduct(cleanBarcode, payload);
+    }
+
+    if (isStapleMode) {
+      const stapleMeta = {
+        barcode: cleanBarcode,
+        brand: payload.brand,
+        per100g: payload.per100g
+      };
+      if (healthMeta) stapleMeta.health = healthMeta;
+      const savedOk = addCustomPantryStaple(cleanName, stapleMeta);
+      if (!savedOk) {
+        setScanStatus('You already have 80 spices & condiments saved. Remove an unused one first.', true);
+        return;
+      }
+      const cb = currentOnSaved;
+      closeStockModal();
+      announcePolite('Saved "' + cleanName + '" to Spices & Condiments.');
+      if (typeof cb === 'function') {
+        cb(Object.assign({ name: cleanName }, stapleMeta));
+      }
+      return;
     }
 
     if (isStoreLookupMode) {
@@ -779,6 +815,7 @@ export function openStockModal({
   currentEditingId = item && item.id ? item.id : null;
   currentSource = (item && item.source) ? item.source : 'manual';
   categoryManuallyOverridden = false;
+  currentQuantityDetected = true;
   currentHealthExtra = { novaGroup: null, nutriScore: '', nutrientLevels: null };
 
   refs.form.reset();
@@ -807,12 +844,21 @@ export function openStockModal({
   refs.satFatInput.value = '';
 
   const isStoreLookupMode = mode === 'swap' || mode === 'adjust_scan';
-  const showScannerByDefault = mode === 'scan' || mode === 'swap' || mode === 'adjust_scan';
+  const isStapleMode = mode === 'staple_scan';
+  const showScannerByDefault = mode === 'scan' || mode === 'swap' || mode === 'adjust_scan' || isStapleMode;
 
-  refs.categoryWrap.hidden = isStoreLookupMode;
-  refs.gramsWrap.hidden = isStoreLookupMode;
-  refs.gramsInput.required = !isStoreLookupMode;
+  refs.categoryWrap.hidden = isStoreLookupMode || isStapleMode;
+  refs.qtyGrid.hidden = isStapleMode;
+  refs.gramsWrap.hidden = isStoreLookupMode || isStapleMode;
+  refs.pkgWrap.hidden = isStapleMode;
+  refs.gramsInput.required = !(isStoreLookupMode || isStapleMode);
   refs.storeRow.hidden = !isStoreLookupMode;
+  refs.aisleWrap.hidden = isStapleMode;
+  refs.twoColTop.classList.toggle('stock-form-grid', !isStapleMode);
+  refs.previewTotalEl.hidden = isStapleMode;
+  refs.nameInput.placeholder = isStapleMode
+    ? 'e.g. Kikkoman Soy Sauce, Kraft BBQ Sauce, Smoked Paprika'
+    : 'e.g. Selection White Kidney Beans or Chicken Breast';
 
   if (mode === 'edit' && item) {
     refs.titleEl.textContent = 'Edit Stock Ingredient';
@@ -851,6 +897,17 @@ export function openStockModal({
       isBarcodeDetectorSupported()
         ? 'Scan item barcode at Maxi/Super C (or enter barcode / name below).'
         : 'Type the barcode digits below (or enter details) to add to your adjustment prompt.',
+      false
+    );
+  } else if (isStapleMode) {
+    refs.titleEl.textContent = 'Scan Spice, Oil or Condiment';
+    refs.saveBtn.textContent = 'Save to Spices & Condiments';
+    refs.scannerPanel.hidden = false;
+    refs.scannerToggleBtn.hidden = true;
+    setScanStatus(
+      isBarcodeDetectorSupported()
+        ? 'Scan bottle or jar barcode (or enter numbers below) — no need to weigh grams on hand.'
+        : 'Type the barcode digits below (or use Scan Photo) to load macros & health alerts.',
       false
     );
   } else {

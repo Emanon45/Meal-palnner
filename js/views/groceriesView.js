@@ -420,6 +420,23 @@ function renderPantrySubtab(frag, nonPerishableItems, appState, appData) {
   staplesCard.appendChild(stTop);
   staplesCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Tap what you already keep in your cupboard. Gemini can use these freely for cooking & seasoning without buying them.'));
 
+  const scanStapleBtn = el('button', 'btn-primary w-full', 'Scan Spice / Condiment Barcode');
+  scanStapleBtn.type = 'button';
+  scanStapleBtn.id = 'pantry-scan-staple-btn';
+  scanStapleBtn.addEventListener('click', () => {
+    openStockModal({
+      mode: 'staple_scan',
+      onSaved: (savedStaple) => {
+        if (savedStaple && savedStaple.name) {
+          uiStatus.stockStatusText = 'Saved "' + savedStaple.name + '" to Spices & Condiments.';
+          announcePolite(uiStatus.stockStatusText);
+        }
+        notifyStockChanged();
+      }
+    });
+  });
+  staplesCard.appendChild(scanStapleBtn);
+
   DEFAULT_SPICE_CONDIMENT_GROUPS.forEach((grp) => {
     const fs = el('fieldset', 'staple-fieldset space-y-1.5');
     fs.appendChild(el('legend', 'text-xs font-bold text-slate-200', grp.label));
@@ -440,12 +457,67 @@ function renderPantrySubtab(frag, nonPerishableItems, appState, appData) {
     staplesCard.appendChild(fs);
   });
 
-  const customStaples = staplesList.filter((s) => !defaultLowerSet.has(String(s).toLowerCase()));
-  if (customStaples.length > 0) {
+  const stapleMetaMap = (appState.pantryStapleMeta && typeof appState.pantryStapleMeta === 'object') ? appState.pantryStapleMeta : {};
+  const hasMeta = (name) => Object.prototype.hasOwnProperty.call(stapleMetaMap, String(name || '').toLowerCase());
+  const plainCustomStaples = staplesList.filter((s) => !defaultLowerSet.has(String(s).toLowerCase()) && !hasMeta(s));
+  const scannedStaples = staplesList.filter((s) => hasMeta(s));
+
+  if (scannedStaples.length > 0) {
+    const scannedFs = el('fieldset', 'staple-fieldset space-y-2');
+    scannedFs.appendChild(el('legend', 'text-xs font-bold text-slate-200', 'Scanned Spices, Oils & Condiments'));
+    const scannedList = el('ul', 'space-y-2 list-none p-0 m-0');
+    scannedStaples.forEach((sname) => {
+      const meta = stapleMetaMap[String(sname).toLowerCase()] || {};
+      const per = meta.per100g || {};
+      const li = el('li', 'subcard space-y-1.5');
+      li.setAttribute('data-scanned-staple', sname);
+
+      const topRow = el('div', 'flex-wrap-row justify-between');
+      const titleStr = meta.brand ? (sname + ' \u2014 ' + meta.brand) : sname;
+      topRow.appendChild(el('span', 'text-xs font-bold text-slate-100 wrap-anywhere', titleStr));
+      const rmBtn = el('button', 'btn-secondary text-xs', 'Remove');
+      rmBtn.type = 'button';
+      rmBtn.setAttribute('aria-label', 'Remove ' + sname);
+      rmBtn.addEventListener('click', () => {
+        removePantryStaple(sname);
+        notifyStockChanged();
+      });
+      topRow.appendChild(rmBtn);
+      li.appendChild(topRow);
+
+      const badgeRow = el('div', 'flex-wrap-row');
+      if (meta.barcode) {
+        badgeRow.appendChild(el('span', 'badge radar-regular', 'UPC ' + meta.barcode));
+      }
+      badgeRow.appendChild(createHealthWarningBadges({
+        name: sname,
+        aisle: 'Pantry/Canned',
+        per100g: per,
+        health: meta.health
+      }, el, { compact: false }));
+      if (badgeRow.childNodes.length > 0) {
+        li.appendChild(badgeRow);
+      }
+
+      const isTrace = (Number(per.calories) || 0) < 10 &&
+        (Number(per.fat) || 0) < 1 &&
+        (Number(per.carbs) || 0) < 2 &&
+        (Number(per.protein) || 0) < 2;
+      const macroSummary = isTrace
+        ? 'Trace / zero calories per serving'
+        : ('Per 100g: ' + Math.round(per.calories || 0) + ' kcal \u00B7 ' + (per.protein || 0) + 'g P \u00B7 ' + (per.carbs || 0) + 'g C \u00B7 ' + (per.fat || 0) + 'g F');
+      li.appendChild(el('div', 'text-xs text-slate-300 wrap-anywhere', macroSummary));
+      scannedList.appendChild(li);
+    });
+    scannedFs.appendChild(scannedList);
+    staplesCard.appendChild(scannedFs);
+  }
+
+  if (plainCustomStaples.length > 0) {
     const customFs = el('fieldset', 'staple-fieldset space-y-1.5');
     customFs.appendChild(el('legend', 'text-xs font-bold text-slate-200', 'Your Custom Spices & Sauces'));
     const customRow = el('div', 'flex-wrap-row');
-    customStaples.forEach((cname) => {
+    plainCustomStaples.forEach((cname) => {
       const chip = el('button', 'pill-btn text-xs chip-toggle', '\u2713 ' + cname + ' \u00D7');
       chip.type = 'button';
       chip.setAttribute('aria-pressed', 'true');
@@ -470,7 +542,7 @@ function renderPantrySubtab(frag, nonPerishableItems, appState, appData) {
   customInput.id = 'custom-staple-input';
   customInput.name = 'customStaple';
   customInput.type = 'text';
-  customInput.maxLength = 50;
+  customInput.maxLength = 60;
   customInput.setAttribute('enterkeyhint', 'done');
   customInput.placeholder = 'e.g. Za\'atar, Chipotle Powder, Hoisin';
   customInput.addEventListener('keydown', (e) => {

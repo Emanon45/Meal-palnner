@@ -439,6 +439,7 @@ export function buildDefaultState() {
     groceriesSubtab: 'buy',
     pantryStock: [],
     pantryStaples: [],
+    pantryStapleMeta: {},
     frozenMealsOnHand: 0,
     postalCode: 'H1W',
     profileDescription: 'High-Protein Batch Prep',
@@ -505,13 +506,35 @@ function sanitizePantryStaples(rawList) {
   const out = [];
   const seenLower = Object.create(null);
   for (let i = 0; i < rawList.length && out.length < 80; i++) {
-    const val = typeof rawList[i] === 'string' ? rawList[i].trim().slice(0, 50) : '';
+    const val = typeof rawList[i] === 'string' ? rawList[i].trim().slice(0, 60) : '';
     if (!val) continue;
     const low = val.toLowerCase();
     if (low === '__proto__' || low === 'constructor' || low === 'prototype' || seenLower[low]) continue;
     seenLower[low] = true;
     out.push(val);
   }
+  return out;
+}
+
+function sanitizePantryStapleMetaEntry(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const rawBarcode = String(raw.barcode || '').replace(/\D+/g, '');
+  const barcode = (rawBarcode.length >= 8 && rawBarcode.length <= 14) ? rawBarcode : '';
+  const brand = typeof raw.brand === 'string' ? raw.brand.trim().slice(0, 50) : '';
+  const per = (raw.per100g && typeof raw.per100g === 'object') ? raw.per100g : {};
+  const per100g = {
+    calories: Math.round(clampNum(per.calories, 0, 900, 0)),
+    protein: Math.round(clampNum(per.protein, 0, 100, 0) * 10) / 10,
+    fat: Math.round(clampNum(per.fat, 0, 100, 0) * 10) / 10,
+    carbs: Math.round(clampNum(per.carbs, 0, 100, 0) * 10) / 10
+  };
+  const health = normalizeHealthMeta(raw.health, per);
+  const out = {
+    barcode: barcode,
+    brand: brand,
+    per100g: per100g
+  };
+  if (health) out.health = health;
   return out;
 }
 
@@ -622,6 +645,9 @@ export function validateState(raw) {
     });
   }
 
+  const cleanStaples = sanitizePantryStaples(raw.pantryStaples);
+  const cleanStapleLowers = new Set(cleanStaples.map((s) => s.toLowerCase()));
+
   let slotSplits = null;
   if (raw.slotSplits && typeof raw.slotSplits === 'object' && !Array.isArray(raw.slotSplits)) {
     slotSplits = {
@@ -667,7 +693,25 @@ export function validateState(raw) {
       }
       return out;
     })(),
-    pantryStaples: sanitizePantryStaples(raw.pantryStaples),
+    pantryStaples: cleanStaples,
+    pantryStapleMeta: (() => {
+      const out = {};
+      if (!raw.pantryStapleMeta || typeof raw.pantryStapleMeta !== 'object' || Array.isArray(raw.pantryStapleMeta)) {
+        return out;
+      }
+      const keys = Object.keys(raw.pantryStapleMeta);
+      let count = 0;
+      for (let i = 0; i < keys.length && count < 80; i++) {
+        const k = String(keys[i] || '').trim().toLowerCase();
+        if (!k || k === '__proto__' || k === 'constructor' || k === 'prototype' || !cleanStapleLowers.has(k)) continue;
+        const cleanEntry = sanitizePantryStapleMetaEntry(raw.pantryStapleMeta[keys[i]]);
+        if (cleanEntry) {
+          out[k] = cleanEntry;
+          count++;
+        }
+      }
+      return out;
+    })(),
     frozenMealsOnHand: clampInt(raw.frozenMealsOnHand, 0, horizonDays, 0),
     postalCode: normalizePostalCode(raw.postalCode),
     profileDescription: (typeof raw.profileDescription === 'string' && raw.profileDescription.trim())
@@ -1409,14 +1453,18 @@ export function setPantryStockCategory(id, category) {
 }
 
 export function togglePantryStaple(name) {
-  const clean = typeof name === 'string' ? name.trim().slice(0, 50) : '';
+  const clean = typeof name === 'string' ? name.trim().slice(0, 60) : '';
   if (!clean) return false;
   if (!Array.isArray(appState.pantryStaples)) appState.pantryStaples = [];
   const low = clean.toLowerCase();
+  if (low === '__proto__' || low === 'constructor' || low === 'prototype') return false;
   const idx = appState.pantryStaples.findIndex((s) => String(s).toLowerCase() === low);
   let active = false;
   if (idx !== -1) {
     appState.pantryStaples.splice(idx, 1);
+    if (appState.pantryStapleMeta && Object.prototype.hasOwnProperty.call(appState.pantryStapleMeta, low)) {
+      delete appState.pantryStapleMeta[low];
+    }
   } else if (appState.pantryStaples.length < 80) {
     appState.pantryStaples.push(clean);
     active = true;
@@ -1425,15 +1473,26 @@ export function togglePantryStaple(name) {
   return active;
 }
 
-export function addCustomPantryStaple(rawName) {
-  const clean = typeof rawName === 'string' ? rawName.trim().slice(0, 50) : '';
+export function addCustomPantryStaple(rawName, meta = null) {
+  const clean = typeof rawName === 'string' ? rawName.trim().slice(0, 60) : '';
   if (!clean) return false;
   const low = clean.toLowerCase();
   if (low === '__proto__' || low === 'constructor' || low === 'prototype') return false;
   if (!Array.isArray(appState.pantryStaples)) appState.pantryStaples = [];
-  if (appState.pantryStaples.some((s) => String(s).toLowerCase() === low)) return true;
-  if (appState.pantryStaples.length >= 80) return false;
-  appState.pantryStaples.push(clean);
+  const exists = appState.pantryStaples.some((s) => String(s).toLowerCase() === low);
+  if (!exists) {
+    if (appState.pantryStaples.length >= 80) return false;
+    appState.pantryStaples.push(clean);
+  }
+  if (meta && typeof meta === 'object') {
+    const cleanMeta = sanitizePantryStapleMetaEntry(meta);
+    if (cleanMeta) {
+      if (!appState.pantryStapleMeta || typeof appState.pantryStapleMeta !== 'object' || Array.isArray(appState.pantryStapleMeta)) {
+        appState.pantryStapleMeta = {};
+      }
+      appState.pantryStapleMeta[low] = cleanMeta;
+    }
+  }
   saveState();
   return true;
 }
@@ -1444,8 +1503,20 @@ export function removePantryStaple(name) {
   const before = appState.pantryStaples.length;
   appState.pantryStaples = appState.pantryStaples.filter((s) => String(s).toLowerCase() !== low);
   if (appState.pantryStaples.length === before) return false;
+  if (appState.pantryStapleMeta && Object.prototype.hasOwnProperty.call(appState.pantryStapleMeta, low)) {
+    delete appState.pantryStapleMeta[low];
+  }
   saveState();
   return true;
+}
+
+export function getPantryStapleMeta(name) {
+  const low = String(name || '').trim().toLowerCase();
+  if (!low || low === '__proto__' || low === 'constructor' || low === 'prototype') return null;
+  if (!appState.pantryStapleMeta || typeof appState.pantryStapleMeta !== 'object') return null;
+  return Object.prototype.hasOwnProperty.call(appState.pantryStapleMeta, low)
+    ? appState.pantryStapleMeta[low]
+    : null;
 }
 
 export function selectBasicPantryStaples() {
@@ -1463,6 +1534,7 @@ export function selectBasicPantryStaples() {
 
 export function clearPantryStaples() {
   appState.pantryStaples = [];
+  appState.pantryStapleMeta = {};
   saveState();
 }
 

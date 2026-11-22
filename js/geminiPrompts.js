@@ -16,6 +16,35 @@ function formatHealthSuffix(item) {
   return ' [Health Note: ' + labels.join(', ') + ']';
 }
 
+export function formatPantryStapleForPrompt(name, meta) {
+  const cleanName = String(name || '').trim();
+  if (!cleanName || !meta || typeof meta !== 'object') return cleanName;
+  const per = meta.per100g || {};
+  const kcal = Math.round(Number(per.calories) || 0);
+  const prot = Math.round((Number(per.protein) || 0) * 10) / 10;
+  const fat = Math.round((Number(per.fat) || 0) * 10) / 10;
+  const carbs = Math.round((Number(per.carbs) || 0) * 10) / 10;
+  const isCalorieBearing = kcal >= 30 || fat >= 3 || carbs >= 5 || prot >= 5;
+
+  let macroTag = '';
+  if (isCalorieBearing) {
+    const mParts = [kcal + ' kcal'];
+    if (prot >= 1) mParts.push(prot + 'g P');
+    if (fat >= 1) mParts.push(fat + 'g F');
+    if (carbs >= 1) mParts.push(carbs + 'g C');
+    macroTag = ' (' + mParts.join(', ') + '/100g)';
+  }
+
+  const healthTag = formatHealthSuffix({
+    name: cleanName,
+    aisle: 'Pantry/Canned',
+    per100g: per,
+    health: meta.health
+  });
+
+  return cleanName + macroTag + healthTag;
+}
+
 function formatStockEntryLine(item, horizonDays) {
   const brandSuffix = item.brand ? (' (' + item.brand + ')') : '';
   const barcodeSuffix = item.barcode ? (' [Barcode: ' + item.barcode + ']') : '';
@@ -94,11 +123,19 @@ export function buildHomeStockPromptBlock(appState, appData, dbSource) {
   }
 
   if (staples.length > 0) {
+    const stapleMetaMap = (appState && appState.pantryStapleMeta && typeof appState.pantryStapleMeta === 'object')
+      ? appState.pantryStapleMeta
+      : {};
+    const stapleEntries = staples.map((s) => {
+      const low = s.trim().toLowerCase();
+      const meta = (low && Object.prototype.hasOwnProperty.call(stapleMetaMap, low)) ? stapleMetaMap[low] : null;
+      return formatPantryStapleForPrompt(s, meta);
+    });
     blocks.push([
       '',
       'SPICES, COOKING OILS & CONDIMENTS ALREADY AT HOME (USE FREELY):',
-      staples.join(', '),
-      'PANTRY STAPLE RULE: Use these freely for flavor and cooking! For calorie-bearing oils, fats, or sweet sauces you use (e.g., Olive Oil, Butter, Sesame Oil, Honey, Light Mayo), include their exact daily grams in the meal `ingredients` array and in `customIngredients` with `"cadPerPackage": 0` so daily calories and fat macros stay accurate. Dry spices, herbs, vinegars, and zero-cal sauces can go right in `seasoningTwist` / `cookingMethod`.'
+      stapleEntries.join(', '),
+      'PANTRY STAPLE RULE: Use these freely for flavor and cooking! For calorie-bearing oils, fats, or sweet sauces (any with kcal/100g listed above, or Olive Oil, Butter, Sesame Oil, Honey, Light Mayo), include their exact daily grams in the meal `ingredients` array and in `customIngredients` with `"cadPerPackage": 0` so daily calories and fat macros stay accurate, and use any `[Health Note: ...]` sauces sparingly. Dry spices, herbs, vinegars, and zero-cal sauces can go right in `seasoningTwist` / `cookingMethod`.'
     ].join('\n'));
   }
 

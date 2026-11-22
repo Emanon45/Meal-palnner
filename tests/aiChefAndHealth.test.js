@@ -381,4 +381,80 @@ test('Health Warnings, AI Chef Prompts, Store Barcode Swap, Preview & Undo', asy
     assert.equal(stateMod.restorePlanFromHistory(0), true);
     assert.equal(stateMod.getAppData().mealTemplates.weeklyTheme, 'Test Custom Week');
   });
+
+  await t.test('Scanned spices & condiments store metadata safely, prune orphans, and format compactly in Gemini prompts', () => {
+    const appState = stateMod.getAppState();
+    stateMod.clearPantryStaples();
+    appState.pantryStock = [];
+    appState.haveAtHome = {};
+
+    // Plain chip without scan metadata
+    stateMod.addCustomPantryStaple('Smoked Paprika');
+
+    // Trace-calorie seasoning with barcode scan metadata -> no calorie noise, keeps health alert if high sodium
+    assert.equal(
+      stateMod.addCustomPantryStaple('Club House Montreal Steak Spice', {
+        barcode: '006620002010',
+        brand: 'Club House',
+        per100g: { calories: 0, protein: 0, fat: 0, carbs: 0 },
+        health: { sodiumMg: 12000 }
+      }),
+      true
+    );
+
+    // Calorie-bearing sugary + salty BBQ sauce -> compact macro tag + health note
+    assert.equal(
+      stateMod.addCustomPantryStaple('Original BBQ Sauce', {
+        barcode: '006810008421',
+        brand: 'Kraft',
+        per100g: { calories: 170, protein: 1.5, fat: 0, carbs: 40 },
+        health: { sugars: 35, sodiumMg: 1050, novaGroup: 4 }
+      }),
+      true
+    );
+
+    // Calorie-bearing clean oil -> compact macro tag + fat warning
+    assert.equal(
+      stateMod.addCustomPantryStaple('Extra Virgin Olive Oil', {
+        barcode: '005974990505',
+        brand: 'Selection',
+        per100g: { calories: 884, protein: 0, fat: 100, carbs: 0 },
+        health: { sugars: 0, saturatedFat: 14, sodiumMg: 0 }
+      }),
+      true
+    );
+
+    const steakMeta = stateMod.getPantryStapleMeta('Club House Montreal Steak Spice');
+    assert.ok(steakMeta);
+    assert.equal(steakMeta.barcode, '006620002010');
+
+    const prompt = promptsMod.buildGeminiMealPrompt();
+    // Plain spice stays plain without macro clutter
+    assert.ok(prompt.includes('Smoked Paprika, ') || prompt.includes(', Smoked Paprika'));
+    // Trace-cal high-sodium seasoning omits "(0 kcal" clutter while surfacing High Sodium
+    assert.equal(prompt.includes('Club House Montreal Steak Spice [Health Note: High Sodium]'), true);
+    assert.equal(prompt.includes('Montreal Steak Spice ('), false);
+    // Calorie-bearing condiment includes compact macro tag & health warning
+    assert.equal(prompt.includes('Original BBQ Sauce (170 kcal, 1.5g P, 40g C/100g) [Health Note: High Sugar, High Sodium, Ultra-Processed]'), true);
+    assert.equal(prompt.includes('Extra Virgin Olive Oil (884 kcal, 100g F/100g) [Health Note: High Sat. Fat, High Fat]'), true);
+
+    // validateState preserves valid staple metadata and prunes orphans + prototype keys
+    const validated = stateMod.validateState({
+      pantryStaples: ['Original BBQ Sauce'],
+      pantryStapleMeta: {
+        'original bbq sauce': { barcode: '006810008421', brand: 'Kraft', per100g: { calories: 170, protein: 1.5, fat: 0, carbs: 40 } },
+        'orphaned sauce': { barcode: '001122334455', brand: 'Ghost', per100g: { calories: 200, protein: 0, fat: 0, carbs: 50 } },
+        __proto__: { barcode: '999999999999' }
+      }
+    });
+    assert.ok(validated.pantryStapleMeta['original bbq sauce']);
+    assert.equal(validated.pantryStapleMeta['orphaned sauce'], undefined);
+    assert.equal(Object.prototype.hasOwnProperty.call(validated.pantryStapleMeta, '__proto__'), false);
+
+    // Removing / clearing staples removes associated metadata cleanly
+    assert.equal(stateMod.removePantryStaple('Original BBQ Sauce'), true);
+    assert.equal(stateMod.getPantryStapleMeta('Original BBQ Sauce'), null);
+    stateMod.clearPantryStaples();
+    assert.deepEqual(appState.pantryStapleMeta, {});
+  });
 });
