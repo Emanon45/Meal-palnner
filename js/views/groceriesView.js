@@ -39,6 +39,14 @@ function notifyStockChanged() {
   }
 }
 
+function handleBatchSaved(result) {
+  if (result && result.summary) {
+    uiStatus.stockStatusText = result.summary;
+    announcePolite(uiStatus.stockStatusText);
+  }
+  notifyStockChanged();
+}
+
 function radarBadgeClass(tag) {
   if (tag === 'HISTORIC LOW') return 'badge radar-historic';
   if (tag === 'HOT DEAL') return 'badge radar-hot';
@@ -323,11 +331,11 @@ function renderPerishablesSubtab(frag, perishableItems, appData) {
   heroCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Scan barcodes or add fridge/fresh food that needs to be used before it spoils. Gemini prioritizes these first in new recipes.'));
 
   const addRow = el('div', 'flex-wrap-row');
-  const scanBtn = el('button', 'btn-primary flex-1', 'Scan Barcode');
+  const scanBtn = el('button', 'btn-primary flex-1', 'Scan Barcodes');
   scanBtn.type = 'button';
   scanBtn.id = 'open-barcode-scanner-btn';
   scanBtn.addEventListener('click', () => {
-    openStockModal({ mode: 'scan', defaultCategory: 'perishable', onSaved: notifyStockChanged });
+    openStockModal({ mode: 'batch_scan', defaultBucket: 'perishable', onSaved: handleBatchSaved });
   });
 
   const manualBtn = el('button', 'btn-secondary flex-1', '+ Add Manually');
@@ -420,19 +428,14 @@ function renderPantrySubtab(frag, nonPerishableItems, appState, appData) {
   staplesCard.appendChild(stTop);
   staplesCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Tap what you already keep in your cupboard. Gemini can use these freely for cooking & seasoning without buying them.'));
 
-  const scanStapleBtn = el('button', 'btn-primary w-full', 'Scan Spice / Condiment Barcode');
+  const scanStapleBtn = el('button', 'btn-primary w-full', 'Scan Spices / Condiments');
   scanStapleBtn.type = 'button';
   scanStapleBtn.id = 'pantry-scan-staple-btn';
   scanStapleBtn.addEventListener('click', () => {
     openStockModal({
-      mode: 'staple_scan',
-      onSaved: (savedStaple) => {
-        if (savedStaple && savedStaple.name) {
-          uiStatus.stockStatusText = 'Saved "' + savedStaple.name + '" to Spices & Condiments.';
-          announcePolite(uiStatus.stockStatusText);
-        }
-        notifyStockChanged();
-      }
+      mode: 'batch_scan',
+      defaultBucket: 'spice',
+      onSaved: handleBatchSaved
     });
   });
   staplesCard.appendChild(scanStapleBtn);
@@ -588,11 +591,11 @@ function renderPantrySubtab(frag, nonPerishableItems, appState, appData) {
   nonPerishHero.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Canned goods, rice, oats, whey, and frozen items you have on hand. Gemini treats these as optional ($0 if used, but not forced every week).'));
 
   const npAddRow = el('div', 'flex-wrap-row');
-  const npScanBtn = el('button', 'btn-primary flex-1', 'Scan Barcode');
+  const npScanBtn = el('button', 'btn-primary flex-1', 'Scan Barcodes');
   npScanBtn.type = 'button';
   npScanBtn.id = 'pantry-scan-barcode-btn';
   npScanBtn.addEventListener('click', () => {
-    openStockModal({ mode: 'scan', defaultCategory: 'non_perishable', onSaved: notifyStockChanged });
+    openStockModal({ mode: 'batch_scan', defaultBucket: 'non_perishable', onSaved: handleBatchSaved });
   });
 
   const npManualBtn = el('button', 'btn-secondary flex-1', '+ Add Manually');

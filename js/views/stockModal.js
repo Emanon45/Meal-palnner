@@ -30,8 +30,74 @@ let currentModalMode = 'scan';
 let categoryManuallyOverridden = false;
 let currentQuantityDetected = true;
 let currentHealthExtra = { novaGroup: null, nutriScore: '', nutrientLevels: null };
+let singlePortionFraction = null;
+
+let batchQueue = [];
+let activeBatchBucket = 'perishable';
+let batchUidCounter = 0;
+let batchSessionId = 0;
+let flashTimerId = null;
+let sharedAudioCtx = null;
 
 let refs = null;
+
+const BUCKET_OPTIONS = [
+  { val: 'perishable', label: 'Perishables', shortLabel: 'Perishable' },
+  { val: 'non_perishable', label: 'Pantry Food', shortLabel: 'Pantry' },
+  { val: 'spice', label: 'Spices & Sauces', shortLabel: 'Spice' }
+];
+
+const PORTION_FRACTIONS = [
+  { frac: 1, label: 'Full' },
+  { frac: 0.75, label: '¾' },
+  { frac: 0.5, label: '½' },
+  { frac: 0.25, label: '¼' }
+];
+
+function getBucketLabel(bucket) {
+  const found = BUCKET_OPTIONS.find((b) => b.val === bucket);
+  return found ? found.label : 'Pantry Food';
+}
+
+function triggerScanFeedback() {
+  if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+    try {
+      navigator.vibrate(60);
+    } catch (_err) {
+      // Ignore vibration errors
+    }
+  }
+  try {
+    const AudioCtx = (typeof window !== 'undefined') ? (window.AudioContext || window.webkitAudioContext) : null;
+    if (AudioCtx) {
+      if (!sharedAudioCtx) sharedAudioCtx = new AudioCtx();
+      if (sharedAudioCtx.state === 'suspended' && typeof sharedAudioCtx.resume === 'function') {
+        sharedAudioCtx.resume().catch(() => {});
+      }
+      const osc = sharedAudioCtx.createOscillator();
+      const gain = sharedAudioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      const now = sharedAudioCtx.currentTime;
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.075);
+      osc.connect(gain);
+      gain.connect(sharedAudioCtx.destination);
+      osc.start(now);
+      osc.stop(now + 0.08);
+    }
+  } catch (_err) {
+    // Ignore audio context restrictions
+  }
+  if (refs && refs.viewport) {
+    refs.viewport.classList.add('scanner-flash');
+    if (flashTimerId !== null) clearTimeout(flashTimerId);
+    flashTimerId = setTimeout(() => {
+      flashTimerId = null;
+      if (refs && refs.viewport) refs.viewport.classList.remove('scanner-flash');
+    }, 200);
+  }
+}
 
 function stopActiveScanner() {
   if (activeScannerCtrl && typeof activeScannerCtrl.stop === 'function') {
@@ -101,7 +167,7 @@ function updateHealthWarningsBanner() {
 }
 
 function updateMacroPreview() {
-  if (!refs) return;
+  if (!refs || currentModalMode === 'batch_scan') return;
   const isStoreLookupMode = currentModalMode === 'swap' || currentModalMode === 'adjust_scan';
   const gOnHand = isStoreLookupMode
     ? Math.max(1, Number(refs.pkgInput.value) || 500)
@@ -222,13 +288,400 @@ async function handleBarcodeLookup(rawCode) {
   }
 }
 
+function renderBatchQueue() {
+  if (!refs || !refs.batchQueueList) return;
+  const total = batchQueue.length;
+  refs.batchQueueHeading.textContent = 'Scanned Queue (' + total + ')';
+  refs.batchSaveAllBtn.textContent = 'Save All (' + total + ')';
+  refs.batchClearBtn.hidden = total === 0;
+  refs.batchQueueEmpty.hidden = total > 0;
+
+  const frag = document.createDocumentFragment();
+  batchQueue.forEach((item) => {
+    const li = el('li', 'subcard batch-queue-card space-y-2');
+    li.setAttribute('data-batch-code', item.barcode);
+    li.setAttribute('data-batch-uid', item.uid);
+
+    if (item.status === 'loading') {
+      const loadRow = el('div', 'flex-wrap-row justify-between');
+      loadRow.appendChild(el('span', 'text-xs font-semibold text-slate-200 wrap-anywhere', 'Looking up barcode ' + item.barcode + '...'));
+      const rmBtn = el('button', 'btn-secondary text-xs', '×');
+      rmBtn.type = 'button';
+      rmBtn.setAttribute('aria-label', 'Remove barcode ' + item.barcode);
+      rmBtn.addEventListener('click', () => {
+        batchQueue = batchQueue.filter((q) => q.uid !== item.uid);
+        renderBatchQueue();
+      });
+      loadRow.appendChild(rmBtn);
+      li.appendChild(loadRow);
+      frag.appendChild(li);
+      return;
+    }
+
+    const topRow = el('div', 'flex-wrap-row justify-between');
+    const titleWrap = el('div', 'flex-wrap-row flex-1');
+    if (item.status === 'ready') {
+      const titleText = item.brand ? (item.name + ' \u2014 ' + item.brand) : item.name;
+      titleWrap.appendChild(el('span', 'text-xs font-bold text-slate-100 wrap-anywhere', titleText));
+      if (item.bucket !== 'spice' && item.packCount > 1) {
+        titleWrap.appendChild(el('span', 'badge radar-flyer', '\u00D7' + item.packCount));
+      }
+    } else {
+      titleWrap.appendChild(el('span', 'text-xs font-bold text-red-400 wrap-anywhere', 'Barcode ' + item.barcode + ' not found'));
+    }
+    const rmBtn = el('button', 'btn-secondary text-xs', '×');
+    rmBtn.type = 'button';
+    rmBtn.setAttribute('aria-label', 'Remove ' + (item.name || item.barcode));
+    rmBtn.addEventListener('click', () => {
+      batchQueue = batchQueue.filter((q) => q.uid !== item.uid);
+      renderBatchQueue();
+    });
+    topRow.appendChild(titleWrap);
+    topRow.appendChild(rmBtn);
+    li.appendChild(topRow);
+
+    if (item.status === 'not_found') {
+      const nameField = el('div', 'space-y-1');
+      const nameLbl = el('label', 'block text-xs font-semibold text-slate-200', 'Product Name *');
+      const nameInpId = 'batch-name-' + item.uid;
+      nameLbl.setAttribute('for', nameInpId);
+      const nameInp = el('input', 'w-full text-sm');
+      nameInp.id = nameInpId;
+      nameInp.type = 'text';
+      nameInp.maxLength = 80;
+      nameInp.placeholder = 'Enter product name *';
+      nameInp.setAttribute('data-batch-name-uid', item.uid);
+      nameInp.value = item.name || '';
+      nameInp.addEventListener('input', () => {
+        item.name = nameInp.value;
+      });
+      nameField.appendChild(nameLbl);
+      nameField.appendChild(nameInp);
+      li.appendChild(nameField);
+
+      const per = item.per100g || {};
+      const mGrid = el('div', 'stock-form-grid');
+      [
+        { key: 'calories', label: 'kcal / 100g', step: '1', max: '900' },
+        { key: 'protein', label: 'Protein g', step: '0.1', max: '100' },
+        { key: 'carbs', label: 'Carbs g', step: '0.1', max: '100' },
+        { key: 'fat', label: 'Fat g', step: '0.1', max: '100' }
+      ].forEach((mf) => {
+        const mInp = el('input', 'w-full text-xs');
+        mInp.type = 'number';
+        mInp.min = '0';
+        mInp.max = mf.max;
+        mInp.step = mf.step;
+        mInp.value = String(per[mf.key] || 0);
+        mInp.addEventListener('input', () => {
+          item.per100g[mf.key] = Math.max(0, Number(mInp.value) || 0);
+        });
+        mGrid.appendChild(createField('batch-' + mf.key + '-' + item.uid, mf.label, mInp));
+      });
+      li.appendChild(mGrid);
+    } else {
+      const badgeRow = el('div', 'flex-wrap-row');
+      badgeRow.appendChild(el('span', 'badge radar-regular', 'UPC ' + item.barcode));
+      const evalAisle = item.bucket === 'spice' ? 'Pantry/Canned' : item.aisle;
+      badgeRow.appendChild(createHealthWarningBadges({
+        name: item.name,
+        aisle: evalAisle,
+        per100g: item.per100g,
+        health: item.health
+      }, el, { compact: false }));
+      li.appendChild(badgeRow);
+
+      const per = item.per100g || {};
+      const isTraceSpice = item.bucket === 'spice' &&
+        (Number(per.calories) || 0) < 10 &&
+        (Number(per.fat) || 0) < 1 &&
+        (Number(per.carbs) || 0) < 2 &&
+        (Number(per.protein) || 0) < 2;
+      const macroTxt = isTraceSpice
+        ? 'Trace / zero calories per serving'
+        : ('Per 100g: ' + Math.round(per.calories || 0) + ' kcal \u00B7 ' + (per.protein || 0) + 'g P \u00B7 ' + (per.carbs || 0) + 'g C \u00B7 ' + (per.fat || 0) + 'g F');
+      li.appendChild(el('div', 'text-xs text-slate-300 wrap-anywhere', macroTxt));
+    }
+
+    // 1-tap per-item bucket override
+    const bucketRow = el('div', 'batch-item-buckets');
+    bucketRow.setAttribute('role', 'group');
+    bucketRow.setAttribute('aria-label', 'Save ' + (item.name || item.barcode) + ' to');
+    BUCKET_OPTIONS.forEach((opt) => {
+      const bBtn = el('button', 'pill-btn text-xs', opt.shortLabel);
+      bBtn.type = 'button';
+      bBtn.setAttribute('aria-pressed', item.bucket === opt.val ? 'true' : 'false');
+      bBtn.addEventListener('click', () => {
+        if (item.bucket !== opt.val) {
+          item.bucket = opt.val;
+          renderBatchQueue();
+        }
+      });
+      bucketRow.appendChild(bBtn);
+    });
+    li.appendChild(bucketRow);
+
+    if (item.bucket !== 'spice') {
+      const portionWrap = el('div', 'space-y-1.5');
+      const chipRow = el('div', 'portion-chip-row');
+      const gInpId = 'batch-grams-' + item.uid;
+      const gInp = el('input', 'w-24 text-right');
+      gInp.id = gInpId;
+      gInp.type = 'number';
+      gInp.min = '1';
+      gInp.max = '50000';
+      gInp.step = '1';
+      gInp.value = String(item.gramsOnHand);
+
+      const chipBtns = [];
+      const syncChipStates = () => {
+        chipBtns.forEach(({ btn, frac }) => {
+          btn.setAttribute('aria-pressed', item.fraction === frac ? 'true' : 'false');
+        });
+      };
+
+      PORTION_FRACTIONS.forEach((pf) => {
+        const cBtn = el('button', 'pill-btn portion-chip text-xs', pf.label);
+        cBtn.type = 'button';
+        cBtn.setAttribute('aria-label', pf.label + ' package for ' + (item.name || item.barcode));
+        cBtn.setAttribute('aria-pressed', item.fraction === pf.frac ? 'true' : 'false');
+        cBtn.addEventListener('click', () => {
+          const baseTotal = Math.max(1, (item.packageGrams || 500) * (item.packCount || 1));
+          item.fraction = pf.frac;
+          item.gramsOnHand = Math.max(1, Math.min(50000, Math.round(baseTotal * pf.frac)));
+          gInp.value = String(item.gramsOnHand);
+          syncChipStates();
+        });
+        chipBtns.push({ btn: cBtn, frac: pf.frac });
+        chipRow.appendChild(cBtn);
+      });
+      portionWrap.appendChild(chipRow);
+
+      const gRow = el('div', 'flex-wrap-row justify-between');
+      const gLbl = el('label', 'text-xs font-semibold text-slate-200', 'Grams on Hand');
+      gLbl.setAttribute('for', gInpId);
+      gInp.addEventListener('input', () => {
+        item.gramsOnHand = clampInt(gInp.value, 1, 50000, item.packageGrams || 500);
+        item.fraction = null;
+        syncChipStates();
+      });
+      gRow.appendChild(gLbl);
+      gRow.appendChild(gInp);
+      portionWrap.appendChild(gRow);
+
+      if (item.status === 'ready' && item.quantityDetected === false) {
+        portionWrap.appendChild(el('span', 'block text-xs text-red-400 font-semibold', 'Package size not in DB (default 500g) \u2014 adjust grams if needed'));
+      }
+      li.appendChild(portionWrap);
+    }
+
+    frag.appendChild(li);
+  });
+
+  refs.batchQueueList.replaceChildren(frag);
+}
+
+async function handleBatchBarcodeAdd(rawCode) {
+  const code = normalizeBarcode(rawCode);
+  if (!code) {
+    setScanStatus('Enter an 8 to 14 digit barcode number (UPC / EAN).', true);
+    return false;
+  }
+
+  const targetBucket = activeBatchBucket;
+  const mySession = batchSessionId;
+  const existingIdx = batchQueue.findIndex((it) => it.barcode === code);
+
+  if (existingIdx !== -1) {
+    const existing = batchQueue[existingIdx];
+    if (existing.status === 'loading') return true;
+    triggerScanFeedback();
+    batchQueue.splice(existingIdx, 1);
+    batchQueue.unshift(existing);
+    if (existing.bucket === 'spice') {
+      renderBatchQueue();
+      setScanStatus('Already queued in Spices & Sauces: ' + (existing.name || code) + '.', false);
+      return true;
+    }
+    existing.packCount += 1;
+    const fracMult = existing.fraction || 1;
+    existing.gramsOnHand = Math.max(1, Math.min(50000, Math.round(existing.packageGrams * existing.packCount * fracMult)));
+    renderBatchQueue();
+    setScanStatus('Added pack #' + existing.packCount + ' of "' + (existing.name || code) + '" (' + existing.gramsOnHand + 'g).', false);
+    announcePolite('Added pack ' + existing.packCount + ' of ' + (existing.name || code));
+    return true;
+  }
+
+  triggerScanFeedback();
+  const uid = 'bq_' + (++batchUidCounter);
+  const entry = {
+    uid,
+    barcode: code,
+    status: 'loading',
+    bucket: targetBucket,
+    name: '',
+    brand: '',
+    aisle: 'Pantry/Canned',
+    packageGrams: 500,
+    packCount: 1,
+    gramsOnHand: 500,
+    fraction: 1,
+    quantityDetected: true,
+    rawQuantityText: '',
+    per100g: { calories: 0, protein: 0, carbs: 0, fat: 0 },
+    health: null,
+    source: 'openfoodfacts'
+  };
+  batchQueue.unshift(entry);
+  renderBatchQueue();
+  setScanStatus('Looking up ' + code + ' in background \u2014 keep scanning!', false);
+
+  const res = await lookupBarcodeMacros(code);
+  if (mySession !== batchSessionId) return true;
+  const live = batchQueue.find((q) => q.uid === uid);
+  if (!live) return true;
+
+  if (res && res.found && res.product) {
+    const p = res.product;
+    live.status = 'ready';
+    live.name = p.name || ('Product ' + code);
+    live.brand = p.brand || '';
+    live.aisle = p.aisle || 'Pantry/Canned';
+    live.packageGrams = clampInt(p.packageGrams, 1, 20000, 500);
+    live.packCount = 1;
+    live.fraction = 1;
+    live.gramsOnHand = live.packageGrams;
+    live.quantityDetected = p.quantityDetected !== false;
+    live.rawQuantityText = p.rawQuantityText || '';
+    live.per100g = p.per100g || { calories: 0, protein: 0, carbs: 0, fat: 0 };
+    live.health = p.health || null;
+    live.source = p.source || 'openfoodfacts';
+    renderBatchQueue();
+    setScanStatus('Queued "' + live.name + '"' + (res.fromCache ? ' (cache)' : '') + ' \u2014 point at next barcode!', false);
+    announcePolite('Queued ' + live.name);
+  } else {
+    live.status = 'not_found';
+    live.source = 'manual';
+    live.quantityDetected = false;
+    renderBatchQueue();
+    setScanStatus('Barcode ' + code + ' not in Open Food Facts \u2014 enter a name below or tap × to remove.', true);
+  }
+  return true;
+}
+
+function saveBatchQueue() {
+  if (batchQueue.length === 0) {
+    setScanStatus('Scan at least one barcode first before saving.', true);
+    announcePolite('Scan at least one barcode first.');
+    return;
+  }
+  if (batchQueue.some((it) => it.status === 'loading')) {
+    setScanStatus('Wait a moment for barcode lookups to finish...', true);
+    return;
+  }
+  const missingName = batchQueue.find((it) => !String(it.name || '').trim());
+  if (missingName) {
+    setScanStatus('Enter a product name for barcode ' + missingName.barcode + ' or remove it with ×.', true);
+    const inp = refs.batchQueueList.querySelector('[data-batch-name-uid="' + missingName.uid + '"]');
+    if (inp) inp.focus();
+    return;
+  }
+
+  refs.batchSaveAllBtn.disabled = true;
+  let savedPerishables = 0;
+  let savedPantry = 0;
+  let savedSpices = 0;
+
+  try {
+    const ordered = batchQueue.slice().reverse();
+    ordered.forEach((item) => {
+      const cleanName = String(item.name || '').trim().slice(0, item.bucket === 'spice' ? 60 : 80);
+      const per = item.per100g || {};
+      const cleanPer = {
+        calories: Math.round(clampNum(per.calories, 0, 900, 0)),
+        protein: Math.round(clampNum(per.protein, 0, 100, 0) * 10) / 10,
+        fat: Math.round(clampNum(per.fat, 0, 100, 0) * 10) / 10,
+        carbs: Math.round(clampNum(per.carbs, 0, 100, 0) * 10) / 10
+      };
+      const cleanAisle = item.bucket === 'spice' ? 'Pantry/Canned' : (item.aisle || 'Pantry/Canned');
+      const gramsVal = clampInt(item.gramsOnHand, 1, 50000, item.packageGrams || 500);
+
+      if (item.source === 'manual' && item.barcode) {
+        saveCachedBarcodeProduct(item.barcode, {
+          barcode: item.barcode,
+          name: cleanName,
+          brand: item.brand || '',
+          aisle: cleanAisle,
+          category: item.bucket === 'perishable' ? 'perishable' : 'non_perishable',
+          gramsOnHand: gramsVal,
+          packageGrams: clampInt(item.packageGrams, 1, 20000, 500),
+          quantityDetected: item.quantityDetected !== false,
+          per100g: cleanPer,
+          health: item.health || undefined,
+          source: 'manual'
+        });
+      }
+
+      if (item.bucket === 'spice') {
+        const meta = {
+          barcode: item.barcode,
+          brand: item.brand || '',
+          per100g: cleanPer
+        };
+        if (item.health) meta.health = item.health;
+        if (addCustomPantryStaple(cleanName, meta)) {
+          savedSpices++;
+        }
+      } else {
+        const saved = upsertPantryStockItem({
+          barcode: item.barcode,
+          name: cleanName,
+          brand: item.brand || '',
+          aisle: cleanAisle,
+          category: item.bucket === 'perishable' ? 'perishable' : 'non_perishable',
+          gramsOnHand: gramsVal,
+          packageGrams: clampInt(item.packageGrams, 1, 20000, 500),
+          per100g: cleanPer,
+          health: item.health || undefined,
+          source: item.source || 'openfoodfacts'
+        });
+        if (saved) {
+          if (item.bucket === 'perishable') savedPerishables++;
+          else savedPantry++;
+        }
+      }
+    });
+
+    const total = savedPerishables + savedPantry + savedSpices;
+    const parts = [];
+    if (savedPerishables > 0) parts.push(savedPerishables + ' Perishable');
+    if (savedPantry > 0) parts.push(savedPantry + ' Pantry');
+    if (savedSpices > 0) parts.push(savedSpices + (savedSpices === 1 ? ' Spice/Condiment' : ' Spices/Condiments'));
+    const summary = parts.length > 0
+      ? ('Saved ' + total + (total === 1 ? ' item' : ' items') + ' (' + parts.join(', ') + ').')
+      : ('Saved ' + total + ' items.');
+
+    const cb = currentOnSaved;
+    closeStockModal();
+    announcePolite(summary);
+    if (typeof cb === 'function') {
+      cb({ total, savedPerishables, savedPantry, savedSpices, summary });
+    }
+  } finally {
+    refs.batchSaveAllBtn.disabled = false;
+  }
+}
+
 async function startCameraScan() {
   if (!refs) return;
   stopActiveScanner();
+  const isBatchMode = currentModalMode === 'batch_scan';
   refs.camToggleBtn.textContent = 'Stop Camera';
   refs.camToggleBtn.setAttribute('aria-pressed', 'true');
 
   activeScannerCtrl = await startCameraBarcodeScan(refs.videoEl, {
+    continuous: isBatchMode,
+    cooldownMs: 1800,
     onStatus: (msg) => setScanStatus(msg, false),
     onError: (reason) => {
       stopActiveScanner();
@@ -237,8 +690,12 @@ async function startCameraScan() {
       }
     },
     onDetected: (code) => {
-      stopActiveScanner();
-      handleBarcodeLookup(code);
+      if (currentModalMode === 'batch_scan') {
+        handleBatchBarcodeAdd(code);
+      } else {
+        stopActiveScanner();
+        handleBarcodeLookup(code);
+      }
     }
   });
 }
@@ -284,6 +741,38 @@ function ensureDialogBuilt() {
   header.appendChild(titleEl);
   header.appendChild(closeTopBtn);
   shell.appendChild(header);
+
+  // Rapid-Scan 3-Way Active Bucket Radio Switcher (shown in batch_scan mode)
+  const batchBucketFieldset = el('fieldset', 'staple-fieldset space-y-1.5');
+  batchBucketFieldset.id = 'batch-bucket-fieldset';
+  batchBucketFieldset.hidden = true;
+  batchBucketFieldset.appendChild(el('legend', 'text-xs font-bold text-slate-200', 'Save scanned items to:'));
+  const bucketGrid = el('div', 'batch-bucket-grid');
+  const bucketRadios = {};
+  BUCKET_OPTIONS.forEach((opt) => {
+    const optWrap = el('div', 'batch-bucket-option');
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.id = 'batch-bucket-' + opt.val;
+    radio.name = 'batchActiveBucket';
+    radio.value = opt.val;
+    radio.className = 'batch-bucket-radio';
+    radio.checked = opt.val === activeBatchBucket;
+    radio.addEventListener('change', () => {
+      if (radio.checked) {
+        activeBatchBucket = opt.val;
+        setScanStatus('Ready to scan into ' + getBucketLabel(opt.val) + '.', false);
+      }
+    });
+    const lbl = el('label', 'pill-btn batch-bucket-label', opt.label);
+    lbl.setAttribute('for', radio.id);
+    optWrap.appendChild(radio);
+    optWrap.appendChild(lbl);
+    bucketGrid.appendChild(optWrap);
+    bucketRadios[opt.val] = radio;
+  });
+  batchBucketFieldset.appendChild(bucketGrid);
+  shell.appendChild(batchBucketFieldset);
 
   // Scanner toggle link (for manual/edit mode)
   const scannerToggleBtn = el('button', 'btn-secondary text-xs w-full', 'Show Barcode Scanner');
@@ -345,7 +834,7 @@ function ensureDialogBuilt() {
   barcodeInput.setAttribute('autocorrect', 'off');
   barcodeInput.setAttribute('autocapitalize', 'none');
   barcodeInput.setAttribute('spellcheck', 'false');
-  barcodeInput.setAttribute('enterkeyhint', 'search');
+  barcodeInput.setAttribute('enterkeyhint', 'done');
   barcodeInput.placeholder = 'e.g. 060383001483';
 
   const lookupBtn = el('button', 'btn-primary text-xs', 'Look Up');
@@ -365,6 +854,57 @@ function ensureDialogBuilt() {
   scannerPanel.appendChild(scanStatusEl);
 
   shell.appendChild(scannerPanel);
+
+  // Rapid-Scan Live Queue Panel & Footer Actions (shown in batch_scan mode)
+  const batchQueuePanel = el('section', 'space-y-2');
+  batchQueuePanel.id = 'batch-queue-panel';
+  batchQueuePanel.hidden = true;
+  batchQueuePanel.setAttribute('aria-label', 'Scanned items queue');
+
+  const bQueueTop = el('div', 'flex-wrap-row justify-between');
+  const batchQueueHeading = el('h3', 'text-sm font-bold text-slate-100', 'Scanned Queue (0)');
+  batchQueueHeading.id = 'batch-queue-heading';
+  const batchClearBtn = el('button', 'btn-secondary text-xs', 'Clear');
+  batchClearBtn.type = 'button';
+  batchClearBtn.id = 'batch-clear-queue-btn';
+  batchClearBtn.hidden = true;
+  batchClearBtn.addEventListener('click', () => {
+    batchSessionId++;
+    batchQueue = [];
+    renderBatchQueue();
+    setScanStatus('Cleared queue. Ready to scan into ' + getBucketLabel(activeBatchBucket) + '.', false);
+  });
+  bQueueTop.appendChild(batchQueueHeading);
+  bQueueTop.appendChild(batchClearBtn);
+  batchQueuePanel.appendChild(bQueueTop);
+
+  const batchQueueEmpty = el(
+    'p',
+    'text-xs text-slate-300 wrap-anywhere',
+    'Point the camera at barcodes one after another (or type UPCs / upload photos above) — items queue here automatically.'
+  );
+  batchQueueEmpty.id = 'batch-queue-empty';
+  batchQueuePanel.appendChild(batchQueueEmpty);
+
+  const batchQueueList = el('ul', 'space-y-2 list-none p-0 m-0');
+  batchQueueList.id = 'batch-queue-list';
+  batchQueuePanel.appendChild(batchQueueList);
+  shell.appendChild(batchQueuePanel);
+
+  const batchActionBar = el('div', 'flex-wrap-row pt-1');
+  batchActionBar.id = 'batch-action-bar';
+  batchActionBar.hidden = true;
+  const batchSaveAllBtn = el('button', 'btn-primary flex-1', 'Save All (0)');
+  batchSaveAllBtn.type = 'button';
+  batchSaveAllBtn.id = 'batch-save-all-btn';
+  batchSaveAllBtn.addEventListener('click', () => saveBatchQueue());
+  const batchCancelBtn = el('button', 'btn-secondary', 'Cancel');
+  batchCancelBtn.type = 'button';
+  batchCancelBtn.id = 'batch-cancel-btn';
+  batchCancelBtn.addEventListener('click', () => closeStockModal());
+  batchActionBar.appendChild(batchSaveAllBtn);
+  batchActionBar.appendChild(batchCancelBtn);
+  shell.appendChild(batchActionBar);
 
   // Live Macro Preview Banner
   const previewBox = el('div', 'ok-banner space-y-1');
@@ -457,6 +997,35 @@ function ensureDialogBuilt() {
   pkgWrap.appendChild(pkgHelpEl);
   qtyGrid.appendChild(pkgWrap);
   form.appendChild(qtyGrid);
+
+  // Zero-Keyboard Portion Quick Chips (for single-item scan / manual / edit)
+  const portionChipsWrap = el('div', 'space-y-1');
+  portionChipsWrap.id = 'stock-portion-chips';
+  portionChipsWrap.appendChild(el('span', 'block text-xs font-semibold text-slate-200', 'Quick Portion (From Package Size)'));
+  const singlePortionRow = el('div', 'portion-chip-row');
+  const singlePortionBtns = [];
+  const syncSinglePortionChips = () => {
+    singlePortionBtns.forEach(({ btn, frac }) => {
+      btn.setAttribute('aria-pressed', singlePortionFraction === frac ? 'true' : 'false');
+    });
+  };
+  PORTION_FRACTIONS.forEach((pf) => {
+    const btn = el('button', 'pill-btn portion-chip text-xs', pf.label);
+    btn.type = 'button';
+    btn.setAttribute('data-portion-frac', String(pf.frac));
+    btn.setAttribute('aria-pressed', 'false');
+    btn.addEventListener('click', () => {
+      const basePkg = clampInt(pkgInput.value, 1, 20000, 500);
+      singlePortionFraction = pf.frac;
+      gramsInput.value = String(Math.max(1, Math.min(50000, Math.round(basePkg * pf.frac))));
+      syncSinglePortionChips();
+      updateMacroPreview();
+    });
+    singlePortionBtns.push({ btn, frac: pf.frac });
+    singlePortionRow.appendChild(btn);
+  });
+  portionChipsWrap.appendChild(singlePortionRow);
+  form.appendChild(portionChipsWrap);
 
   // Store & Price row (used in 'swap' and 'adjust_scan' modes)
   const storeRow = el('div', 'stock-form-grid');
@@ -582,14 +1151,26 @@ function ensureDialogBuilt() {
   refs = {
     dialog,
     titleEl,
+    batchBucketFieldset,
+    bucketRadios,
     scannerToggleBtn,
     scannerPanel,
+    viewport,
     videoEl,
     camToggleBtn,
+    photoBtn,
     photoInput,
     barcodeInput,
     lookupBtn,
     scanStatusEl,
+    batchQueuePanel,
+    batchQueueHeading,
+    batchClearBtn,
+    batchQueueEmpty,
+    batchQueueList,
+    batchActionBar,
+    batchSaveAllBtn,
+    previewBox,
     previewPer100El,
     previewTotalEl,
     healthWarnBox,
@@ -608,6 +1189,8 @@ function ensureDialogBuilt() {
     pkgWrap,
     pkgInput,
     pkgHelpEl,
+    portionChipsWrap,
+    syncSinglePortionChips,
     storeRow,
     storeSelect,
     priceInput,
@@ -637,28 +1220,56 @@ function ensureDialogBuilt() {
     }
   });
 
-  lookupBtn.addEventListener('click', () => {
-    handleBarcodeLookup(barcodeInput.value);
-  });
+  const submitManualBarcode = () => {
+    const raw = barcodeInput.value;
+    if (currentModalMode === 'batch_scan') {
+      if (normalizeBarcode(raw)) barcodeInput.value = '';
+      handleBatchBarcodeAdd(raw);
+    } else {
+      handleBarcodeLookup(raw);
+    }
+  };
+
+  lookupBtn.addEventListener('click', submitManualBarcode);
 
   barcodeInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.isComposing) {
       event.preventDefault();
-      handleBarcodeLookup(barcodeInput.value);
+      submitManualBarcode();
     }
   });
 
   photoInput.addEventListener('change', async () => {
-    const file = photoInput.files && photoInput.files[0];
+    const files = photoInput.files ? Array.from(photoInput.files) : [];
     photoInput.value = '';
-    if (!file) return;
+    if (files.length === 0) return;
+    if (currentModalMode === 'batch_scan') {
+      setScanStatus('Reading barcode' + (files.length > 1 ? 's' : '') + ' from ' + files.length + ' photo(s)...', false);
+      let foundCount = 0;
+      for (let i = 0; i < files.length; i++) {
+        const code = await detectBarcodeFromImageFile(files[i]);
+        if (code) {
+          foundCount++;
+          handleBatchBarcodeAdd(code);
+        }
+      }
+      if (foundCount === 0) {
+        setScanStatus('No barcode detected in photo(s). Try sharper lighting or enter UPC numbers below.', true);
+      }
+      return;
+    }
     setScanStatus('Reading barcode from photo...', false);
-    const code = await detectBarcodeFromImageFile(file);
+    const code = await detectBarcodeFromImageFile(files[0]);
     if (code) {
       await handleBarcodeLookup(code);
     } else {
       setScanStatus('No barcode detected in that photo. Try a sharper photo or type the numbers below.', true);
     }
+  });
+
+  gramsInput.addEventListener('input', () => {
+    singlePortionFraction = null;
+    syncSinglePortionChips();
   });
 
   aisleSelect.addEventListener('change', () => {
@@ -786,6 +1397,7 @@ function ensureDialogBuilt() {
   });
 
   dialog.addEventListener('close', () => {
+    batchSessionId++;
     stopActiveScanner();
     dialog.returnValue = '';
   });
@@ -795,6 +1407,7 @@ function ensureDialogBuilt() {
 }
 
 export function closeStockModal() {
+  batchSessionId++;
   stopActiveScanner();
   if (dialogEl && dialogEl.open) {
     dialogEl.close();
@@ -806,10 +1419,16 @@ export function openStockModal({
   item = null,
   swapTarget = null,
   defaultCategory = '',
+  defaultBucket = '',
   defaultStore = '',
   onSaved = null
 } = {}) {
+  if (typeof document !== 'undefined' && document.activeElement && document.activeElement.tagName === 'INPUT') {
+    document.activeElement.blur();
+  }
   const dialog = ensureDialogBuilt();
+  batchSessionId++;
+  batchQueue = [];
   currentOnSaved = typeof onSaved === 'function' ? onSaved : null;
   currentModalMode = mode;
   currentEditingId = item && item.id ? item.id : null;
@@ -843,15 +1462,40 @@ export function openStockModal({
   refs.sodiumInput.value = '';
   refs.satFatInput.value = '';
 
+  const isBatchMode = mode === 'batch_scan';
   const isStoreLookupMode = mode === 'swap' || mode === 'adjust_scan';
   const isStapleMode = mode === 'staple_scan';
-  const showScannerByDefault = mode === 'scan' || mode === 'swap' || mode === 'adjust_scan' || isStapleMode;
+  const showScannerByDefault = mode === 'scan' || mode === 'swap' || mode === 'adjust_scan' || isStapleMode || isBatchMode;
+
+  const resolvedBucket = (defaultBucket === 'perishable' || defaultBucket === 'non_perishable' || defaultBucket === 'spice')
+    ? defaultBucket
+    : (defaultCategory === 'perishable' ? 'perishable' : 'non_perishable');
+  activeBatchBucket = resolvedBucket;
+  Object.keys(refs.bucketRadios).forEach((bk) => {
+    refs.bucketRadios[bk].checked = bk === resolvedBucket;
+  });
+
+  refs.batchBucketFieldset.hidden = !isBatchMode;
+  refs.batchQueuePanel.hidden = !isBatchMode;
+  refs.batchActionBar.hidden = !isBatchMode;
+  refs.viewport.classList.toggle('is-batch', isBatchMode);
+  refs.viewport.classList.remove('scanner-flash');
+  refs.photoInput.multiple = isBatchMode;
+  refs.photoBtn.textContent = isBatchMode ? 'Scan Photo(s)' : 'Scan Photo';
+  refs.lookupBtn.textContent = isBatchMode ? 'Add' : 'Look Up';
+
+  refs.previewBox.hidden = isBatchMode;
+  refs.healthWarnBox.hidden = true;
+  refs.form.hidden = isBatchMode;
+  refs.portionChipsWrap.hidden = isBatchMode || isStoreLookupMode || isStapleMode;
+  singlePortionFraction = (mode === 'edit' && item) ? null : 1;
+  refs.syncSinglePortionChips();
 
   refs.categoryWrap.hidden = isStoreLookupMode || isStapleMode;
   refs.qtyGrid.hidden = isStapleMode;
   refs.gramsWrap.hidden = isStoreLookupMode || isStapleMode;
   refs.pkgWrap.hidden = isStapleMode;
-  refs.gramsInput.required = !(isStoreLookupMode || isStapleMode);
+  refs.gramsInput.required = !(isBatchMode || isStoreLookupMode || isStapleMode);
   refs.storeRow.hidden = !isStoreLookupMode;
   refs.aisleWrap.hidden = isStapleMode;
   refs.twoColTop.classList.toggle('stock-form-grid', !isStapleMode);
@@ -860,7 +1504,18 @@ export function openStockModal({
     ? 'e.g. Kikkoman Soy Sauce, Kraft BBQ Sauce, Smoked Paprika'
     : 'e.g. Selection White Kidney Beans or Chicken Breast';
 
-  if (mode === 'edit' && item) {
+  if (isBatchMode) {
+    renderBatchQueue();
+    refs.titleEl.textContent = 'Rapid Barcode Scanner';
+    refs.scannerPanel.hidden = false;
+    refs.scannerToggleBtn.hidden = true;
+    setScanStatus(
+      isBarcodeDetectorSupported()
+        ? ('Starting continuous scanner into ' + getBucketLabel(resolvedBucket) + '...')
+        : ('Ready to add multiple items into ' + getBucketLabel(resolvedBucket) + ' via Scan Photo(s) or barcode numbers.'),
+      false
+    );
+  } else if (mode === 'edit' && item) {
     refs.titleEl.textContent = 'Edit Stock Ingredient';
     refs.saveBtn.textContent = 'Save to My Stock';
     populateFormFromProduct(item, { keepGrams: false });

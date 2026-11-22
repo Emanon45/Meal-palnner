@@ -99,6 +99,9 @@ test('Barcode Scanner & Stock-First Gemini Prompt integration', async (t) => {
 
   await t.test('guessAisleFromProduct maps categories and names to the 5 aisles', () => {
     assert.equal(barcodeMod.guessAisleFromProduct(['en:canned-tunas'], 'Skipjack Tuna'), 'Pantry/Canned');
+    assert.equal(barcodeMod.guessAisleFromProduct(['en:whey-proteins'], 'Whey Protein Isolate'), 'Pantry/Canned');
+    assert.equal(barcodeMod.guessAisleFromProduct([], 'Garlic Powder'), 'Pantry/Canned');
+    assert.equal(barcodeMod.guessAisleFromProduct(['en:olive-oils'], "Huile d'olive extra vierge"), 'Pantry/Canned');
     assert.equal(barcodeMod.guessAisleFromProduct(['en:frozen-berries'], 'Wild Blueberries'), 'Frozen');
     assert.equal(barcodeMod.guessAisleFromProduct(['en:yogurts'], '0% Skyr'), 'Dairy/Eggs');
     assert.equal(barcodeMod.guessAisleFromProduct(['en:poultry'], 'Lean Chicken Breast'), 'Meat');
@@ -413,5 +416,71 @@ test('Barcode Scanner & Stock-First Gemini Prompt integration', async (t) => {
     assert.ok(riceRow);
     assert.equal(riceRow.stockDeductedGrams, 300);
     assert.equal(riceRow.remainingGrams, Math.round((riceRow.totalGramsNeeded - 300) * 10) / 10);
+  });
+
+  await t.test('startCameraBarcodeScan supports continuous multi-scan cooldown and track cleanup', async () => {
+    const prevWindowDesc = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const prevNavDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    let trackStopped = false;
+    let frameIdx = 0;
+    const sequence = ['005974990001', '005974990001', '006810008421', '005974990001'];
+
+    class MockBarcodeDetector {
+      static async getSupportedFormats() {
+        return ['upc_a', 'ean_13'];
+      }
+      async detect() {
+        const val = sequence[Math.min(frameIdx, sequence.length - 1)];
+        frameIdx++;
+        return [{ rawValue: val }];
+      }
+    }
+
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { BarcodeDetector: MockBarcodeDetector }
+    });
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: {
+        mediaDevices: {
+          async getUserMedia() {
+            return {
+              getTracks() {
+                return [{ stop() { trackStopped = true; } }];
+              }
+            };
+          }
+        }
+      }
+    });
+
+    try {
+      const detected = [];
+      const mockVideo = {
+        readyState: 2,
+        videoWidth: 640,
+        videoHeight: 480,
+        setAttribute() {},
+        play() { return Promise.resolve(); },
+        pause() {}
+      };
+      const ctrl = await barcodeMod.startCameraBarcodeScan(mockVideo, {
+        continuous: true,
+        cooldownMs: 260,
+        onDetected: (code) => detected.push(code)
+      });
+
+      await new Promise((r) => setTimeout(r, 850));
+      assert.deepEqual(detected, ['005974990001', '006810008421', '005974990001']);
+      assert.equal(trackStopped, false);
+      ctrl.stop();
+      assert.equal(trackStopped, true);
+    } finally {
+      if (prevWindowDesc) Object.defineProperty(globalThis, 'window', prevWindowDesc);
+      else delete globalThis.window;
+      if (prevNavDesc) Object.defineProperty(globalThis, 'navigator', prevNavDesc);
+      else delete globalThis.navigator;
+    }
   });
 });

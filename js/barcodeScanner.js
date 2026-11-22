@@ -271,13 +271,13 @@ export function guessAisleFromProduct(categoriesTags, name) {
   if (/\bfrozen\b|surgel[ée]|ice[-\s]*cream|frozen[-\s]*(?:fruit|berries|veg|peas|corn|edamame)/i.test(text)) {
     return 'Frozen';
   }
-  if (/\bcanned\b|conserve|tinned|en[-\s]*bo[îi]te|dried[-\s]*beans|legumes|beans|lentils|rice|pasta|oats|oatmeal|flour|cereal|bread|tortilla|crackers|sauce|broth|stock|spice|seasoning|tuna|sardines|salmon[-\s]*canned/i.test(text)) {
+  if (/\bcanned\b|conserve|tinned|en[-\s]*bo[îi]te|dried[-\s]*beans|legumes|beans|lentils|rice|pasta|oats|oatmeal|flour|cereal|bread|tortilla|crackers|sauce|broth|stock|spice|seasoning|whey|casein|protein[-\s]*powder|prot[ée]ine\s*en\s*poudre|oil|huile|vinegar|vinaigre|mustard|moutarde|ketchup|mayo|mayonnaise|honey|miel|syrup|sirop|salsa|condiment|herb|herbe|[ée]pice|assaisonnement|garlic[-\s]*powder|onion[-\s]*powder|tomato[-\s]*paste|tuna|sardines|salmon[-\s]*canned/i.test(text)) {
     return 'Pantry/Canned';
   }
   if (/\bmeat\b|poultry|chicken|pork|beef|turkey|steak|ground[-\s]*(?:chicken|beef|turkey|pork)|bacon|ham|sausage|fresh[-\s]*fish|seafood|fillet|shrimp/i.test(text)) {
     return 'Meat';
   }
-  if (/\bdairy\b|milk|yogurt|yogourt|skyr|kefir|cheese|cottage|eggs?\b|whey|casein|protein[-\s]*powder|lait|oeuf|fromage/i.test(text)) {
+  if (/\bdairy\b|milk|yogurt|yogourt|skyr|kefir|cheese|cottage|eggs?\b|lait|oeuf|fromage/i.test(text)) {
     return 'Dairy/Eggs';
   }
   if (/\bproduce\b|fresh[-\s]*(?:fruit|vegetable)|vegetables?|fruits?|apple|banana|berries|blueberry|strawberry|spinach|lettuce|cabbage|carrot|cucumber|tomato|potato|onion|broccoli|pepper/i.test(text)) {
@@ -548,10 +548,14 @@ export async function startCameraBarcodeScan(videoEl, callbacks = {}) {
   const onDetected = typeof callbacks.onDetected === 'function' ? callbacks.onDetected : () => {};
   const onError = typeof callbacks.onError === 'function' ? callbacks.onError : () => {};
   const onStatus = typeof callbacks.onStatus === 'function' ? callbacks.onStatus : () => {};
+  const continuous = Boolean(callbacks.continuous);
+  const cooldownMs = clampNum(callbacks.cooldownMs, 200, 10000, 1800);
 
   let stopped = false;
   let stream = null;
   let timerId = null;
+  let lastCode = '';
+  let lastDetectedAt = 0;
 
   function stop() {
     if (stopped) return;
@@ -629,9 +633,19 @@ export async function startCameraBarcodeScan(videoEl, callbacks = {}) {
             for (let i = 0; i < barcodes.length; i++) {
               const code = normalizeBarcode(barcodes[i] && barcodes[i].rawValue);
               if (code) {
-                stop();
-                onDetected(code);
-                return;
+                if (continuous) {
+                  const now = Date.now();
+                  if (code !== lastCode || (now - lastDetectedAt) >= cooldownMs) {
+                    lastCode = code;
+                    lastDetectedAt = now;
+                    onDetected(code);
+                    break;
+                  }
+                } else {
+                  stop();
+                  onDetected(code);
+                  return;
+                }
               }
             }
           }
