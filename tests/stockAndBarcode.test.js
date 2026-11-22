@@ -41,13 +41,60 @@ test('Barcode Scanner & Stock-First Gemini Prompt integration', async (t) => {
     assert.equal(barcodeMod.normalizeBarcode('abc'), '');
   });
 
-  await t.test('parseQuantityToGrams handles g, ml, kg, oz, and multi-pack quantities', () => {
+  await t.test('parseQuantityToGrams handles g, ml, kg, oz, fl oz, cl, litres, grammes, comma decimals, and multi-pack quantities', () => {
     assert.equal(barcodeMod.parseQuantityToGrams(null, null, '540 mL'), 540);
     assert.equal(barcodeMod.parseQuantityToGrams(null, null, '1.5 kg'), 1500);
     assert.equal(barcodeMod.parseQuantityToGrams(null, null, '2 x 170 g'), 340);
     assert.equal(barcodeMod.parseQuantityToGrams(null, null, '16 oz'), 454);
+    assert.equal(barcodeMod.parseQuantityToGrams(null, null, '16 fl oz'), 473);
+    assert.equal(barcodeMod.parseQuantityToGrams(null, null, '8 fl. oz.'), 237);
+    assert.equal(barcodeMod.parseQuantityToGrams(null, null, '1,89 L / 64 oz liq'), 1890);
+    assert.equal(barcodeMod.parseQuantityToGrams(null, null, '27 oz (765g)'), 765);
+    assert.equal(barcodeMod.parseQuantityToGrams(null, null, '2 litres'), 2000);
+    assert.equal(barcodeMod.parseQuantityToGrams(null, null, '1 litre'), 1000);
+    assert.equal(barcodeMod.parseQuantityToGrams(null, null, '33 cl'), 330);
+    assert.equal(barcodeMod.parseQuantityToGrams(null, null, '500 grammes'), 500);
+    assert.equal(barcodeMod.parseQuantityToGrams('1,5', 'kg', ''), 1500);
     assert.equal(barcodeMod.parseQuantityToGrams(900, 'g', ''), 900);
     assert.equal(barcodeMod.parseQuantityToGrams(null, null, ''), 500);
+  });
+
+  await t.test('resolvePackageQuantity falls back to net_weight, packagings, product_name, and flags missing weights transparently', () => {
+    assert.deepEqual(
+      barcodeMod.resolvePackageQuantity({
+        net_weight_value: 750,
+        net_weight_unit: 'g'
+      }),
+      { packageGrams: 750, detected: true, rawText: '750 g' }
+    );
+
+    assert.deepEqual(
+      barcodeMod.resolvePackageQuantity({
+        packagings: [
+          { quantity_per_unit_value: 205, quantity_per_unit_unit: 'g', number_of_units: 2, weight_measured: 18 }
+        ]
+      }),
+      { packageGrams: 410, detected: true, rawText: '410g' }
+    );
+
+    // Never confuse packaging material weight_measured with food net weight
+    assert.deepEqual(
+      barcodeMod.resolvePackageQuantity({
+        product_name: 'Natrel 2% Fine Filtered Milk 2L',
+        packagings: [{ weight_measured: 35 }]
+      }),
+      { packageGrams: 2000, detected: true, rawText: 'Natrel 2% Fine Filtered Milk 2L' }
+    );
+
+    const missing = barcodeMod.parseOpenFoodFactsProduct('059749894326', {
+      status: 1,
+      product: {
+        product_name: 'Classic Cream Cheese',
+        nutriments: { 'energy-kcal_100g': 340, proteins_100g: 6, fat_100g: 33, carbohydrates_100g: 4 }
+      }
+    });
+    assert.equal(missing.packageGrams, 500);
+    assert.equal(missing.quantityDetected, false);
   });
 
   await t.test('guessAisleFromProduct maps categories and names to the 5 aisles', () => {
@@ -187,11 +234,44 @@ test('Barcode Scanner & Stock-First Gemini Prompt integration', async (t) => {
     });
     assert.equal(notFound.found, false);
     assert.equal(notFound.reason, 'not_found');
+
+    // Legacy cached OFF entry with unflagged 500g automatically upgrades when online
+    const legacyCache = JSON.parse(store.get(barcodeMod.BARCODE_CACHE_KEY) || '{}');
+    legacyCache['005974990002'] = {
+      barcode: '005974990002',
+      name: 'Old Cached Broth',
+      aisle: 'Pantry/Canned',
+      packageGrams: 500,
+      source: 'openfoodfacts'
+    };
+    store.set(barcodeMod.BARCODE_CACHE_KEY, JSON.stringify(legacyCache));
+
+    const upgraded = await barcodeMod.lookupBarcodeMacros('005974990002', {
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            status: 1,
+            product: {
+              product_name: 'Chicken Broth',
+              quantity: '900 ml',
+              nutriments: { 'energy-kcal_100g': 5 }
+            }
+          };
+        }
+      })
+    });
+    assert.equal(upgraded.found, true);
+    assert.equal(upgraded.fromCache, false);
+    assert.equal(upgraded.product.packageGrams, 900);
+    assert.equal(upgraded.product.quantityDetected, true);
   });
 
-  await t.test('Stock items inject into nutritionDb, Gemini prompts (all modes), and MacroEngine grocery deductions', () => {
+  await t.test('Perishable vs Non-Perishable stock items inject into nutritionDb, Gemini prompts, and MacroEngine deductions', () => {
     const appState = stateMod.getAppState();
     appState.pantryStock = [];
+    appState.pantryStaples = ['Olive Oil', 'Smoked Paprika', 'Soy Sauce'];
     appState.haveAtHome = {};
     appState.horizonDays = 7;
 
@@ -200,6 +280,7 @@ test('Barcode Scanner & Stock-First Gemini Prompt integration', async (t) => {
       name: 'White Kidney Beans',
       brand: 'Selection',
       aisle: 'Pantry/Canned',
+      category: 'non_perishable',
       gramsOnHand: 540,
       packageGrams: 540,
       per100g: { calories: 110, protein: 7.5, fat: 0.5, carbs: 20 },
@@ -207,6 +288,20 @@ test('Barcode Scanner & Stock-First Gemini Prompt integration', async (t) => {
     });
     assert.ok(savedBean);
     assert.equal(savedBean.id, 'stock_060383001483');
+    assert.equal(savedBean.category, 'non_perishable');
+
+    const savedChicken = stateMod.upsertPantryStockItem({
+      id: 'chicken_breast',
+      name: 'Boneless Skinless Chicken Breast',
+      aisle: 'Meat',
+      category: 'perishable',
+      gramsOnHand: 400,
+      packageGrams: 500,
+      per100g: { calories: 120, protein: 22.5, fat: 2.6, carbs: 0 },
+      source: 'builtin'
+    });
+    assert.ok(savedChicken);
+    assert.equal(savedChicken.category, 'perishable');
 
     const savedRice = stateMod.upsertPantryStockItem({
       id: 'rice_dry',
@@ -228,11 +323,14 @@ test('Barcode Scanner & Stock-First Gemini Prompt integration', async (t) => {
     for (const mode of ['flyer_deals', 'full_store']) {
       appState.geminiPromptMode = mode;
       const prompt = promptsMod.buildGeminiMealPrompt();
-      assert.match(prompt, /PRIORITY HOME STOCK TO EMPTY FIRST/i);
+      assert.match(prompt, /PERISHABLES AT HOME — USE FIRST/i);
+      assert.match(prompt, /chicken_breast/);
+      assert.match(prompt, /NON-PERISHABLE STOCK AT HOME — OPTIONAL/i);
       assert.match(prompt, /stock_060383001483/);
       assert.match(prompt, /540g total at home/);
-      assert.match(prompt, /110 kcal, 7\.5g P, 0\.5g F, 20g C/);
       assert.match(prompt, /rice_dry/);
+      assert.match(prompt, /SPICES, COOKING OILS & CONDIMENTS ALREADY AT HOME/i);
+      assert.match(prompt, /Smoked Paprika/);
       assert.doesNotMatch(prompt, /walmart/i);
     }
 

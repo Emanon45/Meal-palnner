@@ -530,26 +530,25 @@ export const tier2Tests = [
     feature: 'F4',
     channel: 'CLI/FS',
     requiresBrowser: false,
-    title: 'Zero-oil sanitizer strips/rejects oil directives from Gemini response',
+    title: 'Gemini cooking oil twists are permitted when updating mealTemplates',
     async run({ rootDir }) {
-      const tainted = {
+      const oilPayload = {
         weeklyTheme: 'Olive Oil Mediterranean Week',
         meals: [
-          { id: 'breakfast', seasoningTwist: 'Fry in 1 tbsp olive oil and butter' },
-          { id: 'lunch', seasoningTwist: 'Drizzle canola oil and margarine' },
-          { id: 'dinner', seasoningTwist: "Cook with huile d'olive and cooking spray pam" },
+          { id: 'breakfast', seasoningTwist: 'Finish with 1 tsp olive oil and herbs' },
+          { id: 'lunch', seasoningTwist: 'Light sesame oil drizzle' },
+          { id: 'dinner', seasoningTwist: 'Ginger and garlic' },
           { id: 'snack', seasoningTwist: 'Add cinnamon' },
         ],
       };
       const res = await runUpdatePlanIsolated({
         rootDir,
         flippScenario: makeFlippCatalog(),
-        geminiScenario: { mode: 'mock_oil_tainted', apiKey: 'mock-key', payload: tainted },
+        geminiScenario: { mode: 'mock_oil_allowed', apiKey: 'mock-key', payload: oilPayload },
       });
       assert.equal(res.exitCode, 0);
       assertDataJsonSchema(res.dataJson);
-      assertZeroAddedOil(res.dataJson.mealTemplates, 'sanitized mealTemplates');
-      assertZeroAddedOil(res.dataJson.prepTimeline, 'sanitized prepTimeline');
+      assert.equal(res.dataJson.userProfile.zeroAddedOil, false);
     },
   },
   {
@@ -614,7 +613,7 @@ export const tier2Tests = [
     feature: 'F5',
     channel: 'Node/Engine',
     requiresBrowser: false,
-    title: 'Custom nutritionDb containing olive_oil/butter is never added to solved daily portions',
+    title: 'Custom nutritionDb containing olive_oil can be used in custom recipes within fat ceiling',
     async run({ rootDir }) {
       const me = loadMacroEngine(rootDir);
       const data = makeSampleDataJson();
@@ -629,10 +628,24 @@ export const tier2Tests = [
         pantryDefault: true,
         price: { cadPer100g: 2.0, cadPerPackage: 10, regularCadPer100g: 2.0, historicalLowCadPer100g: 1.5, savingsPct: 0, radarTag: 'REGULAR', flyerItemName: null, onFlyer: false },
       };
+      data.mealTemplates = {
+        meals: [
+          {
+            id: 'lunch',
+            title: 'Olive Oil Chicken Bowl',
+            cookingMethod: 'Pan-sear with olive oil',
+            seasoningTwist: 'Oregano',
+            ingredients: [
+              { id: 'chicken_breast', grams: 200 },
+              { id: 'olive_oil', grams: 5 },
+              { id: 'rice_dry', grams: 100 }
+            ]
+          }
+        ]
+      };
       const plan = me.solveDailyPortions(data, { targets: EXPECTED_GOAL_PRESETS.recomp });
-      assert.equal(plan.zeroAddedOil, true);
-      assert.equal(plan.ingredientGrams.olive_oil, undefined);
-      assertZeroAddedOil(plan.meals, 'meals');
+      assert.equal(plan.zeroAddedOil, false);
+      assert.ok(plan.ingredientGrams.olive_oil > 0);
     },
   },
   {
@@ -641,11 +654,12 @@ export const tier2Tests = [
     feature: 'F5',
     channel: 'CLI/FS',
     requiresBrowser: false,
-    title: 'Root data.json mealTemplates and prepTimeline pass zero-oil keyword scan',
+    title: 'Root data.json has 4 mealTemplates, prepTimeline steps, and zeroAddedOil=false',
     async run({ rootDir }) {
       const data = readRootDataJson(rootDir);
-      assertZeroAddedOil(data.mealTemplates, 'root data.json mealTemplates');
-      assertZeroAddedOil(data.prepTimeline, 'root data.json prepTimeline');
+      assert.equal(data.userProfile.zeroAddedOil, false);
+      assert.equal(data.mealTemplates.meals.length, 4);
+      assert.ok(Array.isArray(data.prepTimeline) && data.prepTimeline.length >= 5);
     },
   },
   {
@@ -659,7 +673,7 @@ export const tier2Tests = [
       const me = loadMacroEngine(rootDir);
       for (const input of [null, {}]) {
         const plan = me.solveDailyPortions(input, {});
-        assert.equal(plan.zeroAddedOil, true);
+        assert.equal(plan.zeroAddedOil, false);
         assert.equal(plan.meals.length, 4);
         assert.ok(Number.isFinite(plan.totals.calories) && plan.totals.calories > 0);
       }
@@ -724,7 +738,7 @@ export const tier2Tests = [
       } else {
         assert.ok(plan.totals.fat <= 30.01);
       }
-      assert.equal(plan.zeroAddedOil, true);
+      assert.equal(plan.zeroAddedOil, false);
     },
   },
   {
@@ -763,7 +777,7 @@ export const tier2Tests = [
         { calories: 1400, protein: 160, fat: 35, carbs: 100 },
       ]) {
         const plan = me.solveDailyPortions(data, { targets });
-        assert.equal(plan.zeroAddedOil, true);
+        assert.equal(plan.zeroAddedOil, false);
         assert.ok(plan.totals.fat <= targets.fat + 0.01 || plan.fatCeilingExceeded);
         assert.ok(Number.isFinite(plan.totals.calories) && plan.totals.calories > 0);
       }
@@ -2495,7 +2509,7 @@ export const tier2Tests = [
         slotSplits: { breakfast: 10, lunch: 10, dinner: 70, snack: 10 },
       });
       for (const plan of [bHeavy, dHeavy]) {
-        assert.equal(plan.zeroAddedOil, true);
+        assert.equal(plan.zeroAddedOil, false);
         for (const m of plan.meals) {
           assert.ok(Number.isFinite(m.totals.calories) && m.totals.calories >= 0);
           for (const ing of m.ingredients) {
@@ -2563,7 +2577,7 @@ export const tier2Tests = [
               dinnerSwap,
               slotSplits,
             });
-            assert.equal(plan.zeroAddedOil, true);
+            assert.equal(plan.zeroAddedOil, false);
             assert.ok(plan.totals.fat <= preset.fat + 0.01 || plan.fatCeilingExceeded);
             const sumCal = plan.meals.reduce((s, m) => s + m.totals.calories, 0);
             assert.ok(Math.abs(sumCal - plan.totals.calories) <= 2);
@@ -2942,7 +2956,7 @@ export const tier2Tests = [
         schema.nutritionDb.ground_chicken.per100g
       );
       const plan = me.solveDailyPortions(makeSampleDataJson(), { targets: me.GOAL_PRESETS.cut });
-      assert.equal(plan.zeroAddedOil, true);
+      assert.equal(plan.zeroAddedOil, false);
     },
   },
   {

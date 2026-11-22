@@ -194,9 +194,6 @@ def load_nutrition_baseline(schema_path: Path | str | None = None) -> dict[str, 
                 raise ValueError(f"nutritionDb[{ing_id!r}] missing field {field!r}")
         if not isinstance(entry["name"], str) or not entry["name"].strip():
             raise ValueError(f"nutritionDb[{ing_id!r}].name must be a non-empty string")
-        normalized_id = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(ing_id).replace("_", " "))
-        if contains_added_oil(normalized_id) or contains_added_oil(entry["name"]):
-            raise ValueError(f"nutritionDb[{ing_id!r}] violates zero-added-oil rule")
         if not isinstance(entry["aisle"], str) or entry["aisle"] not in aisle_set:
             raise ValueError(f"nutritionDb[{ing_id!r}].aisle {entry['aisle']!r} not in aisleOrder")
         if not isinstance(entry["unitLabel"], str) or not entry["unitLabel"].strip():
@@ -436,17 +433,16 @@ CATALOG_EXCLUDE_KEYWORDS: tuple[str, ...] = (
     "cake", "cakes", "gateau", "gateaux", "muffin", "muffins", "donut", "donuts", "beigne", "beignes",
     "candy", "candies", "bonbon", "bonbons", "chocolat", "chocolats", "chocolate", "chocolates",
     "creme glacee", "ice cream", "soda", "sodas", "cola", "colas", "boisson gazeuse",
-    "sirop", "sirops", "syrup", "syrups", "jus", "juice", "juices", "sauce", "sauces",
-    "mayo", "mayonnaise", "margarine", "margarines", "beurre", "beurres", "butter", "butters",
-    "huile", "huiles", "oil", "oils", "canola", "shortening", "lard",
+    "sirop", "sirops", "syrup", "syrups", "jus", "juice", "juices",
+    "shortening", "lard",
     "cat food", "nourriture pour chat", "dog food", "litiere", "savon", "detergent", "shampoing",
 )
 
 USER_PROFILE: dict[str, Any] = {
-    "description": "High-Protein Batch Prep • Zero Added Oil",
+    "description": "High-Protein Batch Prep",
     "neighborhood": "Canada",
     "postalCode": "H1W",
-    "zeroAddedOil": True,
+    "zeroAddedOil": False,
 }
 
 GOAL_PRESETS: dict[str, dict[str, Any]] = copy.deepcopy(_BASELINE_SCHEMA["goalPresets"])
@@ -509,8 +505,7 @@ BASE_MEAL_TEMPLATES: list[dict[str, Any]] = [
         "slot": "Breakfast",
         "title": "Eggs & Crispy Grelot Potatoes",
         "cookingMethod": (
-            "Non-stick dry skillet scramble with splash of water/broth (0g oil) "
-            "+ air-fried crispy potatoes + berries"
+            "Non-stick skillet scramble + air-fried crispy potatoes + berries"
         ),
         "seasoningTwist": "Oregano, cracked black pepper, lemon zest, and fresh green onions",
         "swappable": False,
@@ -528,8 +523,7 @@ BASE_MEAL_TEMPLATES: list[dict[str, Any]] = [
         "slot": "Lunch",
         "title": "Seared Protein & Jasmine Rice Bowl",
         "cookingMethod": (
-            "Dry-seared in natural juices or air-fried (0g oil) over steamed rice "
-            "with crunchy slaw"
+            "Pan-seared or air-fried over steamed rice with crunchy slaw"
         ),
         "seasoningTwist": "Smoked paprika, sumac, garlic powder, cumin, and lemon juice",
         "swappable": True,
@@ -551,7 +545,7 @@ BASE_MEAL_TEMPLATES: list[dict[str, Any]] = [
         "title": "Braised Protein & White Beans",
         "cookingMethod": (
             "Trimmed meat braised slowly in diced tomatoes, ginger, garlic, onion, "
-            "and broth (0g oil), topped with 0% skyr dollop"
+            "and broth, topped with 0% skyr dollop"
         ),
         "seasoningTwist": "Fresh grated ginger, crushed garlic, thyme, and mild chili flakes",
         "swappable": True,
@@ -569,7 +563,7 @@ BASE_MEAL_TEMPLATES: list[dict[str, Any]] = [
         "slot": "Snack",
         "title": "0% Skyr & Whey Fruit Bowl",
         "cookingMethod": "Whipped cold 0% skyr with whey isolate and fresh/thawed fruit",
-        "seasoningTwist": "Cinnamon and vanilla extract",
+        "seasoningTwist": "Cinnamon and pure vanilla extract",
         "swappable": False,
         "baseIngredients": ["skyr_0", "whey_isolate", "berries", "banana"],
     },
@@ -584,8 +578,8 @@ BASE_PREP_TIMELINE: list[dict[str, Any]] = [
         "startMinute": 0,
         "durationMinutes": 40,
         "timerSeconds": 2400,
-        "parallelNote": "Rinse jasmine rice and start cooker; sear trimmed pork or chicken in hot dry pot, deglaze with diced tomatoes, ginger, garlic, and white beans.",
-        "zeroOilNote": "Sear meat in its own natural moisture and deglaze with tomato juices and broth (0g oil).",
+        "parallelNote": "Rinse jasmine rice and start cooker; sear trimmed pork or chicken in hot pot, deglaze with diced tomatoes, ginger, garlic, and white beans.",
+        "zeroOilNote": "",
     },
     {
         "id": "step_2",
@@ -596,18 +590,18 @@ BASE_PREP_TIMELINE: list[dict[str, Any]] = [
         "durationMinutes": 22,
         "timerSeconds": 1320,
         "parallelNote": "While dinner simmers, halve grelot potatoes, season with smoked paprika, garlic powder, and salt, and air-fry at 200C shaking halfway.",
-        "zeroOilNote": "Mist lightly with water or broth before seasoning so spices adhere with zero added cooking oil.",
+        "zeroOilNote": "",
     },
     {
         "id": "step_3",
         "order": 3,
-        "title": "Dry-Sear Lunch Protein (Ground Chicken or Tuna Patties)",
+        "title": "Sear Lunch Protein (Ground Chicken or Tuna Patties)",
         "station": "Non-Stick Skillet",
         "startMinute": 10,
         "durationMinutes": 12,
         "timerSeconds": 720,
-        "parallelNote": "Brown Walmart extra-lean ground chicken with cumin and sumac (or air-fry spiced tuna-potato patties) while potatoes crisp.",
-        "zeroOilNote": "Cook in natural meat juices with a 2 tbsp splash of water or low-sodium broth (0g oil).",
+        "parallelNote": "Brown extra-lean ground chicken with cumin and sumac (or air-fry spiced tuna-potato patties) while potatoes crisp.",
+        "zeroOilNote": "",
     },
     {
         "id": "step_4",
@@ -618,7 +612,7 @@ BASE_PREP_TIMELINE: list[dict[str, Any]] = [
         "durationMinutes": 15,
         "timerSeconds": 900,
         "parallelNote": "Shred green cabbage and carrots and dice English cucumber into crisp meal-prep containers.",
-        "zeroOilNote": "Dress slaw with lemon or lime juice, salt, and scallion with zero added oil.",
+        "zeroOilNote": "",
     },
     {
         "id": "step_5",
@@ -629,7 +623,7 @@ BASE_PREP_TIMELINE: list[dict[str, Any]] = [
         "durationMinutes": 15,
         "timerSeconds": 900,
         "parallelNote": "Weigh cooked batches by macro targets; keep Days 1-4 in fridge containers and freeze Day 5+ meals flat with 24h thaw labels.",
-        "zeroOilNote": "Store broth-rich braises cleanly with zero added fats for clean reheating.",
+        "zeroOilNote": "",
     },
 ]
 
@@ -1350,8 +1344,6 @@ def fetch_flyer_catalog(
             raw_name = str(item.get("name") or "").replace("\xa0", " ").strip()
             if not raw_name:
                 continue
-            if contains_added_oil(raw_name):
-                continue
             folded_name = fold_accents(raw_name)
             if "walmart" in folded_name:
                 continue
@@ -1374,8 +1366,6 @@ def fetch_flyer_catalog(
             post = _norm_unit_str(item.get("post_price_text"))
             price_text = f"{pre} ${price_val:.2f} {post}".strip()
             price_text = re.sub(r"\s+", " ", price_text)
-            if contains_added_oil(price_text):
-                continue
 
             vt_dt = parse_iso_dt(item.get("valid_to"))
             valid_to_str = vt_dt.astimezone(tz).date().isoformat() if vt_dt is not None else ""
@@ -1746,7 +1736,7 @@ def build_fallback_plan(
         deal_names = [
             d["name"]
             for d in deals.values()
-            if isinstance(d, dict) and d.get("name") and not contains_added_oil(d["name"])
+            if isinstance(d, dict) and d.get("name")
         ][:3]
         if deal_names:
             deal_note = f" ({winning_store} flyer highlights: {', '.join(deal_names)})"
@@ -1769,10 +1759,6 @@ def apply_gemini_customization(
     """Merge safe Gemini text customizations onto base_plan without touching locked macros/ingredients/timers."""
     if not isinstance(gemini_payload, dict):
         raise ValueError("Gemini payload must be a JSON object")
-
-    violations = validate_zero_added_oil(gemini_payload, path="gemini")
-    if violations:
-        raise ValueError(f"Gemini output violated zero-added-oil rule: {violations[0]}")
 
     merged = copy.deepcopy(base_plan)
     mt = merged["mealTemplates"]
@@ -1820,7 +1806,6 @@ def apply_gemini_customization(
             if note and note.strip():
                 step["parallelNote"] = note.strip()
 
-    sanitize_zero_oil(merged)
     return merged
 
 
@@ -1846,14 +1831,11 @@ def generate_meal_plan(
         "for a Montreal meal-prep plan.\n"
         f"Winning grocery store this week: {winning_store}.\n"
         f"Flyer highlights: {json.dumps(deal_summary, ensure_ascii=False)}.\n"
-        "STRICT RULES:\n"
-        "1. ZERO ADDED COOKING OIL: NEVER mention oil, olive oil, vegetable oil, huile, butter, "
-        "beurre, margarine, lard, shortening, cooking spray, or Pam. Use broth, water, tomato "
-        "juices, lemon/lime juice, or dry heat.\n"
-        "2. Keep base meals aligned to: breakfast (Greek egg scramble + grelot potatoes + berries), "
+        "RULES:\n"
+        "1. Keep base meals aligned to: breakfast (Greek egg scramble + grelot potatoes + berries), "
         "lunch (Poulet Rouge/Boustan high-protein bowl), dinner (Malagasy Henakisoa sy Tsaramaso "
         "chili-style pork + white beans), snack (0% Skyr + whey + fruit).\n"
-        "3. Return JSON matching the schema with stepIds step_1 through step_5."
+        "2. Return JSON matching the schema with stepIds step_1 through step_5."
     )
 
     try:
@@ -2237,12 +2219,6 @@ def run_pipeline(
         "prepTimeline": plan_sections["prepTimeline"],
         "weeklyFlyerCatalog": flyer_catalog,
     }
-
-    sanitize_zero_oil({
-        "mealTemplates": data["mealTemplates"],
-        "prepTimeline": data["prepTimeline"],
-        "weeklyFlyerCatalog": data["weeklyFlyerCatalog"],
-    })
 
     payload_bytes = (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     for out_path in (root_dir / "data.json", root_dir / "public" / "data.json"):

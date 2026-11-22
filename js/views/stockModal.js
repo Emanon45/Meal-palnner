@@ -3,6 +3,7 @@ import {
   el,
   clampInt,
   clampNum,
+  inferStockCategory,
   upsertPantryStockItem,
   announcePolite
 } from '../state.js';
@@ -25,6 +26,7 @@ let currentOnSaved = null;
 let currentEditingId = null;
 let currentSource = 'manual';
 let currentModalMode = 'scan';
+let categoryManuallyOverridden = false;
 let currentHealthExtra = { novaGroup: null, nutriScore: '', nutrientLevels: null };
 
 let refs = null;
@@ -127,8 +129,25 @@ function populateFormFromProduct(product, { keepGrams = false } = {}) {
   if (product.aisle && DEFAULT_AISLE_ORDER.indexOf(product.aisle) !== -1) {
     refs.aisleSelect.value = product.aisle;
   }
+  if (product.category === 'perishable' || product.category === 'non_perishable') {
+    refs.categorySelect.value = product.category;
+  } else if (!categoryManuallyOverridden) {
+    refs.categorySelect.value = inferStockCategory(refs.aisleSelect.value);
+  }
   const pkgG = clampInt(product.packageGrams, 1, 20000, 500);
   refs.pkgInput.value = String(pkgG);
+  if (refs.pkgHelpEl) {
+    if (product.quantityDetected === false) {
+      refs.pkgHelpEl.textContent = 'Not listed in Open Food Facts — defaulted to 500g. Enter the real package weight.';
+      refs.pkgHelpEl.className = 'block text-xs text-red-400 font-semibold';
+    } else if (product.source === 'openfoodfacts' || product.rawQuantityText) {
+      refs.pkgHelpEl.textContent = 'Detected from barcode: ' + (product.rawQuantityText || (pkgG + 'g'));
+      refs.pkgHelpEl.className = 'block text-xs text-emerald-300';
+    } else {
+      refs.pkgHelpEl.textContent = '';
+      refs.pkgHelpEl.className = 'block text-xs text-slate-400';
+    }
+  }
   if (!keepGrams) {
     refs.gramsInput.value = String(clampInt(product.gramsOnHand || pkgG, 1, 50000, pkgG));
   }
@@ -174,7 +193,14 @@ async function handleBarcodeLookup(rawCode) {
     if (res && res.found && res.product) {
       populateFormFromProduct(res.product, { keepGrams: Boolean(currentEditingId) });
       const srcNote = res.fromCache ? ' (from device cache)' : ' (from Open Food Facts)';
-      setScanStatus('Loaded "' + res.product.name + '"' + srcNote + '. Verify details and save.', false);
+      if (res.product.quantityDetected === false) {
+        setScanStatus(
+          'Loaded "' + res.product.name + '"' + srcNote + ' — package size not listed in Open Food Facts (defaulted to 500g; edit Package Size & Grams below).',
+          false
+        );
+      } else {
+        setScanStatus('Loaded "' + res.product.name + '"' + srcNote + '. Verify details and save.', false);
+      }
       announcePolite('Loaded macros for ' + res.product.name);
     } else if (res && res.reason === 'not_found') {
       currentSource = 'manual';
@@ -381,6 +407,21 @@ function ensureDialogBuilt() {
   twoColTop.appendChild(createField('stock-aisle-select', 'Aisle', aisleSelect));
   form.appendChild(twoColTop);
 
+  const categorySelect = el('select', 'w-full');
+  [
+    { val: 'perishable', label: 'Perishable \u2014 Use First' },
+    { val: 'non_perishable', label: 'Non-Perishable Pantry \u2014 Optional' }
+  ].forEach((c) => {
+    const opt = document.createElement('option');
+    opt.value = c.val;
+    opt.textContent = c.label;
+    categorySelect.appendChild(opt);
+  });
+  categorySelect.value = 'perishable';
+  const categoryWrap = createField('stock-category-select', 'Storage Type', categorySelect);
+  categoryWrap.id = 'stock-category-wrap';
+  form.appendChild(categoryWrap);
+
   const qtyGrid = el('div', 'stock-form-grid');
   const gramsInput = el('input', 'w-full');
   gramsInput.type = 'number';
@@ -399,7 +440,12 @@ function ensureDialogBuilt() {
   pkgInput.max = '20000';
   pkgInput.step = '1';
   pkgInput.value = '500';
-  qtyGrid.appendChild(createField('stock-package-input', 'Package Size (g)', pkgInput));
+  const pkgWrap = createField('stock-package-input', 'Package Size (g)', pkgInput);
+  const pkgHelpEl = el('span', 'block text-xs text-slate-400', '');
+  pkgHelpEl.id = 'stock-package-help';
+  pkgInput.setAttribute('aria-describedby', 'stock-package-help');
+  pkgWrap.appendChild(pkgHelpEl);
+  qtyGrid.appendChild(pkgWrap);
   form.appendChild(qtyGrid);
 
   // Store & Price row (used in 'swap' and 'adjust_scan' modes)
@@ -542,9 +588,12 @@ function ensureDialogBuilt() {
     nameInput,
     brandInput,
     aisleSelect,
+    categoryWrap,
+    categorySelect,
     gramsWrap,
     gramsInput,
     pkgInput,
+    pkgHelpEl,
     storeRow,
     storeSelect,
     priceInput,
@@ -598,6 +647,25 @@ function ensureDialogBuilt() {
     }
   });
 
+  aisleSelect.addEventListener('change', () => {
+    if (!categoryManuallyOverridden && !currentEditingId) {
+      categorySelect.value = inferStockCategory(aisleSelect.value);
+    }
+  });
+
+  categorySelect.addEventListener('change', () => {
+    categoryManuallyOverridden = true;
+  });
+
+  pkgInput.addEventListener('input', () => {
+    if (pkgHelpEl) {
+      pkgHelpEl.className = 'block text-xs text-slate-400';
+      if (pkgHelpEl.textContent && pkgHelpEl.textContent.indexOf('Not listed') !== -1) {
+        pkgHelpEl.textContent = 'Custom package weight entered.';
+      }
+    }
+  });
+
   [
     gramsInput,
     pkgInput,
@@ -633,8 +701,10 @@ function ensureDialogBuilt() {
       name: cleanName,
       brand: brandInput.value.trim(),
       aisle: aisleSelect.value,
+      category: categorySelect.value === 'perishable' ? 'perishable' : 'non_perishable',
       gramsOnHand: isStoreLookupMode ? pkgGrams : clampInt(gramsInput.value, 1, 50000, pkgGrams),
       packageGrams: pkgGrams,
+      quantityDetected: true,
       per100g: {
         calories: Math.round(clampNum(calInput.value, 0, 900, 0)),
         protein: Math.round(clampNum(protInput.value, 0, 100, 0) * 10) / 10,
@@ -695,22 +765,38 @@ export function closeStockModal() {
   }
 }
 
-export function openStockModal({ mode = 'scan', item = null, swapTarget = null, onSaved = null } = {}) {
+export function openStockModal({
+  mode = 'scan',
+  item = null,
+  swapTarget = null,
+  defaultCategory = '',
+  defaultStore = '',
+  onSaved = null
+} = {}) {
   const dialog = ensureDialogBuilt();
   currentOnSaved = typeof onSaved === 'function' ? onSaved : null;
   currentModalMode = mode;
   currentEditingId = item && item.id ? item.id : null;
   currentSource = (item && item.source) ? item.source : 'manual';
+  categoryManuallyOverridden = false;
   currentHealthExtra = { novaGroup: null, nutriScore: '', nutrientLevels: null };
 
   refs.form.reset();
   refs.barcodeInput.value = '';
   refs.nameInput.value = '';
   refs.brandInput.value = '';
-  refs.aisleSelect.value = 'Pantry/Canned';
+  refs.aisleSelect.value = defaultCategory === 'perishable' ? 'Meat' : 'Pantry/Canned';
+  if (defaultCategory === 'perishable' || defaultCategory === 'non_perishable') {
+    refs.categorySelect.value = defaultCategory;
+    categoryManuallyOverridden = true;
+  } else {
+    refs.categorySelect.value = inferStockCategory(refs.aisleSelect.value);
+  }
   refs.gramsInput.value = '500';
   refs.pkgInput.value = '500';
-  refs.storeSelect.value = 'Maxi';
+  refs.pkgHelpEl.textContent = '';
+  refs.pkgHelpEl.className = 'block text-xs text-slate-400';
+  refs.storeSelect.value = (defaultStore === 'Maxi' || defaultStore === 'Super C') ? defaultStore : 'Maxi';
   refs.priceInput.value = '4.99';
   refs.calInput.value = '0';
   refs.protInput.value = '0';
@@ -723,6 +809,7 @@ export function openStockModal({ mode = 'scan', item = null, swapTarget = null, 
   const isStoreLookupMode = mode === 'swap' || mode === 'adjust_scan';
   const showScannerByDefault = mode === 'scan' || mode === 'swap' || mode === 'adjust_scan';
 
+  refs.categoryWrap.hidden = isStoreLookupMode;
   refs.gramsWrap.hidden = isStoreLookupMode;
   refs.gramsInput.required = !isStoreLookupMode;
   refs.storeRow.hidden = !isStoreLookupMode;

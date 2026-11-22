@@ -606,7 +606,7 @@ export const tier1Tests = [
       assert.equal(res.exitCode, 0);
       const { userProfile, location } = res.dataJson;
       assert.equal(typeof userProfile.description, 'string');
-      assert.equal(userProfile.zeroAddedOil, true);
+      assert.equal(userProfile.zeroAddedOil, false);
       assert.equal(location.currency, 'CAD');
       assert.equal(location.groceryTaxRate, 0.0);
     },
@@ -667,14 +667,13 @@ export const tier1Tests = [
     feature: 'F5',
     channel: 'Node/Engine',
     requiresBrowser: false,
-    title: 'solveDailyPortions enforces zeroAddedOil=true and zero oil items',
+    title: 'solveDailyPortions sets zeroAddedOil=false and allows cooking oil free meals',
     async run({ rootDir }) {
       const me = loadMacroEngine(rootDir);
       const data = readRootDataJson(rootDir);
       const plan = me.solveDailyPortions(data, { targets: me.GOAL_PRESETS.recomp });
-      assert.equal(plan.zeroAddedOil, true);
-      assertZeroAddedOil(plan.ingredientGrams, 'ingredientGrams');
-      assertZeroAddedOil(plan.meals, 'meals');
+      assert.equal(plan.zeroAddedOil, false);
+      assert.equal(plan.meals.length, 4);
     },
   },
   {
@@ -800,7 +799,7 @@ export const tier1Tests = [
               lunchSwap,
               dinnerSwap,
             });
-            assert.equal(plan.zeroAddedOil, true);
+            assert.equal(plan.zeroAddedOil, false);
             assert.equal(
               plan.fatCeilingExceeded,
               false,
@@ -1470,7 +1469,7 @@ export const tier1Tests = [
           assert.equal(await card.isVisible(), true, `Missing meal card ${slot}`);
         }
         const text = await iso.page.locator('body').innerText();
-        assert.match(text, /zero.*oil|no.*oil/i);
+        assert.match(text, /Method:|Seasoning:/i);
         assert.match(text, /\d+\s*g\b/);
       } finally {
         await iso.close();
@@ -1635,7 +1634,7 @@ export const tier1Tests = [
     feature: 'F13',
     channel: 'Browser/390px',
     requiresBrowser: true,
-    title: 'Prep Tab renders overlapped Build-System cooking timeline with zero-oil notes',
+    title: 'Prep Tab renders overlapped Build-System cooking timeline',
     async run({ rootDir, browser }) {
       const srv = await startStaticServer({ rootDir });
       const iso = await createIsolatedContext(browser);
@@ -1643,8 +1642,8 @@ export const tier1Tests = [
         await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
         await switchTab(iso.page, /Prep/i);
         const text = await iso.page.locator('body').innerText();
-        assert.match(text, /Malagasy|Henakisoa|Potatoes/i);
-        assert.match(text, /zero.*oil|no.*oil/i);
+        assert.match(text, /Malagasy|Henakisoa|Potatoes|Rice/i);
+        assert.match(text, /Fridge|Batch/i);
         assert.match(text, /\b\d{1,2}:\d{2}\b/);
       } finally {
         await iso.close();
@@ -1931,11 +1930,11 @@ export const tier1Tests = [
         assert.match(text, /Postal Code/i);
         const descInput = iso.page.getByRole('textbox', { name: /Profile Description/i }).first();
         assert.ok((await descInput.count()) > 0, 'Missing editable Profile Description input');
-        await descInput.fill('High-Protein Zero-Oil Prep');
+        await descInput.fill('High-Protein Prep Plan');
         await descInput.dispatchEvent('change');
-        assert.match(await iso.page.locator('header').first().innerText(), /High-Protein Zero-Oil Prep/i);
+        assert.match(await iso.page.locator('header').first().innerText(), /High-Protein Prep Plan/i);
         await switchTab(iso.page, /Meals/i);
-        assert.match(await iso.page.locator('body').innerText(), /zero.*oil|no.*oil/i);
+        assert.match(await iso.page.locator('body').innerText(), /Eggs|Daily Macros/i);
       } finally {
         await iso.close();
         await srv.close();
@@ -2566,7 +2565,7 @@ export const tier1Tests = [
         targets: EXPECTED_GOAL_PRESETS.recomp,
         slotSplits: { breakfast: 15, lunch: 40, dinner: 35, snack: 10 },
       });
-      assert.equal(weightedPlan.zeroAddedOil, true);
+      assert.equal(weightedPlan.zeroAddedOil, false);
       assert.ok(weightedPlan.totals.fat <= EXPECTED_GOAL_PRESETS.recomp.fat + 0.01);
 
       const getMeal = (plan, id) => plan.meals.find((m) => m.id === id);

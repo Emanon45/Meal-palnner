@@ -156,9 +156,6 @@
         throw new TypeError('setBaselineData invalid nutritionDb entry: ' + id);
       }
       var itemName = (typeof item.name === 'string' && item.name.trim()) ? item.name.trim() : id;
-      if (isOilIngredient(id, itemName)) {
-        continue;
-      }
       var per = isPlainObject(item.per100g) ? item.per100g : item;
       if (
         !hasValidNonNegNumber(per.calories) ||
@@ -270,7 +267,7 @@
       id: 'breakfast',
       slot: 'Breakfast',
       title: 'Eggs & Crispy Grelot Potatoes',
-      cookingMethod: 'Dry non-stick skillet scramble + air-fried or dry-roasted grelot potatoes in water/spices (0g oil)',
+      cookingMethod: 'Non-stick skillet scramble + crispy air-fried grelot potatoes',
       seasoningTwist: 'Oregano, lemon zest, smoked paprika & fresh green onion',
       swappable: false
     },
@@ -278,7 +275,7 @@
       id: 'lunch',
       slot: 'Lunch',
       title: 'Seared Protein & Jasmine Rice Bowl',
-      cookingMethod: 'Dry non-stick sear in natural rendered juices, broth, or water (0g oil)',
+      cookingMethod: 'Pan-seared in skillet with aromatics and broth',
       seasoningTwist: 'Smoked paprika, cumin, garlic & lemon',
       swappable: true
     },
@@ -286,7 +283,7 @@
       id: 'dinner',
       slot: 'Dinner',
       title: 'Braised Protein & White Beans',
-      cookingMethod: 'Braised slow-simmer in natural juices, diced tomatoes, ginger & broth (0g oil)',
+      cookingMethod: 'Slow-braised with diced tomatoes, ginger & broth',
       seasoningTwist: 'Fresh ginger, garlic, herbs & 0% skyr dollop',
       swappable: true
     },
@@ -294,7 +291,7 @@
       id: 'snack',
       slot: 'Snack',
       title: "0% Skyr Protein Bowl",
-      cookingMethod: 'No-cook chilled bowl with whey isolate & fruit (0g oil)',
+      cookingMethod: 'No-cook chilled bowl with whey isolate & fruit',
       seasoningTwist: 'Vanilla/cinnamon whisked into 0% skyr',
       swappable: false
     }
@@ -429,7 +426,6 @@
 
   function sanitizeInstruction(text, fallbackText) {
     if (typeof text !== 'string' || !text.trim()) return fallbackText;
-    if (isOilText(text)) return fallbackText;
     return text.trim();
   }
 
@@ -457,10 +453,6 @@
       var ov = (hasOwn(overrides, id) && overrides[id] && typeof overrides[id] === 'object') ? overrides[id] : null;
       var rawName = (ov && typeof ov.name === 'string' && ov.name.trim()) ? ov.name.trim() : (base ? base.name : id);
       var resolvedName = base ? sanitizeInstruction(rawName, base.name) : rawName;
-
-      if (!base && isOilIngredient(id, resolvedName)) {
-        continue;
-      }
 
       var basePer = (base && base.per100g) || { calories: 0, protein: 0, fat: 0, carbs: 0 };
       var ovPer = (ov && ov.per100g && typeof ov.per100g === 'object') ? ov.per100g : {};
@@ -2049,7 +2041,7 @@
         assembled.ingredientGrams = gMap;
       };
 
-      // Trim highest-fat ingredients in custom menus if fat exceeds ceiling
+      // Trim highest-fat ingredients in custom menus if fat exceeds ceiling (oils/fats trim down to 5g floor)
       var fatIter = 0;
       while (assembled.totals.fat > targets.fat && fatIter < 250) {
         fatIter++;
@@ -2059,18 +2051,21 @@
           var mealRef = assembled.meals[mIdx];
           for (var iIdx = 0; iIdx < mealRef.ingredients.length; iIdx++) {
             var ingRef = mealRef.ingredients[iIdx];
-            if (!hasOwn(db, ingRef.id) || ingRef.grams <= 40) continue;
+            if (!hasOwn(db, ingRef.id)) continue;
             var fRate = (db[ingRef.id].per100g && db[ingRef.id].per100g.fat) || 0;
+            var trimFloor = fRate >= 50 ? 5 : 40;
+            if (ingRef.grams <= trimFloor) continue;
             if (fRate >= 4 && fRate > maxFatRate) {
               maxFatRate = fRate;
-              bestFatRef = { mealIdx: mIdx, ingIdx: iIdx, id: ingRef.id, grams: ingRef.grams };
+              bestFatRef = { mealIdx: mIdx, ingIdx: iIdx, id: ingRef.id, grams: ingRef.grams, floor: trimFloor };
             }
           }
         }
         if (!bestFatRef) break;
+        var trimStep = bestFatRef.floor <= 5 && bestFatRef.grams > 5 ? 1 : 5;
         assembled.meals[bestFatRef.mealIdx].ingredients[bestFatRef.ingIdx] = buildIngredientEntry(
           bestFatRef.id,
-          Math.max(40, bestFatRef.grams - 5),
+          Math.max(bestFatRef.floor, bestFatRef.grams - trimStep),
           db
         );
         recalcAssembled();
@@ -2115,7 +2110,7 @@
       totals: assembled.totals,
       targets: targets,
       fatCeilingExceeded: assembled.totals.fat > targets.fat,
-      zeroAddedOil: true
+      zeroAddedOil: false
     };
     if (slotSplits !== null) {
       result.slotSplits = slotSplits;
@@ -2144,7 +2139,7 @@
         if (id === '__proto__') continue;
         var g = Number(dailyPlan.ingredientGrams[id]);
         if (!Number.isFinite(g) || g <= 0) continue;
-        if (!hasOwn(db, id) || isOilIngredient(id, db[id].name)) continue;
+        if (!hasOwn(db, id)) continue;
         out[id] = g;
       }
       return out;
@@ -2159,7 +2154,7 @@
           if (!ing || typeof ing.id !== 'string' || ing.id === '__proto__') continue;
           var mg = Number(ing.grams);
           if (!Number.isFinite(mg) || mg <= 0) continue;
-          if (!hasOwn(db, ing.id) || isOilIngredient(ing.id, db[ing.id].name)) continue;
+          if (!hasOwn(db, ing.id)) continue;
           out[ing.id] = (hasOwn(out, ing.id) ? out[ing.id] : 0) + mg;
         }
       }
@@ -2331,7 +2326,7 @@
             if (!ing || typeof ing.id !== 'string' || ing.id === '__proto__' || ing.id === 'aromatics_zero') continue;
             var mg = Number(ing.grams);
             if (!Number.isFinite(mg) || mg <= 0) continue;
-            if (!hasOwn(db, ing.id) || isOilIngredient(ing.id, db[ing.id].name)) continue;
+            if (!hasOwn(db, ing.id)) continue;
             if (!hasOwn(mapOut, ing.id)) {
               mapOut[ing.id] = 0;
               orderOut.push(ing.id);

@@ -237,7 +237,7 @@ export function assertDataJsonSchema(
   } else {
     assert.match(String(data.userProfile.postalCode), /^[A-Z]\d[A-Z]$/);
   }
-  assert.equal(data.userProfile.zeroAddedOil, true);
+  assert.equal(typeof data.userProfile.zeroAddedOil, 'boolean');
 
   for (const [presetId, expected] of Object.entries(EXPECTED_GOAL_PRESETS)) {
     const actual = data.goalPresets[presetId];
@@ -283,8 +283,6 @@ export function assertDataJsonSchema(
 
   assert.ok(Array.isArray(data.mealTemplates.meals) && data.mealTemplates.meals.length === 4);
   assert.ok(Array.isArray(data.prepTimeline) && data.prepTimeline.length >= 3);
-  assertZeroAddedOil(data.mealTemplates, 'mealTemplates');
-  assertZeroAddedOil(data.prepTimeline, 'prepTimeline');
 }
 
 const REQUIRED_CATEGORY_BASELINES = [

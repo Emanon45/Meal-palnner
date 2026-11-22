@@ -38,6 +38,67 @@ export const SLOT_SPLIT_PRESETS = [
   { id: 'light_breakfast', label: 'Light Breakfast (15/35/35/15)', splits: { breakfast: 15, lunch: 35, dinner: 35, snack: 15 } }
 ];
 
+export const DEFAULT_SPICE_CONDIMENT_GROUPS = [
+  {
+    id: 'oils',
+    label: 'Cooking Oils & Fats',
+    items: ['Olive Oil', 'Avocado / Canola Oil', 'Sesame Oil', 'Butter']
+  },
+  {
+    id: 'condiments',
+    label: 'Condiments & Sauces',
+    items: [
+      'Soy Sauce',
+      'Sriracha / Hot Sauce',
+      'Dijon / Yellow Mustard',
+      'Rice / Apple Cider Vinegar',
+      'Balsamic Vinegar',
+      'Honey / Maple Syrup',
+      'Lemon / Lime Juice',
+      'Tomato Paste',
+      'BBQ / Teriyaki Sauce',
+      'Light Mayo'
+    ]
+  },
+  {
+    id: 'spices',
+    label: 'Spices & Herbs',
+    items: [
+      'Salt & Black Pepper',
+      'Garlic Powder',
+      'Onion Powder',
+      'Smoked Paprika',
+      'Cumin',
+      'Oregano',
+      'Thyme',
+      'Chili Flakes',
+      'Curry Powder',
+      'Garam Masala',
+      'Cinnamon',
+      'Ginger',
+      'Italian Seasoning',
+      'Cajun / Taco Seasoning'
+    ]
+  }
+];
+
+export const BASIC_PANTRY_STAPLES = [
+  'Salt & Black Pepper',
+  'Garlic Powder',
+  'Onion Powder',
+  'Smoked Paprika',
+  'Cumin',
+  'Oregano',
+  'Olive Oil',
+  'Soy Sauce'
+];
+
+export function inferStockCategory(aisle) {
+  return (aisle === 'Meat' || aisle === 'Dairy/Eggs' || aisle === 'Produce')
+    ? 'perishable'
+    : 'non_perishable';
+}
+
 export const FALLBACK_META = {
   schemaVersion: '1.0.0',
   generatedAt: null,
@@ -62,7 +123,7 @@ export const FALLBACK_META = {
     description: 'High-Protein Batch Prep',
     neighborhood: 'Canada',
     postalCode: 'H1W',
-    zeroAddedOil: true
+    zeroAddedOil: false
   },
   proteinSwaps: {
     lunch: [
@@ -91,8 +152,8 @@ export const FALLBACK_META = {
       startMinute: 0,
       durationMinutes: 40,
       timerSeconds: 2400,
-      parallelNote: 'Rinse jasmine rice and start cooker; sear trimmed pork or chicken in hot dry pot, deglaze with diced tomatoes, ginger, garlic, and white beans.',
-      zeroOilNote: 'Sear meat in natural moisture and deglaze with tomato juices and broth (0g oil).'
+      parallelNote: 'Rinse jasmine rice and start cooker; sear trimmed pork or chicken in hot pot, deglaze with diced tomatoes, ginger, garlic, and white beans.',
+      zeroOilNote: ''
     },
     {
       id: 'step_2',
@@ -103,18 +164,18 @@ export const FALLBACK_META = {
       durationMinutes: 22,
       timerSeconds: 1320,
       parallelNote: 'Halve grelot potatoes, season with smoked paprika and garlic powder, air-fry at 200C shaking halfway.',
-      zeroOilNote: 'Mist lightly with water or broth before seasoning with zero added cooking oil.'
+      zeroOilNote: ''
     },
     {
       id: 'step_3',
       order: 3,
-      title: 'Dry-Sear Lunch Protein (Ground Chicken or Tuna Patties)',
+      title: 'Sear Lunch Protein (Ground Chicken or Tuna Patties)',
       station: 'Non-Stick Skillet',
       startMinute: 10,
       durationMinutes: 12,
       timerSeconds: 720,
       parallelNote: 'Brown ground chicken with cumin and sumac (or air-fry spiced tuna-potato patties).',
-      zeroOilNote: 'Cook in natural meat juices with a 2 tbsp splash of water or broth (0g oil).'
+      zeroOilNote: ''
     },
     {
       id: 'step_4',
@@ -125,7 +186,7 @@ export const FALLBACK_META = {
       durationMinutes: 15,
       timerSeconds: 900,
       parallelNote: 'Shred green cabbage and carrots and dice English cucumber into crisp meal-prep containers.',
-      zeroOilNote: 'Dress slaw with lemon or lime juice and scallion with zero added oil.'
+      zeroOilNote: ''
     },
     {
       id: 'step_5',
@@ -136,7 +197,7 @@ export const FALLBACK_META = {
       durationMinutes: 15,
       timerSeconds: 900,
       parallelNote: 'Weigh cooked portions; place Days 1-4 in fridge and freeze Day 5+ containers.',
-      zeroOilNote: 'Store broth-rich braises cleanly with zero added fats.'
+      zeroOilNote: ''
     }
   ]
 };
@@ -191,6 +252,10 @@ export function sanitizePantryStockItem(entry) {
   const per = (entry.per100g && typeof entry.per100g === 'object') ? entry.per100g : {};
   const rawAisle = typeof entry.aisle === 'string' ? entry.aisle.trim() : '';
   const aisle = DEFAULT_AISLE_ORDER.indexOf(rawAisle) !== -1 ? rawAisle : 'Pantry/Canned';
+  const rawCategory = typeof entry.category === 'string' ? entry.category.trim() : '';
+  const category = (rawCategory === 'perishable' || rawCategory === 'non_perishable')
+    ? rawCategory
+    : inferStockCategory(aisle);
   const rawSource = typeof entry.source === 'string' ? entry.source.trim() : '';
   const source = (rawSource === 'openfoodfacts' || rawSource === 'builtin' || rawSource === 'manual') ? rawSource : 'manual';
   const rawStore = typeof entry.store === 'string' ? entry.store.trim() : '';
@@ -215,6 +280,7 @@ export function sanitizePantryStockItem(entry) {
     name: safeName,
     brand: typeof entry.brand === 'string' ? entry.brand.trim().slice(0, 50) : '',
     aisle: aisle,
+    category: category,
     gramsOnHand: clampInt(entry.gramsOnHand, 0, 50000, 0),
     packageGrams: clampInt(entry.packageGrams, 1, 20000, 500),
     cookedYield: clampNum(entry.cookedYield, 0.2, 4.0, 1.0),
@@ -372,6 +438,7 @@ export function buildDefaultState() {
     inCart: {},
     groceriesSubtab: 'buy',
     pantryStock: [],
+    pantryStaples: [],
     frozenMealsOnHand: 0,
     postalCode: 'H1W',
     profileDescription: 'High-Protein Batch Prep',
@@ -385,9 +452,12 @@ export function buildDefaultState() {
     ],
     activeMemberId: 'p1',
     geminiPromptMode: 'flyer_deals',
+    chefStoreChoice: 'auto',
     chefViewMode: 'new',
     chefNote: '',
     chefAdjustNote: '',
+    likedMeals: [],
+    dislikedMeals: [],
     planHistory: [],
     customSwapItems: {},
     pendingAdjustments: { nilStockIds: [], scannedAdditions: [] },
@@ -396,6 +466,53 @@ export function buildDefaultState() {
     timers: {},
     lastSyncedAt: null
   };
+}
+
+function sanitizeMealPrefList(rawList, maxLen) {
+  if (!Array.isArray(rawList)) return [];
+  const out = [];
+  const seen = Object.create(null);
+  for (let i = 0; i < rawList.length && out.length < maxLen; i++) {
+    const item = rawList[i];
+    if (!item || typeof item !== 'object') continue;
+    const title = typeof item.title === 'string' ? item.title.trim().slice(0, 90) : '';
+    if (!title) continue;
+    const rawSlotId = typeof item.slotId === 'string' ? item.slotId.trim().toLowerCase() : 'lunch';
+    const slotId = MEAL_SLOTS.indexOf(rawSlotId) !== -1 ? rawSlotId : 'lunch';
+    const slotLabel = typeof item.slot === 'string' && item.slot.trim()
+      ? item.slot.trim().slice(0, 20)
+      : (slotId.charAt(0).toUpperCase() + slotId.slice(1));
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48);
+    const key = typeof item.key === 'string' && item.key.trim() ? item.key.trim().slice(0, 64) : (slotId + '::' + slug);
+    if (!key || seen[key]) continue;
+    seen[key] = true;
+    out.push({
+      key: key,
+      slot: slotLabel,
+      slotId: slotId,
+      title: title,
+      seasoningTwist: typeof item.seasoningTwist === 'string' ? item.seasoningTwist.trim().slice(0, 120) : '',
+      ingredientsSummary: typeof item.ingredientsSummary === 'string' ? item.ingredientsSummary.trim().slice(0, 180) : '',
+      note: typeof item.note === 'string' ? item.note.trim().slice(0, 140) : '',
+      savedAt: typeof item.savedAt === 'string' ? item.savedAt : ''
+    });
+  }
+  return out;
+}
+
+function sanitizePantryStaples(rawList) {
+  if (!Array.isArray(rawList)) return [];
+  const out = [];
+  const seenLower = Object.create(null);
+  for (let i = 0; i < rawList.length && out.length < 80; i++) {
+    const val = typeof rawList[i] === 'string' ? rawList[i].trim().slice(0, 50) : '';
+    if (!val) continue;
+    const low = val.toLowerCase();
+    if (low === '__proto__' || low === 'constructor' || low === 'prototype' || seenLower[low]) continue;
+    seenLower[low] = true;
+    out.push(val);
+  }
+  return out;
 }
 
 export function validateState(raw) {
@@ -534,7 +651,9 @@ export function validateState(raw) {
     feedback: feedback,
     haveAtHome: haveAtHome,
     inCart: inCart,
-    groceriesSubtab: raw.groceriesSubtab === 'stock' ? 'stock' : 'buy',
+    groceriesSubtab: (raw.groceriesSubtab === 'perishables' || raw.groceriesSubtab === 'stock')
+      ? 'perishables'
+      : (raw.groceriesSubtab === 'pantry' ? 'pantry' : 'buy'),
     pantryStock: (() => {
       if (!Array.isArray(raw.pantryStock)) return [];
       const seenIds = Object.create(null);
@@ -548,6 +667,7 @@ export function validateState(raw) {
       }
       return out;
     })(),
+    pantryStaples: sanitizePantryStaples(raw.pantryStaples),
     frozenMealsOnHand: clampInt(raw.frozenMealsOnHand, 0, horizonDays, 0),
     postalCode: normalizePostalCode(raw.postalCode),
     profileDescription: (typeof raw.profileDescription === 'string' && raw.profileDescription.trim())
@@ -587,9 +707,14 @@ export function validateState(raw) {
     geminiPromptMode: (raw.geminiPromptMode === 'full_store' || raw.geminiPromptMode === 'browser_hunt')
       ? 'full_store'
       : 'flyer_deals',
+    chefStoreChoice: (raw.chefStoreChoice === 'Maxi' || raw.chefStoreChoice === 'Super C')
+      ? raw.chefStoreChoice
+      : 'auto',
     chefViewMode: raw.chefViewMode === 'adjust' ? 'adjust' : 'new',
     chefNote: typeof raw.chefNote === 'string' ? raw.chefNote.trim().slice(0, 300) : '',
     chefAdjustNote: typeof raw.chefAdjustNote === 'string' ? raw.chefAdjustNote.trim().slice(0, 300) : '',
+    likedMeals: sanitizeMealPrefList(raw.likedMeals, 16),
+    dislikedMeals: sanitizeMealPrefList(raw.dislikedMeals, 10),
     planHistory: (() => {
       if (!Array.isArray(raw.planHistory)) return [];
       const out = [];
@@ -911,25 +1036,34 @@ export function tryImportSharedPlanFromHash() {
   }
 }
 
+function normalizeSingleStoreName(raw) {
+  const s = String(raw || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (s === 'maxi' || s.indexOf('maxi') === 0) return 'Maxi';
+  if (s === 'super c' || s === 'superc' || s.indexOf('super c') === 0 || s.indexOf('superc') === 0) return 'Super C';
+  return '';
+}
+
+function parseOverlayJsonObject(rawJsonStr) {
+  const cleaned = rawJsonStr.trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (_parseErr) {
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
+    }
+    return null;
+  }
+}
+
 export function applyCustomMealJsonOverlay(targetData, rawJsonStr) {
   if (!rawJsonStr || typeof rawJsonStr !== 'string' || !rawJsonStr.trim()) return false;
   try {
-    const cleaned = rawJsonStr.trim()
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
-    let parsed = null;
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch (_parseErr) {
-      const firstBrace = cleaned.indexOf('{');
-      const lastBrace = cleaned.lastIndexOf('}');
-      if (firstBrace !== -1 && lastBrace > firstBrace) {
-        parsed = JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
-      } else {
-        return false;
-      }
-    }
+    const parsed = parseOverlayJsonObject(rawJsonStr);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
 
     if (!targetData.nutritionDb || typeof targetData.nutritionDb !== 'object') {
@@ -937,6 +1071,8 @@ export function applyCustomMealJsonOverlay(targetData, rawJsonStr) {
     } else {
       targetData.nutritionDb = Object.assign({}, targetData.nutritionDb);
     }
+
+    const paidStoreCounts = { Maxi: 0, 'Super C': 0 };
 
     function registerCustomDbEntry(cid, ci) {
       if (!cid || cid === '__proto__' || cid === 'constructor' || cid === 'prototype') return;
@@ -946,6 +1082,10 @@ export function applyCustomMealJsonOverlay(targetData, rawJsonStr) {
       const cadPkg = clampNum(ci.cadPerPackage !== undefined ? ci.cadPerPackage : (ci.price && ci.price.cadPerPackage), 0, 250, 4.99);
       const cad100 = clampNum(ci.cadPer100g !== undefined ? ci.cadPer100g : (ci.price && ci.price.cadPer100g), 0, 50, Math.round((cadPkg / (pkgG / 100)) * 100) / 100);
       const storeName = typeof ci.store === 'string' && ci.store.trim() ? ci.store.trim() : '';
+      const normStore = normalizeSingleStoreName(storeName);
+      if (normStore && cadPkg > 0) {
+        paidStoreCounts[normStore]++;
+      }
       const healthMeta = normalizeHealthMeta(ci.health || ci, per);
       const entry = {
         name: typeof ci.name === 'string' && ci.name.trim() ? ci.name.trim() : cid,
@@ -991,6 +1131,16 @@ export function applyCustomMealJsonOverlay(targetData, rawJsonStr) {
     }
 
     const srcTemplates = (parsed.mealTemplates && typeof parsed.mealTemplates === 'object') ? parsed.mealTemplates : parsed;
+    const explicitStore = normalizeSingleStoreName(parsed.winningStore || parsed.store || srcTemplates.winningStore);
+    if (explicitStore) {
+      targetData.winningStore = explicitStore;
+    } else if (paidStoreCounts.Maxi > paidStoreCounts['Super C']) {
+      targetData.winningStore = 'Maxi';
+    } else if (paidStoreCounts['Super C'] > paidStoreCounts.Maxi) {
+      targetData.winningStore = 'Super C';
+    } else if (paidStoreCounts.Maxi > 0) {
+      targetData.winningStore = 'Maxi';
+    }
     if (!targetData.mealTemplates || typeof targetData.mealTemplates !== 'object') {
       targetData.mealTemplates = JSON.parse(JSON.stringify(FALLBACK_META.mealTemplates));
     }
@@ -1245,6 +1395,136 @@ export function removePantryStockItem(id) {
   if (appState.pantryStock.length === beforeLen) return false;
   saveState();
   recomputePlan();
+  return true;
+}
+
+export function setPantryStockCategory(id, category) {
+  if (!Array.isArray(appState.pantryStock) || !id) return null;
+  if (category !== 'perishable' && category !== 'non_perishable') return null;
+  const item = appState.pantryStock.find((it) => it && it.id === id);
+  if (!item) return null;
+  item.category = category;
+  saveState();
+  return item;
+}
+
+export function togglePantryStaple(name) {
+  const clean = typeof name === 'string' ? name.trim().slice(0, 50) : '';
+  if (!clean) return false;
+  if (!Array.isArray(appState.pantryStaples)) appState.pantryStaples = [];
+  const low = clean.toLowerCase();
+  const idx = appState.pantryStaples.findIndex((s) => String(s).toLowerCase() === low);
+  let active = false;
+  if (idx !== -1) {
+    appState.pantryStaples.splice(idx, 1);
+  } else if (appState.pantryStaples.length < 80) {
+    appState.pantryStaples.push(clean);
+    active = true;
+  }
+  saveState();
+  return active;
+}
+
+export function addCustomPantryStaple(rawName) {
+  const clean = typeof rawName === 'string' ? rawName.trim().slice(0, 50) : '';
+  if (!clean) return false;
+  const low = clean.toLowerCase();
+  if (low === '__proto__' || low === 'constructor' || low === 'prototype') return false;
+  if (!Array.isArray(appState.pantryStaples)) appState.pantryStaples = [];
+  if (appState.pantryStaples.some((s) => String(s).toLowerCase() === low)) return true;
+  if (appState.pantryStaples.length >= 80) return false;
+  appState.pantryStaples.push(clean);
+  saveState();
+  return true;
+}
+
+export function removePantryStaple(name) {
+  if (!Array.isArray(appState.pantryStaples) || !name) return false;
+  const low = String(name).trim().toLowerCase();
+  const before = appState.pantryStaples.length;
+  appState.pantryStaples = appState.pantryStaples.filter((s) => String(s).toLowerCase() !== low);
+  if (appState.pantryStaples.length === before) return false;
+  saveState();
+  return true;
+}
+
+export function selectBasicPantryStaples() {
+  if (!Array.isArray(appState.pantryStaples)) appState.pantryStaples = [];
+  const existingLow = new Set(appState.pantryStaples.map((s) => String(s).toLowerCase()));
+  BASIC_PANTRY_STAPLES.forEach((b) => {
+    if (!existingLow.has(b.toLowerCase()) && appState.pantryStaples.length < 80) {
+      appState.pantryStaples.push(b);
+      existingLow.add(b.toLowerCase());
+    }
+  });
+  saveState();
+  return appState.pantryStaples.slice();
+}
+
+export function clearPantryStaples() {
+  appState.pantryStaples = [];
+  saveState();
+}
+
+export function recordMealFeedbackSnapshot(meal, rating, note) {
+  if (!meal || !meal.title) return;
+  const slotId = MEAL_SLOTS.indexOf(String(meal.id || '').toLowerCase()) !== -1
+    ? String(meal.id).toLowerCase()
+    : 'lunch';
+  const title = String(meal.title).trim().slice(0, 90);
+  if (!title) return;
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48);
+  const key = slotId + '::' + slug;
+  const slotLabel = String(meal.slot || (slotId.charAt(0).toUpperCase() + slotId.slice(1))).trim().slice(0, 20);
+  const ingredientsSummary = (Array.isArray(meal.ingredients) ? meal.ingredients : [])
+    .filter((i) => i && i.id && i.id !== 'aromatics_zero' && i.name)
+    .map((i) => i.name)
+    .slice(0, 6)
+    .join(', ')
+    .slice(0, 180);
+
+  const entry = {
+    key: key,
+    slot: slotLabel,
+    slotId: slotId,
+    title: title,
+    seasoningTwist: typeof meal.seasoningTwist === 'string' ? meal.seasoningTwist.trim().slice(0, 120) : '',
+    ingredientsSummary: ingredientsSummary,
+    note: typeof note === 'string' ? note.trim().slice(0, 140) : '',
+    savedAt: new Date().toISOString()
+  };
+
+  if (!Array.isArray(appState.likedMeals)) appState.likedMeals = [];
+  if (!Array.isArray(appState.dislikedMeals)) appState.dislikedMeals = [];
+
+  appState.likedMeals = appState.likedMeals.filter((it) => it && it.key !== key);
+  appState.dislikedMeals = appState.dislikedMeals.filter((it) => it && it.key !== key);
+
+  if (rating === 'up') {
+    appState.likedMeals.unshift(entry);
+    appState.likedMeals = appState.likedMeals.slice(0, 16);
+  } else if (rating === 'down') {
+    appState.dislikedMeals.unshift(entry);
+    appState.dislikedMeals = appState.dislikedMeals.slice(0, 10);
+  }
+  saveState();
+}
+
+export function removeLikedMeal(key) {
+  if (!Array.isArray(appState.likedMeals) || !key) return false;
+  const before = appState.likedMeals.length;
+  appState.likedMeals = appState.likedMeals.filter((it) => it && it.key !== key);
+  if (appState.likedMeals.length === before) return false;
+  saveState();
+  return true;
+}
+
+export function removeDislikedMeal(key) {
+  if (!Array.isArray(appState.dislikedMeals) || !key) return false;
+  const before = appState.dislikedMeals.length;
+  appState.dislikedMeals = appState.dislikedMeals.filter((it) => it && it.key !== key);
+  if (appState.dislikedMeals.length === before) return false;
+  saveState();
   return true;
 }
 
@@ -1586,12 +1866,38 @@ export function previewCustomMealJson(rawStr) {
     });
 
     const stockUsedNames = [];
+    const perishableUsedNames = [];
+    let perishableTotalCount = 0;
     const dailyIngGrams = activeDaily.ingredientGrams || {};
     activeStock.forEach((stItem) => {
+      const cat = stItem.category || inferStockCategory(stItem.aisle);
+      if (cat === 'perishable') perishableTotalCount++;
       if ((Number(dailyIngGrams[stItem.id]) || 0) > 0) {
         stockUsedNames.push(stItem.name);
+        if (cat === 'perishable') perishableUsedNames.push(stItem.name);
       }
     });
+
+    let hasMaxiPaid = false;
+    let hasSuperCPaid = false;
+    try {
+      const rawObj = parseOverlayJsonObject(rawStr);
+      if (rawObj && rawObj.customIngredients && typeof rawObj.customIngredients === 'object') {
+        const ciList = Array.isArray(rawObj.customIngredients)
+          ? rawObj.customIngredients
+          : Object.values(rawObj.customIngredients);
+        ciList.forEach((ci) => {
+          if (!ci || typeof ci !== 'object') return;
+          const cadPkg = ci.cadPerPackage !== undefined ? Number(ci.cadPerPackage) : (ci.price && ci.price.cadPerPackage !== undefined ? Number(ci.price.cadPerPackage) : 1);
+          if (!(cadPkg > 0)) return;
+          const st = normalizeSingleStoreName(ci.store);
+          if (st === 'Maxi') hasMaxiPaid = true;
+          if (st === 'Super C') hasSuperCPaid = true;
+        });
+      }
+    } catch (_err) {
+      // Ignore secondary parse check errors
+    }
 
     const healthWarnings = [];
     const seenWarnIds = Object.create(null);
@@ -1614,6 +1920,8 @@ export function previewCustomMealJson(rawStr) {
       ok: true,
       error: '',
       weeklyTheme: (base.mealTemplates && base.mealTemplates.weeklyTheme) || 'Custom Menu',
+      chosenStore: base.winningStore || 'Super C',
+      mixedStoresWarning: hasMaxiPaid && hasSuperCPaid,
       meals: activeDaily.meals.map((m) => ({
         id: m.id,
         slot: m.slot,
@@ -1629,6 +1937,8 @@ export function previewCustomMealJson(rawStr) {
       estimatedCostCad: scaled.summary.remainingCostCad,
       stockUsedNames: stockUsedNames,
       stockTotalCount: activeStock.length,
+      perishableUsedNames: perishableUsedNames,
+      perishableTotalCount: perishableTotalCount,
       healthWarnings: healthWarnings
     };
   } catch (err) {

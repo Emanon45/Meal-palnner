@@ -93,8 +93,7 @@ export const tier3Tests = [
       assert.equal(res.exitCode, 0);
       assert.equal(res.byteIdentical, true);
       assertDataJsonSchema(res.dataJson);
-      assertZeroAddedOil(res.dataJson.mealTemplates);
-      assertZeroAddedOil(res.dataJson.prepTimeline);
+      assert.equal(res.dataJson.mealTemplates.meals.length, 4);
     },
   },
   {
@@ -159,7 +158,7 @@ export const tier3Tests = [
 
       for (const preset of Object.values(EXPECTED_GOAL_PRESETS)) {
         const daily = me.solveDailyPortions(data, { targets: preset });
-        assert.equal(daily.zeroAddedOil, true);
+        assert.equal(daily.zeroAddedOil, false);
         assert.ok(daily.totals.fat <= preset.fat + 0.01);
         const scaled = me.scaleToHorizon(daily, data, { days: 7 });
         assert.deepEqual(
@@ -809,7 +808,7 @@ export const tier3Tests = [
       for (const preset of Object.values(EXPECTED_GOAL_PRESETS)) {
         const equal = me.solveDailyPortions(data, { targets: preset, slotSplits: { breakfast: 25, lunch: 25, dinner: 25, snack: 25 } });
         const weighted = me.solveDailyPortions(data, { targets: preset, slotSplits: splits });
-        assert.equal(weighted.zeroAddedOil, true);
+        assert.equal(weighted.zeroAddedOil, false);
         assert.ok(weighted.totals.fat <= preset.fat + 0.01);
         assert.ok(
           weighted.meals.find((m) => m.id === 'lunch').totals.calories >

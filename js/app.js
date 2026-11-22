@@ -125,15 +125,30 @@ const mealsCallbacks = {
 
 const chefCallbacks = {
   onPlanApplied: () => {
+    updateHeader();
     renderMealsTab(mealsCallbacks);
     renderPrepTab();
     renderGroceriesTab(groceriesCallbacks);
     renderChefTab(chefCallbacks);
     updateSettingsControlsInPlace();
   },
+  onOpenPerishablesSubtab: () => {
+    const appState = getAppState();
+    appState.groceriesSubtab = 'perishables';
+    saveState();
+    selectTab('groceries', false);
+    renderGroceriesTab(groceriesCallbacks);
+  },
+  onOpenPantrySubtab: () => {
+    const appState = getAppState();
+    appState.groceriesSubtab = 'pantry';
+    saveState();
+    selectTab('groceries', false);
+    renderGroceriesTab(groceriesCallbacks);
+  },
   onOpenStockSubtab: () => {
     const appState = getAppState();
-    appState.groceriesSubtab = 'stock';
+    appState.groceriesSubtab = 'perishables';
     saveState();
     selectTab('groceries', false);
     renderGroceriesTab(groceriesCallbacks);
@@ -158,7 +173,7 @@ const settingsCallbacks = {
   },
   onOpenStockSubtab: () => {
     const appState = getAppState();
-    appState.groceriesSubtab = 'stock';
+    appState.groceriesSubtab = 'perishables';
     saveState();
     selectTab('groceries', false);
     renderGroceriesTab(groceriesCallbacks);

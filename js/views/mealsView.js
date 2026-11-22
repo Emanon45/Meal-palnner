@@ -17,7 +17,8 @@ import {
   recomputePlan,
   applyCheapestProteinSwaps,
   announcePolite,
-  isMealEaten
+  isMealEaten,
+  recordMealFeedbackSnapshot
 } from '../state.js';
 
 let activeCallbacks = {};
@@ -384,10 +385,10 @@ export function renderMealsTab(callbacks) {
     upBtn.addEventListener('click', () => {
       const cur = appState.feedback[meal.id];
       cur.rating = cur.rating === 'up' ? null : 'up';
-      saveState();
+      recordMealFeedbackSnapshot(meal, cur.rating, cur.note);
       upBtn.setAttribute('aria-pressed', cur.rating === 'up' ? 'true' : 'false');
       downBtn.setAttribute('aria-pressed', 'false');
-      announcePolite(meal.slot + ' feedback saved.');
+      announcePolite(cur.rating === 'up' ? (meal.slot + ' saved to Liked Meals.') : (meal.slot + ' removed from Liked Meals.'));
     });
 
     const downBtn = el('button', 'pill-btn');
@@ -398,7 +399,7 @@ export function renderMealsTab(callbacks) {
     downBtn.addEventListener('click', () => {
       const cur = appState.feedback[meal.id];
       cur.rating = cur.rating === 'down' ? null : 'down';
-      saveState();
+      recordMealFeedbackSnapshot(meal, cur.rating, cur.note);
       downBtn.setAttribute('aria-pressed', cur.rating === 'down' ? 'true' : 'false');
       upBtn.setAttribute('aria-pressed', 'false');
       announcePolite(meal.slot + ' feedback saved.');
@@ -415,11 +416,19 @@ export function renderMealsTab(callbacks) {
     noteInput.value = fb.note || '';
     noteInput.addEventListener('input', () => {
       appState.feedback[meal.id].note = noteInput.value;
-      saveState();
+      if (appState.feedback[meal.id].rating) {
+        recordMealFeedbackSnapshot(meal, appState.feedback[meal.id].rating, noteInput.value);
+      } else {
+        saveState();
+      }
     });
     noteInput.addEventListener('change', () => {
       appState.feedback[meal.id].note = noteInput.value;
-      saveState();
+      if (appState.feedback[meal.id].rating) {
+        recordMealFeedbackSnapshot(meal, appState.feedback[meal.id].rating, noteInput.value);
+      } else {
+        saveState();
+      }
       announcePolite(meal.slot + ' note saved.');
     });
 

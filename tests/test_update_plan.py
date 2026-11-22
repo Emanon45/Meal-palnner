@@ -932,13 +932,13 @@ class TestGeminiIntegrationSanitizerAndFallback(unittest.TestCase):
         )
         self.assertEqual(plan["prepTimeline"][0]["timerSeconds"], 2400)
 
-    def test_gemini_oil_violation_triggers_deterministic_fallback(self) -> None:
-        bad_payload = {
-            "weeklyTheme": "Savory Week",
+    def test_gemini_allows_cooking_oil_in_seasoning_and_prep_tips(self) -> None:
+        oil_payload = {
+            "weeklyTheme": "Mediterranean Olive Oil Week",
             "produceRotationNote": "Fresh veggies",
             "fruitRotationNote": "Fresh fruit",
             "mealCustomizations": {
-                "breakfast": {"seasoningTwist": "Drizzle 1 tbsp olive oil over potatoes"},
+                "breakfast": {"seasoningTwist": "Drizzle 1 tsp olive oil over roasted potatoes"},
                 "lunch": {"seasoningTwist": "Sumac and lemon"},
                 "dinner": {"seasoningTwist": "Ginger and garlic"},
                 "snack": {"seasoningTwist": "Cinnamon"},
@@ -946,7 +946,7 @@ class TestGeminiIntegrationSanitizerAndFallback(unittest.TestCase):
             "prepTips": [],
         }
         mock_client = MagicMock()
-        mock_client.models.generate_content.return_value = SimpleNamespace(text=json.dumps(bad_payload))
+        mock_client.models.generate_content.return_value = SimpleNamespace(text=json.dumps(oil_payload))
 
         with (
             patch.object(update_plan, "genai", SimpleNamespace(Client=MagicMock(return_value=mock_client))),
@@ -958,8 +958,8 @@ class TestGeminiIntegrationSanitizerAndFallback(unittest.TestCase):
                 flyer_period={"validFrom": "2026-11-12", "validTo": "2026-11-18"},
                 api_key="test-key",
             )
-        self.assertEqual(ai_source, "fallback")
-        self.assertEqual(update_plan.validate_zero_added_oil(plan), [])
+        self.assertEqual(ai_source, "gemini")
+        self.assertIn("olive oil", plan["mealTemplates"]["meals"][0]["seasoningTwist"])
 
     def test_missing_api_key_and_api_error_use_deterministic_fallback(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
@@ -988,10 +988,10 @@ class TestGeminiIntegrationSanitizerAndFallback(unittest.TestCase):
         self.assertEqual(ai_source2, "fallback")
         self.assertEqual(plan, plan2)
 
-    def test_all_fallback_profiles_pass_zero_oil_check(self) -> None:
-        self.assertEqual(update_plan.validate_zero_added_oil(update_plan.FALLBACK_PROFILES), [])
-        self.assertEqual(update_plan.validate_zero_added_oil(update_plan.BASE_MEAL_TEMPLATES), [])
-        self.assertEqual(update_plan.validate_zero_added_oil(update_plan.BASE_PREP_TIMELINE), [])
+    def test_all_fallback_profiles_are_valid_strings(self) -> None:
+        self.assertGreaterEqual(len(update_plan.FALLBACK_PROFILES), 3)
+        self.assertEqual(len(update_plan.BASE_MEAL_TEMPLATES), 4)
+        self.assertEqual(len(update_plan.BASE_PREP_TIMELINE), 5)
 
 
 class TestEndToEndPipelineOutput(unittest.TestCase):
@@ -1019,7 +1019,7 @@ class TestEndToEndPipelineOutput(unittest.TestCase):
         self.assertEqual(data["location"]["postalCodeDisplay"], "H1W")
         self.assertEqual(data["location"]["postalCodeQuery"], "H1W1A1")
         self.assertEqual(data["location"]["groceryTaxRate"], 0.0)
-        self.assertTrue(data["userProfile"]["zeroAddedOil"])
+        self.assertFalse(data["userProfile"]["zeroAddedOil"])
 
         self.assertEqual(
             data["goalPresets"],
@@ -1046,10 +1046,7 @@ class TestEndToEndPipelineOutput(unittest.TestCase):
         self.assertGreaterEqual(len(data["prepTimeline"]), 5)
         for step in data["prepTimeline"]:
             self.assertEqual(step["timerSeconds"], step["durationMinutes"] * 60)
-            self.assertTrue(step["zeroOilNote"])
-
-        self.assertEqual(update_plan.validate_zero_added_oil(data["mealTemplates"]), [])
-        self.assertEqual(update_plan.validate_zero_added_oil(data["prepTimeline"]), [])
+            self.assertIn("zeroOilNote", step)
 
     def test_e2e_writes_valid_schema_and_byte_identical_files_flipp_plus_gemini(self) -> None:
         now = dt.datetime(2026, 11, 17, 13, 0, 0, tzinfo=dt.timezone.utc)
@@ -1129,11 +1126,9 @@ class TestEndToEndPipelineOutput(unittest.TestCase):
                 (Path(tmp_dir) / "public" / "data.json").read_bytes(),
             )
 
-    def test_fallback_pipeline_excludes_oil_deals_and_never_crashes_zero_oil_check(self) -> None:
+    def test_fallback_pipeline_handles_oil_deals_cleanly(self) -> None:
         now = dt.datetime(2026, 11, 17, 13, 0, 0, tzinfo=dt.timezone.utc)
 
-        # Even if raw deals passed directly to build_fallback_plan contain oil/beurre keywords,
-        # weeklyTheme filters them out so sanitize_zero_oil passes.
         plan = update_plan.build_fallback_plan(
             "Maxi",
             deals={
@@ -1143,12 +1138,9 @@ class TestEndToEndPipelineOutput(unittest.TestCase):
             },
             flyer_period={"validFrom": "2026-11-12", "validTo": "2026-11-18"},
         )
-        self.assertEqual(update_plan.validate_zero_added_oil(plan), [])
         self.assertIn("FILET DE PORC FRAIS", plan["mealTemplates"]["weeklyTheme"])
-        self.assertNotIn("HUILE", plan["mealTemplates"]["weeklyTheme"])
-        self.assertNotIn("BEURRE", plan["mealTemplates"]["weeklyTheme"])
+        self.assertIn("THON PALE", plan["mealTemplates"]["weeklyTheme"])
 
-        # End-to-end run_pipeline(api_key="") with oil/butter flyer items must exclude them cleanly
         def oil_flyer_http_get(url: str, params: dict | None = None, timeout: int = 12) -> dict:
             q = (params or {}).get("q", "")
             if q in ("thon", "tuna", "sardines"):
@@ -1161,7 +1153,7 @@ class TestEndToEndPipelineOutput(unittest.TestCase):
             if q in ("pommes de terre", "potatoes"):
                 return {
                     "items": [
-                        _make_flipp_item(303, "POMMES DE TERRE AU BEURRE 500G", "Maxi", 1.99),
+                        _make_flipp_item(303, "POMMES DE TERRE BLANCHES 500G", "Maxi", 1.99),
                     ]
                 }
             return {"items": []}
@@ -1175,9 +1167,11 @@ class TestEndToEndPipelineOutput(unittest.TestCase):
             )
             self._assert_valid_schema(data)
             self.assertEqual(data["source"], "fallback+flipp")
-            self.assertEqual(data["nutritionDb"]["tuna_water"]["price"]["flyerItemName"], "THON PALE DANS L'EAU 170G")
-            self.assertFalse(data["nutritionDb"]["potatoes_raw"]["price"]["onFlyer"])
-            self.assertEqual(update_plan.validate_zero_added_oil(data["mealTemplates"]), [])
+            self.assertEqual(data["nutritionDb"]["potatoes_raw"]["price"]["flyerItemName"], "POMMES DE TERRE BLANCHES 500G")
+            self.assertEqual(
+                (Path(tmp_dir) / "data.json").read_bytes(),
+                (Path(tmp_dir) / "public" / "data.json").read_bytes(),
+            )
 
     def test_e2e_regression_t2_f02_03_active_store_beats_expired_and_2099_future(self) -> None:
         now = dt.datetime(2026, 11, 17, 13, 0, 0, tzinfo=dt.timezone.utc)
@@ -1235,7 +1229,7 @@ class TestEndToEndPipelineOutput(unittest.TestCase):
                 (Path(tmp_dir) / "public" / "data.json").read_bytes(),
             )
 
-    def test_weekly_flyer_catalog_maxi_superc_only_and_zero_oil(self) -> None:
+    def test_weekly_flyer_catalog_maxi_superc_only_and_allows_cooking_oils(self) -> None:
         now = dt.datetime(2026, 11, 17, 13, 0, 0, tzinfo=dt.timezone.utc)
 
         def catalog_http_get(url: str, params: dict | None = None, timeout: int = 12) -> dict:
@@ -1252,7 +1246,7 @@ class TestEndToEndPipelineOutput(unittest.TestCase):
                 return {
                     "items": [
                         _make_flipp_item(904, "COURONNES DE BROCOLI", "Super C", 1.49),
-                        _make_flipp_item(905, "BROCOLI SAUCE AU BEURRE", "Super C", 2.99),
+                        _make_flipp_item(905, "HUILE D'OLIVE EXTRA VIERGE", "Super C", 6.99),
                     ]
                 }
             if q in ("porc", "pork"):
@@ -1282,11 +1276,10 @@ class TestEndToEndPipelineOutput(unittest.TestCase):
             self.assertNotIn("SAUCISSES DE BOEUF", maxi_names)
             self.assertIn("COURONNES DE BROCOLI", sc_names)
             self.assertIn("LONGE DE PORC", sc_names)
-            self.assertNotIn("BROCOLI SAUCE AU BEURRE", sc_names)
+            self.assertIn("HUILE D'OLIVE EXTRA VIERGE", sc_names)
 
             catalog_str = json.dumps(catalog).lower()
             self.assertNotIn("walmart", catalog_str)
-            self.assertEqual(update_plan.validate_zero_added_oil(catalog), [])
 
 
 class TestSharedSchemaParity(unittest.TestCase):
@@ -1430,7 +1423,7 @@ class TestSharedSchemaParity(unittest.TestCase):
         self.assertEqual(update_plan.GOAL_PRESETS, js_exports["goalPresets"])
         self.assertEqual(update_plan.DEFAULT_NUTRITION_DB, js_exports["nutritionDb"])
 
-    def test_load_nutrition_baseline_rejects_semantic_and_oil_violations(self) -> None:
+    def test_load_nutrition_baseline_rejects_semantic_violations_and_allows_oils(self) -> None:
         base_schema = json.loads(self.SCHEMA_PATH.read_text(encoding="utf-8"))
 
         def _expect_value_error(mutator, label: str) -> None:
@@ -1442,19 +1435,22 @@ class TestSharedSchemaParity(unittest.TestCase):
                 with self.assertRaises(ValueError, msg=label):
                     update_plan.load_nutrition_baseline(bad_path)
 
-        # Oil entry in nutritionDb
-        def _add_olive_oil(s: dict) -> None:
-            s["nutritionDb"]["olive_oil"] = {
-                "name": "Extra Virgin Olive Oil",
-                "aisle": "Pantry/Canned",
-                "per100g": {"calories": 884, "protein": 0, "fat": 100, "carbs": 0},
-                "cookedYield": 1.0,
-                "packageGrams": 500,
-                "unitLabel": "bottle",
-                "price": {"cadPer100g": 1.5, "cadPerPackage": 7.5, "regularCadPer100g": 1.5, "historicalLowCadPer100g": 1.0},
-            }
-
-        _expect_value_error(_add_olive_oil, "olive_oil_entry")
+        # Oil entry in nutritionDb is permitted cleanly
+        oil_candidate = copy.deepcopy(base_schema)
+        oil_candidate["nutritionDb"]["olive_oil"] = {
+            "name": "Extra Virgin Olive Oil",
+            "aisle": "Pantry/Canned",
+            "per100g": {"calories": 884, "protein": 0, "fat": 100, "carbs": 0},
+            "cookedYield": 1.0,
+            "packageGrams": 500,
+            "unitLabel": "bottle",
+            "price": {"cadPer100g": 1.5, "cadPerPackage": 7.5, "regularCadPer100g": 1.5, "historicalLowCadPer100g": 1.0},
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ok_path = Path(tmp_dir) / "oil_allowed.json"
+            ok_path.write_text(json.dumps(oil_candidate), encoding="utf-8")
+            loaded = update_plan.load_nutrition_baseline(ok_path)
+            self.assertIn("olive_oil", loaded["nutritionDb"])
         _expect_value_error(lambda s: s["categoryBaselines"]["baselinePrices"].__setitem__("pork", 0), "zero_baseline_price")
         _expect_value_error(lambda s: s["categoryBaselines"]["baselinePrices"].pop("chicken"), "missing_baseline_subcat")
         _expect_value_error(lambda s: s["goalPresets"]["cut"].__setitem__("calories", -500), "negative_goal_preset_calories")

@@ -69,7 +69,7 @@ test('Suite 1: UMD exports, browser VM isolation, and contract constants', async
 
     const vmPlanPre = ctxPre.MacroEngine.solveDailyPortions(null, { preset: 'cut' });
     const vmScaledPre = ctxPre.MacroEngine.scaleToHorizon(vmPlanPre, null, { days: 7 });
-    assert.equal(vmPlanPre.zeroAddedOil, true);
+    assert.equal(vmPlanPre.zeroAddedOil, false);
     assert.equal(vmScaledPre.days, 7);
 
     // (b) Unhydrated VM + explicit ctx.MacroEngine.setBaselineData(schema)
@@ -93,7 +93,7 @@ test('Suite 1: UMD exports, browser VM isolation, and contract constants', async
 
     const vmPlanLate = ctxLate.MacroEngine.solveDailyPortions(null, { preset: 'cut' });
     const vmScaledLate = ctxLate.MacroEngine.scaleToHorizon(vmPlanLate, null, { days: 7 });
-    assert.equal(vmPlanLate.zeroAddedOil, true);
+    assert.equal(vmPlanLate.zeroAddedOil, false);
     assert.equal(vmScaledLate.days, 7);
     assert.deepEqual(
       JSON.parse(JSON.stringify(vmPlanLate.totals)),
@@ -181,7 +181,7 @@ test('Suite 1: UMD exports, browser VM isolation, and contract constants', async
     assert.equal(engineSource.includes('Aggressive Cut'), false);
   });
 
-  await t.test('setBaselineData validates schema inputs and rejects oil entries', () => {
+  await t.test('setBaselineData validates schema inputs and accepts cooking oil entries', () => {
     assert.throws(() => setBaselineData(null), TypeError);
     assert.throws(() => setBaselineData([]), TypeError);
     assert.throws(() => setBaselineData({}), TypeError);
@@ -189,7 +189,7 @@ test('Suite 1: UMD exports, browser VM isolation, and contract constants', async
     assert.throws(() => setBaselineData({ aisleOrder: ['Produce'], goalPresets: {}, nutritionDb: BASELINE_SCHEMA.nutritionDb }), TypeError);
     assert.throws(() => setBaselineData({ aisleOrder: ['Produce'], goalPresets: BASELINE_SCHEMA.goalPresets, nutritionDb: {} }), TypeError);
 
-    // Reject oil ingredients cleanly in an isolated VM context
+    // Accept cooking oil ingredients cleanly in an isolated VM context
     const code = fs.readFileSync(ENGINE_PATH, 'utf8');
     const ctx = vm.createContext({
       Object, Array, Math, Number, String, Boolean, RegExp, TypeError, Error
@@ -211,8 +211,8 @@ test('Suite 1: UMD exports, browser VM isolation, and contract constants', async
       price: { cadPer100g: 1.5, regularCadPer100g: 1.5, historicalLowCadPer100g: 1.0 }
     };
     ctx.MacroEngine.setBaselineData(schemaWithOil);
-    assert.equal(Object.prototype.hasOwnProperty.call(ctx.MacroEngine.DEFAULT_NUTRITION_DB, 'olive_oil'), false);
-    assert.equal(Object.keys(ctx.MacroEngine.DEFAULT_NUTRITION_DB).length, 25);
+    assert.equal(Object.prototype.hasOwnProperty.call(ctx.MacroEngine.DEFAULT_NUTRITION_DB, 'olive_oil'), true);
+    assert.equal(Object.keys(ctx.MacroEngine.DEFAULT_NUTRITION_DB).length, 26);
 
     // Reject prototype-pollution keys and empty/non-string entries in aisleOrder
     for (const badAisle of ['__proto__', 'constructor', 'toString', 'valueOf', '', '   ', 123]) {
@@ -244,7 +244,7 @@ test('Suite 1: UMD exports, browser VM isolation, and contract constants', async
     }));
     const planWithAisles = ctx.MacroEngine.solveDailyPortions(dataWithAisles, { preset: 'cut' });
     const scaledWithAisles = ctx.MacroEngine.scaleToHorizon(planWithAisles, dataWithAisles, { days: 7 });
-    assert.equal(planWithAisles.zeroAddedOil, true);
+    assert.equal(planWithAisles.zeroAddedOil, false);
     assert.equal(scaledWithAisles.days, 7);
     assert.deepEqual(
       Array.from(scaledWithAisles.groceryListByAisle.map((g) => g.aisle)),
@@ -259,7 +259,7 @@ test('Suite 1: UMD exports, browser VM isolation, and contract constants', async
     }));
     const planWithoutAisles = ctx.MacroEngine.solveDailyPortions(dataWithoutAisles, { preset: 'cut' });
     const scaledWithoutAisles = ctx.MacroEngine.scaleToHorizon(planWithoutAisles, dataWithoutAisles, { days: 7 });
-    assert.equal(planWithoutAisles.zeroAddedOil, true);
+    assert.equal(planWithoutAisles.zeroAddedOil, false);
     assert.equal(scaledWithoutAisles.days, 7);
     assert.equal(scaledWithoutAisles.summary.totalCostCad, scaledWithAisles.summary.totalCostCad);
     assert.ok(scaledWithoutAisles.groceryListByAisle.length >= 4);
@@ -284,8 +284,8 @@ test('Suite 2: All 27 preset x lunchSwap x dinnerSwap combinations satisfy macro
         // Non-mutating options
         assert.equal(JSON.stringify(opts), optsSnapshot);
 
-        // Purity & fat ceiling
-        assert.equal(plan.zeroAddedOil, true, `${preset}/${lunchSwap}/${dinnerSwap}`);
+        // Fat ceiling & zeroAddedOil flag
+        assert.equal(plan.zeroAddedOil, false, `${preset}/${lunchSwap}/${dinnerSwap}`);
         assert.equal(plan.fatCeilingExceeded, false, `${preset}/${lunchSwap}/${dinnerSwap} exceeded fat ceiling (${plan.totals.fat} > ${plan.targets.fat})`);
         assert.ok(plan.totals.fat <= plan.targets.fat, `${preset}/${lunchSwap}/${dinnerSwap}: fat ${plan.totals.fat} > ${plan.targets.fat}`);
 
@@ -363,7 +363,7 @@ test('Suite 3: Custom slider targets, fatCeiling alias, and fat-ceiling boundary
       });
       assert.equal(plan.fatCeilingExceeded, false, `Expected fatCeilingExceeded=false at ${fatLimit}g`);
       assert.ok(plan.totals.fat <= fatLimit, `Expected ${plan.totals.fat} <= ${fatLimit}`);
-      assert.equal(plan.zeroAddedOil, true);
+      assert.equal(plan.zeroAddedOil, false);
     }
   });
 
@@ -414,22 +414,17 @@ test('Suite 3: Custom slider targets, fatCeiling alias, and fat-ceiling boundary
 });
 
 // ============================================================================
-// Suite 4: Zero-Oil Sanitization & Fallback/Override Resilience
+// Suite 4: Cooking Oils / Condiments Support & Flipp Override Resilience
 // ============================================================================
-test('Suite 4: Zero-added-oil enforcement and Gemini/Flipp override resilience', async (t) => {
-  await t.test('DEFAULT_NUTRITION_DB contains zero added oils/butters/sprays', () => {
-    for (const [id, entry] of Object.entries(DEFAULT_NUTRITION_DB)) {
-      assert.doesNotMatch(id, /\b(oil|butter|lard|ghee|margarine|shortening|pam|spray)\b/i);
-      assert.ok(entry.name.length > 0);
-    }
-    // Specifically verify diced_tomatoes ("Canned Diced Tomatoes (no oil)") is preserved
+test('Suite 4: Cooking oils permitted when within fat ceiling, and Flipp override resilience', async (t) => {
+  await t.test('DEFAULT_NUTRITION_DB loads all 25 baseline ingredients cleanly', () => {
+    assert.equal(Object.keys(DEFAULT_NUTRITION_DB).length, 25);
     const plan = solveDailyPortions(null, { preset: 'cut' });
     assert.ok(plan.ingredientGrams.diced_tomatoes > 0);
   });
 
-  await t.test('Oil injections in data.nutritionDb, mealTemplates, and userProfile are stripped and sanitized', () => {
-    const poisonedData = {
-      userProfile: { zeroAddedOil: false },
+  await t.test('Cooking oils in custom nutritionDb, mealTemplates, and scaleToHorizon are allowed and fat-trimmed if needed', () => {
+    const oilCustomData = {
       nutritionDb: {
         olive_oil: {
           name: 'Extra Virgin Olive Oil',
@@ -444,11 +439,6 @@ test('Suite 4: Zero-added-oil enforcement and Gemini/Flipp override resilience',
           name: 'Salted Butter',
           aisle: 'Dairy/Eggs',
           per100g: { calories: 717, protein: 0.9, fat: 81, carbs: 0.1 }
-        },
-        cooking_spray: {
-          name: 'Pam Cooking Spray',
-          aisle: 'Pantry/Canned',
-          per100g: { calories: 800, protein: 0, fat: 90, carbs: 0 }
         }
       },
       mealTemplates: {
@@ -456,39 +446,38 @@ test('Suite 4: Zero-added-oil enforcement and Gemini/Flipp override resilience',
           {
             id: 'lunch',
             title: 'Gemini Spiced Chicken Bowl',
-            cookingMethod: 'Pan sear in 1 tbsp olive oil and butter',
-            seasoningTwist: 'Sumac & garlic (0g oil, no butter)',
-            baseIngredients: ['ground_chicken', 'olive_oil', 'butter', 'rice_dry']
+            cookingMethod: 'Pan sear in 1 tbsp olive oil',
+            seasoningTwist: 'Sumac & garlic',
+            ingredients: [
+              { id: 'ground_chicken', grams: 200 },
+              { id: 'olive_oil', grams: 10 },
+              { id: 'rice_dry', grams: 100 }
+            ]
           }
         ]
       }
     };
 
-    const plan = solveDailyPortions(poisonedData, { preset: 'cut', lunchSwap: 'ground_chicken' });
-    assert.equal(plan.zeroAddedOil, true);
-    assert.equal(plan.ingredientGrams.olive_oil, undefined);
-    assert.equal(plan.ingredientGrams.butter, undefined);
-    assert.equal(plan.ingredientGrams.cooking_spray, undefined);
+    const plan = solveDailyPortions(oilCustomData, { preset: 'cut' });
+    assert.equal(plan.zeroAddedOil, false);
+    assert.ok(plan.ingredientGrams.olive_oil > 0);
 
     const lunch = plan.meals.find((m) => m.id === 'lunch');
     assert.ok(lunch.title.includes('Gemini Spiced Chicken Bowl'));
-    assert.doesNotMatch(lunch.cookingMethod, /olive oil|butter/i);
-    // Safe zero-oil negation phrasing is preserved
-    assert.equal(lunch.seasoningTwist, 'Sumac & garlic (0g oil, no butter)');
+    assert.match(lunch.cookingMethod, /olive oil/i);
 
-    // Also verify scaleToHorizon strips oil even if injected into a synthetic dailyPlan
     const syntheticPlan = {
       ingredientGrams: {
         ground_chicken: 200,
-        olive_oil: 30,
+        olive_oil: 10,
         butter: 15,
         diced_tomatoes: 200
       }
     };
-    const scaled = scaleToHorizon(syntheticPlan, poisonedData, { days: 7 });
+    const scaled = scaleToHorizon(syntheticPlan, oilCustomData, { days: 7 });
     const allGroceryIds = scaled.groceryListByAisle.flatMap((g) => g.items.map((i) => i.id));
-    assert.equal(allGroceryIds.includes('olive_oil'), false);
-    assert.equal(allGroceryIds.includes('butter'), false);
+    assert.equal(allGroceryIds.includes('olive_oil'), true);
+    assert.equal(allGroceryIds.includes('butter'), true);
     assert.equal(allGroceryIds.includes('diced_tomatoes'), true);
   });
 
@@ -696,39 +685,34 @@ test('Suite 6: Aisle order, haveAtHome/frozenMealsOnHand deductions, 0% tax CAD 
 // ============================================================================
 // Suite 7: Adversarial Regression Suite (Iteration 2 Fixes)
 // ============================================================================
-test('Suite 7: Regression tests for underscored oils, poisoned core DB keys, prototype-key lookups, and empty-string prices', async (t) => {
-  await t.test('Underscored oils, niche fats, and mixed 0g-oil+olive_oil strings are sanitized while zero added cooking oil is preserved', () => {
-    const poisoned = {
+test('Suite 7: Regression tests for cooking oil instructions preserved, core DB overrides, prototype-key lookups, and empty-string prices', async (t) => {
+  await t.test('Custom meal cooking methods & seasoning twists mentioning oils/fats are preserved directly', () => {
+    const oilStyledData = {
       proteinSwaps: {
         lunch: [
-          { id: 'ground_chicken', label: 'Chicken in canola_oil', style: 'Seared with cooking_spray' }
+          { id: 'ground_chicken', label: 'Chicken in canola oil', style: 'Seared Bowl' }
         ],
         dinner: [
-          { id: 'pork_loin_lean', label: 'Pork with EVOO', style: 'Braised in duck fat' }
+          { id: 'pork_loin_lean', label: 'Pork with EVOO', style: 'Braised Bowl' }
         ]
       },
       mealTemplates: {
         meals: [
           {
             id: 'breakfast',
-            cookingMethod: 'Dry sear with 0g oil and 1 tbsp olive_oil',
-            seasoningTwist: 'Roasted with zero added cooking oil & herbs'
+            cookingMethod: 'Pan sear with 1 tsp olive oil',
+            seasoningTwist: 'Roasted with fresh herbs'
           },
           {
             id: 'lunch',
-            cookingMethod: 'Cook meat in sesame_oil',
-            seasoningTwist: 'Basted with tallow and schmaltz'
-          },
-          {
-            id: 'dinner',
-            cookingMethod: 'Braise with no added cooking oil in broth',
-            seasoningTwist: 'Simmered without cooking oil, ginger & garlic'
+            cookingMethod: 'Finish bowl with toasted sesame oil',
+            seasoningTwist: 'Scallions and ginger'
           }
         ]
       }
     };
 
-    const plan = solveDailyPortions(poisoned, {
+    const plan = solveDailyPortions(oilStyledData, {
       preset: 'cut',
       lunchSwap: 'ground_chicken',
       dinnerSwap: 'pork_loin_lean'
@@ -738,50 +722,37 @@ test('Suite 7: Regression tests for underscored oils, poisoned core DB keys, pro
     const lunch = plan.meals.find((m) => m.id === 'lunch');
     const dinner = plan.meals.find((m) => m.id === 'dinner');
 
-    assert.doesNotMatch(breakfast.cookingMethod, /olive_oil|olive oil/i);
-    assert.equal(breakfast.seasoningTwist, 'Roasted with zero added cooking oil & herbs');
-
-    assert.doesNotMatch(lunch.cookingMethod, /sesame_oil|sesame oil/i);
-    assert.doesNotMatch(lunch.seasoningTwist, /tallow|schmaltz/i);
-    assert.doesNotMatch(lunch.title, /canola_oil|canola oil/i);
-    assert.ok(lunch.title.includes('Extra-Lean Ground Chicken'));
-
-    assert.equal(dinner.cookingMethod, 'Braise with no added cooking oil in broth');
-    assert.equal(dinner.seasoningTwist, 'Simmered without cooking oil, ginger & garlic');
-    assert.doesNotMatch(dinner.title, /evoo/i);
-    assert.ok(dinner.title.includes('Lean Pork Loin'));
+    assert.match(breakfast.cookingMethod, /olive oil/i);
+    assert.match(lunch.cookingMethod, /sesame oil/i);
+    assert.ok(lunch.title.includes('Chicken in canola oil'));
+    assert.ok(dinner.title.includes('Pork with EVOO'));
   });
 
-  await t.test('Poisoned core DEFAULT_NUTRITION_DB ingredient names fall back cleanly without crashing solver', () => {
-    const poisonedCoreData = {
+  await t.test('Custom nutritionDb item names solve cleanly without crashing solver', () => {
+    const customNameData = {
       nutritionDb: {
-        ground_chicken: { name: 'Ground Chicken cooked in olive_oil' },
-        pork_loin_lean: { name: 'Pork Loin in Butter' },
-        rice_dry: { name: 'Jasmine Rice with sesame_oil' },
-        potatoes_raw: { name: 'Potatoes roasted in duck fat' },
-        egg_whites: { name: 'Egg Whites cooked with cooking_spray' },
-        skyr_0: { name: 'Skyr with EVOO' },
-        whey_isolate: { name: 'Whey with butter' }
+        ground_chicken: { name: 'Ground Chicken cooked in olive oil' },
+        pork_loin_lean: { name: 'Pork Loin in Butter' }
       }
     };
 
-    const plan = solveDailyPortions(poisonedCoreData, {
+    const plan = solveDailyPortions(customNameData, {
       preset: 'cut',
       lunchSwap: 'ground_chicken',
       dinnerSwap: 'pork_loin_lean'
     });
 
-    assert.equal(plan.zeroAddedOil, true);
+    assert.equal(plan.zeroAddedOil, false);
     assert.ok(plan.ingredientGrams.ground_chicken >= 50);
     assert.ok(plan.ingredientGrams.pork_loin_lean >= 50);
 
     const allIngs = plan.meals.flatMap((m) => m.ingredients);
     const porkIng = allIngs.find((i) => i.id === 'pork_loin_lean');
     const chickenIng = allIngs.find((i) => i.id === 'ground_chicken');
-    assert.equal(porkIng.name, DEFAULT_NUTRITION_DB.pork_loin_lean.name);
-    assert.equal(chickenIng.name, DEFAULT_NUTRITION_DB.ground_chicken.name);
+    assert.equal(porkIng.name, 'Pork Loin in Butter');
+    assert.equal(chickenIng.name, 'Ground Chicken cooked in olive oil');
 
-    const scaled = scaleToHorizon(plan, poisonedCoreData, { days: 7 });
+    const scaled = scaleToHorizon(plan, customNameData, { days: 7 });
     assert.ok(scaled.summary.totalCostCad > 0);
   });
 
@@ -814,7 +785,7 @@ test('Suite 7: Regression tests for underscored oils, poisoned core DB keys, pro
       assert.equal(plan.meals[2].activeSwap, 'pork_loin_lean');
       assert.equal(plan.meals[1].title.includes('undefined'), false);
       assert.equal(plan.meals[2].title.includes('undefined'), false);
-      assert.equal(plan.zeroAddedOil, true);
+      assert.equal(plan.zeroAddedOil, false);
       assert.equal(({}).polluted, undefined);
 
       const scaled = scaleToHorizon(plan, maliciousData, {
@@ -997,7 +968,7 @@ test('Suite 9: Per-slot macro solver weighting (options.slotSplits) invariants, 
   }
 
   function assertPlanInvariants(plan, label, { proteinTol = 8, carbTol = 10, checkTargets = true } = {}) {
-    assert.equal(plan.zeroAddedOil, true, `${label}: zeroAddedOil`);
+    assert.equal(plan.zeroAddedOil, false, `${label}: zeroAddedOil`);
     assert.equal(plan.fatCeilingExceeded, false, `${label}: fatCeilingExceeded (${plan.totals.fat} > ${plan.targets.fat})`);
     assert.ok(plan.totals.fat <= plan.targets.fat, `${label}: fat ${plan.totals.fat} > ${plan.targets.fat}`);
     assertNoNegativeZero(plan, label);
@@ -1289,7 +1260,7 @@ test('Suite 9: Per-slot macro solver weighting (options.slotSplits) invariants, 
     });
     assertPlanInvariants(customPlan, 'custom_templates', { checkTargets: false });
     assert.ok(mealById(customPlan, 'lunch').ingredients.some((i) => i.id === 'chicken_breast'));
-    assert.doesNotMatch(mealById(customPlan, 'dinner').cookingMethod, /olive oil/i);
+    assert.equal(mealById(customPlan, 'dinner').cookingMethod, 'Saute in olive oil');
 
     // node:vm browser isolation parity
     const code = fs.readFileSync(ENGINE_PATH, 'utf8');

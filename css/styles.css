@@ -892,10 +892,35 @@ input[type="number"] {
   white-space: nowrap !important;
 }
 
-/* Groceries 2-Subtab Switcher & My Stock Scanner Dialog */
+/* Groceries 3-Subtab Switcher, Spices Fieldsets & My Stock Scanner Dialog */
 .subtab-bar {
   padding-block: 0.25rem 0.5rem;
   border-block-end: 1px solid var(--border);
+}
+
+.subtab-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.subtab-grid-3 .pill-btn {
+  padding: 0.45rem 0.25rem;
+  font-size: 0.72rem;
+  line-height: 1.15;
+  min-inline-size: 0;
+}
+
+.staple-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.chip-toggle {
+  min-block-size: 38px;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem;
 }
 
 .stock-item-card {

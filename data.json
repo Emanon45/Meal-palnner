@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "generatedAt": "2026-11-22T08:27:13Z",
+  "generatedAt": "2026-11-22T09:53:26Z",
   "source": "fallback+flipp",
   "location": {
     "postalCodeDisplay": "H1W",
@@ -29,10 +29,10 @@
     }
   },
   "userProfile": {
-    "description": "High-Protein Batch Prep • Zero Added Oil",
+    "description": "High-Protein Batch Prep",
     "neighborhood": "Canada",
     "postalCode": "H1W",
-    "zeroAddedOil": true
+    "zeroAddedOil": false
   },
   "goalPresets": {
     "cut": {
@@ -744,7 +744,7 @@
         "id": "breakfast",
         "slot": "Breakfast",
         "title": "Eggs & Crispy Grelot Potatoes",
-        "cookingMethod": "Non-stick dry skillet scramble with splash of water/broth (0g oil) + air-fried crispy potatoes + berries",
+        "cookingMethod": "Non-stick skillet scramble + air-fried crispy potatoes + berries",
         "seasoningTwist": "Fresh chives, parsley, crushed red pepper, and black pepper",
         "swappable": false,
         "baseIngredients": [
@@ -760,7 +760,7 @@
         "id": "lunch",
         "slot": "Lunch",
         "title": "Seared Protein & Jasmine Rice Bowl",
-        "cookingMethod": "Dry-seared in natural juices or air-fried (0g oil) over steamed rice with crunchy slaw",
+        "cookingMethod": "Pan-seared or air-fried over steamed rice with crunchy slaw",
         "seasoningTwist": "Lebanese 7-spice, lemon zest, dried mint, and roasted garlic powder",
         "swappable": true,
         "baseIngredients": [
@@ -779,7 +779,7 @@
         "id": "dinner",
         "slot": "Dinner",
         "title": "Braised Protein & White Beans",
-        "cookingMethod": "Trimmed meat braised slowly in diced tomatoes, ginger, garlic, onion, and broth (0g oil), topped with 0% skyr dollop",
+        "cookingMethod": "Trimmed meat braised slowly in diced tomatoes, ginger, garlic, onion, and broth, topped with 0% skyr dollop",
         "seasoningTwist": "Malagasy ginger-scallion base, crushed tomatoes, bay leaf, and white pepper",
         "swappable": true,
         "baseIngredients": [
@@ -817,7 +817,7 @@
       "durationMinutes": 40,
       "timerSeconds": 2400,
       "parallelNote": "Start rice cooker first; simmer pork with bay leaf, grated ginger, garlic, diced tomatoes, and white beans.",
-      "zeroOilNote": "Sear meat in its own natural moisture and deglaze with tomato juices and broth (0g oil)."
+      "zeroOilNote": ""
     },
     {
       "id": "step_2",
@@ -828,18 +828,18 @@
       "durationMinutes": 22,
       "timerSeconds": 1320,
       "parallelNote": "Air-fry seasoned grelot potatoes at 200C in a single layer until golden and crisp.",
-      "zeroOilNote": "Mist lightly with water or broth before seasoning so spices adhere with zero added cooking oil."
+      "zeroOilNote": ""
     },
     {
       "id": "step_3",
       "order": 3,
-      "title": "Dry-Sear Lunch Protein (Ground Chicken or Tuna Patties)",
+      "title": "Sear Lunch Protein (Ground Chicken or Tuna Patties)",
       "station": "Non-Stick Skillet",
       "startMinute": 10,
       "durationMinutes": 12,
       "timerSeconds": 720,
       "parallelNote": "Dry-sear lunch protein with Lebanese 7-spice and a splash of lemon-infused broth.",
-      "zeroOilNote": "Cook in natural meat juices with a 2 tbsp splash of water or low-sodium broth (0g oil)."
+      "zeroOilNote": ""
     },
     {
       "id": "step_4",
@@ -850,7 +850,7 @@
       "durationMinutes": 15,
       "timerSeconds": 900,
       "parallelNote": "Julienne carrots, shred cabbage finely, and toss fresh tomato-onion lasary with lime juice.",
-      "zeroOilNote": "Dress slaw with lemon or lime juice, salt, and scallion with zero added oil."
+      "zeroOilNote": ""
     },
     {
       "id": "step_5",
@@ -861,7 +861,7 @@
       "durationMinutes": 15,
       "timerSeconds": 900,
       "parallelNote": "Cool hot meals briefly before sealing Days 1-4 fridge tubs and Day 5+ freezer packs.",
-      "zeroOilNote": "Store broth-rich braises cleanly with zero added fats for clean reheating."
+      "zeroOilNote": ""
     }
   ],
   "weeklyFlyerCatalog": {

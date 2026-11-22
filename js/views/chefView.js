@@ -18,6 +18,8 @@ import {
   addAdjustScannedItem,
   removeAdjustScannedItem,
   clearPendingAdjustments,
+  inferStockCategory,
+  removeLikedMeal,
   formatCad,
   formatSyncTime,
   saveState,
@@ -39,12 +41,15 @@ function notifyPlanUpdated() {
   }
 }
 
-function countMaxiSuperCFlyerDeals(appData) {
+function countMaxiSuperCFlyerDeals(appData, storeChoice) {
   const seen = Object.create(null);
   const catalog = (appData && appData.weeklyFlyerCatalog && typeof appData.weeklyFlyerCatalog === 'object')
     ? appData.weeklyFlyerCatalog
     : {};
-  ['Maxi', 'Super C'].forEach((store) => {
+  const stores = (storeChoice === 'Maxi' || storeChoice === 'Super C')
+    ? [storeChoice]
+    : ['Maxi', 'Super C'];
+  stores.forEach((store) => {
     const list = Array.isArray(catalog[store]) ? catalog[store] : [];
     list.forEach((d) => {
       if (d && d.name) {
@@ -56,29 +61,36 @@ function countMaxiSuperCFlyerDeals(appData) {
   const winStore = (appData && (appData.winningStore === 'Maxi' || appData.winningStore === 'Super C'))
     ? appData.winningStore
     : 'Super C';
-  Object.keys(db).forEach((k) => {
-    if (k === 'ground_chicken' || k.indexOf('stock_') === 0) return;
-    const it = db[k];
-    if (it && it.price && it.price.onFlyer) {
-      const label = String(it.price.flyerItemName || it.name || '');
-      if (label) {
-        seen[winStore + '|' + label.toLowerCase()] = true;
+  if (stores.indexOf(winStore) !== -1) {
+    Object.keys(db).forEach((k) => {
+      if (k === 'ground_chicken' || k.indexOf('stock_') === 0) return;
+      const it = db[k];
+      if (it && it.price && it.price.onFlyer) {
+        const label = String(it.price.flyerItemName || it.name || '');
+        if (label) {
+          seen[winStore + '|' + label.toLowerCase()] = true;
+        }
       }
-    }
-  });
+    });
+  }
   return Object.keys(seen).length;
 }
 
-function formatStockSummaryLine(appState) {
+function summarizeHomeInventory(appState) {
   const list = Array.isArray(appState.pantryStock)
     ? appState.pantryStock.filter((it) => it && Number(it.gramsOnHand) > 0)
     : [];
-  if (list.length === 0) {
-    return 'No stock at home yet — scan barcodes or add ingredients to empty them first.';
-  }
-  const preview = list.slice(0, 3).map((it) => it.name + ' (' + it.gramsOnHand + 'g)').join(', ');
-  const extra = list.length > 3 ? (' + ' + (list.length - 3) + ' more') : '';
-  return 'Home Stock Included (' + list.length + '): ' + preview + extra;
+  const perishables = [];
+  const nonPerishables = [];
+  list.forEach((it) => {
+    const cat = (it.category === 'perishable' || it.category === 'non_perishable')
+      ? it.category
+      : inferStockCategory(it.aisle);
+    if (cat === 'perishable') perishables.push(it);
+    else nonPerishables.push(it);
+  });
+  const staples = Array.isArray(appState.pantryStaples) ? appState.pantryStaples : [];
+  return { perishables, nonPerishables, staples };
 }
 
 function resolveOrigSwapId(itemId, grocerySwaps) {
@@ -173,8 +185,21 @@ function renderLivePreviewInto(container, rawStr) {
 
   const headerRow = el('div', 'flex-wrap-row justify-between');
   headerRow.appendChild(el('span', 'text-xs font-bold text-emerald-300', 'Preview: ' + res.weeklyTheme));
-  headerRow.appendChild(el('span', 'badge radar-flyer', 'Est. ' + formatCad(res.estimatedCostCad) + ' CAD'));
+  const topBadges = el('div', 'flex-wrap-row');
+  if (res.chosenStore) {
+    topBadges.appendChild(el('span', 'badge radar-historic', res.chosenStore + ' Only'));
+  }
+  topBadges.appendChild(el('span', 'badge radar-flyer', 'Est. ' + formatCad(res.estimatedCostCad) + ' CAD'));
+  headerRow.appendChild(topBadges);
   frag.appendChild(headerRow);
+
+  if (res.mixedStoresWarning) {
+    frag.appendChild(el(
+      'p',
+      'text-xs text-red-400 font-semibold wrap-anywhere',
+      'Warning: This JSON mixes Maxi and Super C items. Ask Gemini to stick to 1 store only.'
+    ));
+  }
 
   const macroLine = el(
     'p',
@@ -196,7 +221,12 @@ function renderLivePreviewInto(container, rawStr) {
   });
   frag.appendChild(mealUl);
 
-  if (res.stockTotalCount > 0) {
+  if (res.perishableTotalCount > 0) {
+    const perishSummary = res.perishableUsedNames && res.perishableUsedNames.length > 0
+      ? ('Uses ' + res.perishableUsedNames.length + ' / ' + res.perishableTotalCount + ' perishables first: ' + res.perishableUsedNames.join(', '))
+      : ('Uses 0 / ' + res.perishableTotalCount + ' perishables at home');
+    frag.appendChild(el('p', 'text-xs text-emerald-300 wrap-anywhere', perishSummary));
+  } else if (res.stockTotalCount > 0) {
     const stockSummary = res.stockUsedNames.length > 0
       ? ('Uses ' + res.stockUsedNames.length + ' / ' + res.stockTotalCount + ' home stock items: ' + res.stockUsedNames.join(', '))
       : ('Uses 0 / ' + res.stockTotalCount + ' home stock items');
@@ -273,42 +303,98 @@ export function renderChefTab(callbacks) {
 
   if (viewMode === 'new') {
     const isFullStore = appState.geminiPromptMode === 'full_store' || appState.geminiPromptMode === 'browser_hunt';
-    const flyerDealsCount = countMaxiSuperCFlyerDeals(appData);
+    const curStoreChoice = (appState.chefStoreChoice === 'Maxi' || appState.chefStoreChoice === 'Super C')
+      ? appState.chefStoreChoice
+      : 'auto';
+    const flyerDealsCount = countMaxiSuperCFlyerDeals(appData, curStoreChoice);
 
-    // Card 1: Step 1 — Search Mode & Inputs
+    // Card 1: Step 1 — Search Mode, Single-Store Pick & Inputs
     const step1Card = el('div', 'card space-stack');
-    step1Card.appendChild(el('h2', 'text-base font-bold text-slate-100', 'Step 1: Choose Maxi & Super C Search'));
+    step1Card.appendChild(el('h2', 'text-base font-bold text-slate-100', 'Step 1: Choose 1 Store & Search Mode'));
+
+    const storeFs = el('fieldset', 'staple-fieldset space-y-1.5');
+    storeFs.appendChild(el('legend', 'text-xs font-bold text-slate-200', 'Shopping Store (1 Store Only)'));
+    const storeRow = el('div', 'subtab-grid-3');
+
+    const storeAutoBtn = el('button', 'pill-btn', 'Auto: 1 Cheapest');
+    storeAutoBtn.type = 'button';
+    storeAutoBtn.id = 'chef-store-auto-btn';
+    storeAutoBtn.setAttribute('aria-pressed', curStoreChoice === 'auto' ? 'true' : 'false');
+
+    const storeMaxiBtn = el('button', 'pill-btn', 'Maxi Only');
+    storeMaxiBtn.type = 'button';
+    storeMaxiBtn.id = 'chef-store-maxi-btn';
+    storeMaxiBtn.setAttribute('aria-pressed', curStoreChoice === 'Maxi' ? 'true' : 'false');
+
+    const storeSuperCBtn = el('button', 'pill-btn', 'Super C Only');
+    storeSuperCBtn.type = 'button';
+    storeSuperCBtn.id = 'chef-store-superc-btn';
+    storeSuperCBtn.setAttribute('aria-pressed', curStoreChoice === 'Super C' ? 'true' : 'false');
+
+    storeRow.appendChild(storeAutoBtn);
+    storeRow.appendChild(storeMaxiBtn);
+    storeRow.appendChild(storeSuperCBtn);
+    storeFs.appendChild(storeRow);
+    step1Card.appendChild(storeFs);
 
     const searchRow = el('div', 'flex-wrap-row');
-    const flyerDealsBtn = el('button', 'pill-btn text-xs flex-1', 'Flyer Deals (Maxi & Super C)');
+    const flyerDealsBtn = el('button', 'pill-btn text-xs flex-1', 'Flyer Deals');
     flyerDealsBtn.type = 'button';
     flyerDealsBtn.id = 'chef-mode-flyer-btn';
     flyerDealsBtn.setAttribute('aria-pressed', !isFullStore ? 'true' : 'false');
 
-    const fullStoreBtn = el('button', 'pill-btn text-xs flex-1', 'Full-Store Web (Maxi & Super C)');
+    const fullStoreBtn = el('button', 'pill-btn text-xs flex-1', 'Full-Store Web Search');
     fullStoreBtn.type = 'button';
     fullStoreBtn.id = 'chef-mode-full-btn';
     fullStoreBtn.setAttribute('aria-pressed', isFullStore ? 'true' : 'false');
 
-    const modeHintEl = el(
-      'p',
-      'text-xs text-slate-300 wrap-anywhere',
-      isFullStore
-        ? 'Uses Gemini web search to compare regular shelf value packs + weekly flyers on maxi.ca and superc.ca only.'
-        : 'Fast blank-slate generator — uses this week\'s Maxi & Super C flyer specials and works in any Gemini chat.'
-    );
+    const modeHintEl = el('p', 'text-xs text-slate-300 wrap-anywhere', '');
+    const storeChipEl = el('span', 'badge radar-flyer', '');
+    storeChipEl.id = 'chef-store-chip';
+    const dealsChipEl = el('span', 'badge radar-historic', '');
+    dealsChipEl.id = 'chef-deals-chip';
 
     function syncNewModeUI() {
       const full = appState.geminiPromptMode === 'full_store';
+      const stChoice = (appState.chefStoreChoice === 'Maxi' || appState.chefStoreChoice === 'Super C')
+        ? appState.chefStoreChoice
+        : 'auto';
+      storeAutoBtn.setAttribute('aria-pressed', stChoice === 'auto' ? 'true' : 'false');
+      storeMaxiBtn.setAttribute('aria-pressed', stChoice === 'Maxi' ? 'true' : 'false');
+      storeSuperCBtn.setAttribute('aria-pressed', stChoice === 'Super C' ? 'true' : 'false');
       flyerDealsBtn.setAttribute('aria-pressed', !full ? 'true' : 'false');
       fullStoreBtn.setAttribute('aria-pressed', full ? 'true' : 'false');
-      modeHintEl.textContent = full
-        ? 'Uses Gemini web search to compare regular shelf value packs + weekly flyers on maxi.ca and superc.ca only.'
-        : 'Fast blank-slate generator — uses this week\'s Maxi & Super C flyer specials and works in any Gemini chat.';
+
+      const stText = stChoice === 'auto'
+        ? 'Gemini compares Maxi & Super C and picks whichever single store is cheapest.'
+        : ('Locked strictly to ' + stChoice + ' only.');
+      modeHintEl.textContent = (full
+        ? 'Uses Gemini web search for regular value packs + flyers. '
+        : 'Fast weekly planner using this week\'s flyer specials. ') + stText;
+
+      storeChipEl.textContent = (stChoice === 'auto' ? '1 Cheapest (Maxi / Super C)' : (stChoice + ' Only')) + ' · ' + appState.postalCode;
+      dealsChipEl.textContent = countMaxiSuperCFlyerDeals(appData, stChoice) + ' Flyer Deals';
+
       if (promptPreviewPre) {
         promptPreviewPre.textContent = buildGeminiMealPrompt();
       }
     }
+
+    storeAutoBtn.addEventListener('click', () => {
+      appState.chefStoreChoice = 'auto';
+      saveState();
+      syncNewModeUI();
+    });
+    storeMaxiBtn.addEventListener('click', () => {
+      appState.chefStoreChoice = 'Maxi';
+      saveState();
+      syncNewModeUI();
+    });
+    storeSuperCBtn.addEventListener('click', () => {
+      appState.chefStoreChoice = 'Super C';
+      saveState();
+      syncNewModeUI();
+    });
 
     flyerDealsBtn.addEventListener('click', () => {
       appState.geminiPromptMode = 'flyer_deals';
@@ -329,38 +415,86 @@ export function renderChefTab(callbacks) {
     const chipsRow = el('div', 'flex-wrap-row');
     chipsRow.appendChild(el('span', 'badge', appState.targets.calories + ' kcal · ' + appState.targets.protein + 'g P'));
     chipsRow.appendChild(el('span', 'badge', appState.horizonDays + ' Days'));
-    chipsRow.appendChild(el('span', 'badge radar-flyer', 'Maxi & Super C · ' + appState.postalCode));
-    chipsRow.appendChild(el('span', 'badge radar-historic', flyerDealsCount + ' Flyer Deals'));
+    chipsRow.appendChild(storeChipEl);
+    chipsRow.appendChild(dealsChipEl);
     step1Card.appendChild(chipsRow);
+    syncNewModeUI();
 
-    // My Stock Summary subcard
+    // Perishables, Optional Pantry & Spices Summary subcard
+    const inv = summarizeHomeInventory(appState);
     const stockBox = el('div', 'subcard space-y-2');
-    stockBox.appendChild(el('p', 'text-xs text-slate-200 wrap-anywhere', formatStockSummaryLine(appState)));
+    const perishPreview = inv.perishables.length > 0
+      ? (' (' + inv.perishables.slice(0, 2).map((it) => it.name).join(', ') + (inv.perishables.length > 2 ? ' +' + (inv.perishables.length - 2) : '') + ')')
+      : '';
+    stockBox.appendChild(el(
+      'p',
+      'text-xs text-slate-200 wrap-anywhere',
+      'Perishables (Use First): ' + inv.perishables.length + perishPreview +
+      '  |  Pantry Food (Optional): ' + inv.nonPerishables.length +
+      '  |  Spices & Condiments: ' + inv.staples.length
+    ));
     const stockBtnRow = el('div', 'flex-wrap-row');
-    const scanStockBtn = el('button', 'btn-secondary text-xs flex-1', 'Scan Stock Barcode');
+    const scanStockBtn = el('button', 'btn-secondary text-xs flex-1', 'Scan Barcode');
     scanStockBtn.type = 'button';
     scanStockBtn.id = 'chef-scan-stock-btn';
     scanStockBtn.addEventListener('click', () => {
       openStockModal({
         mode: 'scan',
+        defaultCategory: 'perishable',
         onSaved: () => notifyPlanUpdated()
       });
     });
 
-    const manageStockBtn = el('button', 'btn-secondary text-xs flex-1', 'Manage My Stock');
-    manageStockBtn.type = 'button';
-    manageStockBtn.id = 'chef-manage-stock-btn';
-    manageStockBtn.addEventListener('click', () => {
-      if (typeof activeCallbacks.onOpenStockSubtab === 'function') {
+    const managePerishBtn = el('button', 'btn-secondary text-xs flex-1', 'Perishables');
+    managePerishBtn.type = 'button';
+    managePerishBtn.id = 'chef-manage-stock-btn';
+    managePerishBtn.addEventListener('click', () => {
+      if (typeof activeCallbacks.onOpenPerishablesSubtab === 'function') {
+        activeCallbacks.onOpenPerishablesSubtab();
+      } else if (typeof activeCallbacks.onOpenStockSubtab === 'function') {
         activeCallbacks.onOpenStockSubtab();
       }
     });
+
+    const managePantryBtn = el('button', 'btn-secondary text-xs flex-1', 'Pantry & Spices');
+    managePantryBtn.type = 'button';
+    managePantryBtn.id = 'chef-manage-pantry-btn';
+    managePantryBtn.addEventListener('click', () => {
+      if (typeof activeCallbacks.onOpenPantrySubtab === 'function') {
+        activeCallbacks.onOpenPantrySubtab();
+      }
+    });
     stockBtnRow.appendChild(scanStockBtn);
-    stockBtnRow.appendChild(manageStockBtn);
+    stockBtnRow.appendChild(managePerishBtn);
+    stockBtnRow.appendChild(managePantryBtn);
     stockBox.appendChild(stockBtnRow);
     step1Card.appendChild(stockBox);
 
-    // Optional Weekly Note (NO "avoid repeating" checkbox)
+    // Saved Liked Meals subcard
+    const likedList = Array.isArray(appState.likedMeals) ? appState.likedMeals : [];
+    const likedBox = el('div', 'subcard space-y-1.5');
+    likedBox.id = 'chef-liked-meals-box';
+    if (likedList.length > 0) {
+      likedBox.appendChild(el('p', 'text-xs font-bold text-emerald-300', 'Liked Meals (' + likedList.length + ' sent to Gemini for reuse)'));
+      const likedChips = el('div', 'flex-wrap-row');
+      likedList.forEach((lm) => {
+        const lChip = el('button', 'pill-btn text-xs chip-toggle', '\uD83D\uDC4D ' + lm.slot + ': ' + lm.title + ' \u00D7');
+        lChip.type = 'button';
+        lChip.setAttribute('aria-pressed', 'true');
+        lChip.setAttribute('aria-label', 'Remove liked meal ' + lm.title);
+        lChip.addEventListener('click', () => {
+          removeLikedMeal(lm.key);
+          renderChefTab();
+        });
+        likedChips.appendChild(lChip);
+      });
+      likedBox.appendChild(likedChips);
+    } else {
+      likedBox.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Tip: Tap 👍 on any dish in Meals to save favorites Gemini can bring back.'));
+    }
+    step1Card.appendChild(likedBox);
+
+    // Optional Weekly Note
     const noteWrap = el('div', 'space-y-1');
     const noteLbl = el('label', 'block text-xs font-semibold text-slate-200', 'Optional Weekly Note (Cravings / Rules)');
     noteLbl.setAttribute('for', 'chef-note-input');
@@ -425,8 +559,8 @@ export function renderChefTab(callbacks) {
       const promptText = buildGeminiMealPrompt();
       if (promptPreviewPre) promptPreviewPre.textContent = promptText;
       const modeName = appState.geminiPromptMode === 'full_store'
-        ? 'Full-Store Maxi & Super C prompt'
-        : 'Maxi & Super C Flyer Deals prompt';
+        ? 'Full-Store 1-Shop prompt'
+        : 'Weekly Flyer 1-Shop prompt';
       copyTextWithFeedback(promptText, modeName, promptStatusEl, null);
     });
 
@@ -486,6 +620,7 @@ export function renderChefTab(callbacks) {
         swapNowBtn.addEventListener('click', () => {
           openStockModal({
             mode: 'swap',
+            defaultStore: effectiveData.winningStore === 'Maxi' ? 'Maxi' : 'Super C',
             swapTarget: { id: ing.origId, name: ing.name },
             onSaved: (payload) => {
               const saved = applyInStoreSwap(ing.origId, payload);
@@ -534,6 +669,7 @@ export function renderChefTab(callbacks) {
     scanNewBtn.addEventListener('click', () => {
       openStockModal({
         mode: 'adjust_scan',
+        defaultStore: effectiveData.winningStore === 'Maxi' ? 'Maxi' : 'Super C',
         onSaved: (payload) => {
           addAdjustScannedItem(payload);
           renderChefTab();
@@ -547,6 +683,7 @@ export function renderChefTab(callbacks) {
     addManualAdjBtn.addEventListener('click', () => {
       openStockModal({
         mode: 'adjust_scan',
+        defaultStore: effectiveData.winningStore === 'Maxi' ? 'Maxi' : 'Super C',
         onSaved: (payload) => {
           addAdjustScannedItem(payload);
           renderChefTab();

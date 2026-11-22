@@ -1,5 +1,6 @@
 import {
   FALLBACK_META,
+  DEFAULT_SPICE_CONDIMENT_GROUPS,
   uiStatus,
   getEngine,
   getAppState,
@@ -10,13 +11,20 @@ import {
   el,
   clampInt,
   formatCad,
+  inferStockCategory,
   saveState,
   announcePolite,
   recomputePlan,
   applyInStoreSwap,
   upsertPantryStockItem,
   updatePantryStockGrams,
-  removePantryStockItem
+  removePantryStockItem,
+  setPantryStockCategory,
+  togglePantryStaple,
+  addCustomPantryStaple,
+  removePantryStaple,
+  selectBasicPantryStaples,
+  clearPantryStaples
 } from '../state.js';
 import { createHealthWarningBadges } from '../healthWarnings.js';
 import { openStockModal } from './stockModal.js';
@@ -76,37 +84,263 @@ export function updateGrocerySummaryAndRow(summaryEl, rowEl, item) {
   }
 }
 
-function renderStockSubtab(frag, appState, appData) {
-  const stockList = Array.isArray(appState.pantryStock) ? appState.pantryStock : [];
+function getStockItemCategory(item) {
+  if (item && (item.category === 'perishable' || item.category === 'non_perishable')) {
+    return item.category;
+  }
+  return inferStockCategory(item && item.aisle);
+}
 
-  // Card 1: Scan / Add & Send to Gemini
+function buildQuickAddBuiltInCard({
+  cardTitle,
+  selectLabel,
+  selectId,
+  gramsId,
+  addBtnId,
+  dbSource,
+  builtInIds,
+  targetCategory
+}) {
+  if (builtInIds.length === 0) return null;
+  const quickCard = el('div', 'card space-y-2');
+  quickCard.appendChild(el('h3', 'text-sm font-bold text-slate-100', cardTitle));
+
+  const selectLbl = el('label', 'block text-xs font-semibold text-slate-200', selectLabel);
+  selectLbl.setAttribute('for', selectId);
+  const stapleSel = el('select', 'w-full text-sm');
+  stapleSel.id = selectId;
+  builtInIds.forEach((kid) => {
+    const entry = dbSource[kid];
+    const opt = document.createElement('option');
+    opt.value = kid;
+    opt.textContent = entry.name + ' (' + (entry.aisle || 'Pantry/Canned') + ')';
+    stapleSel.appendChild(opt);
+  });
+  quickCard.appendChild(selectLbl);
+  quickCard.appendChild(stapleSel);
+
+  const qtyRow = el('div', 'flex-wrap-row');
+  const gramsLbl = el('label', 'text-xs font-semibold text-slate-200', 'Grams on Hand');
+  gramsLbl.setAttribute('for', gramsId);
+  const gramsInp = el('input', 'w-24 text-right');
+  gramsInp.id = gramsId;
+  gramsInp.type = 'number';
+  gramsInp.min = '1';
+  gramsInp.max = '50000';
+  gramsInp.step = '1';
+  const initialPkg = clampInt(dbSource[builtInIds[0]] && dbSource[builtInIds[0]].packageGrams, 1, 20000, 500);
+  gramsInp.value = String(initialPkg);
+
+  stapleSel.addEventListener('change', () => {
+    const picked = dbSource[stapleSel.value];
+    gramsInp.value = String(clampInt(picked && picked.packageGrams, 1, 20000, 500));
+  });
+
+  const addBuiltInBtn = el('button', 'btn-secondary flex-1', 'Add to Stock');
+  addBuiltInBtn.type = 'button';
+  addBuiltInBtn.id = addBtnId;
+  addBuiltInBtn.addEventListener('click', () => {
+    const pickedId = stapleSel.value;
+    const entry = dbSource[pickedId];
+    if (!entry) return;
+    const pkgG = clampInt(entry.packageGrams, 1, 20000, 500);
+    const gramsVal = clampInt(gramsInp.value, 1, 50000, pkgG);
+    const saved = upsertPantryStockItem({
+      id: pickedId,
+      name: entry.name,
+      brand: '',
+      aisle: entry.aisle || 'Pantry/Canned',
+      category: targetCategory,
+      gramsOnHand: gramsVal,
+      packageGrams: pkgG,
+      cookedYield: entry.cookedYield || 1.0,
+      per100g: entry.per100g || { calories: 0, protein: 0, fat: 0, carbs: 0 },
+      source: 'builtin'
+    });
+    if (saved) {
+      uiStatus.stockStatusText = 'Added ' + saved.name + ' (' + saved.gramsOnHand + 'g) to ' + (targetCategory === 'perishable' ? 'Perishables.' : 'Pantry.');
+      announcePolite(uiStatus.stockStatusText);
+      notifyStockChanged();
+    }
+  });
+
+  qtyRow.appendChild(gramsLbl);
+  qtyRow.appendChild(gramsInp);
+  qtyRow.appendChild(addBuiltInBtn);
+  quickCard.appendChild(qtyRow);
+  return quickCard;
+}
+
+function buildStockItemsListCard({
+  headingText,
+  ariaLabel,
+  emptyText,
+  items,
+  moveLabel,
+  targetMoveCategory
+}) {
+  const listCard = el('section', 'card space-stack');
+  listCard.setAttribute('aria-label', ariaLabel);
+  listCard.appendChild(el('h3', 'text-base font-bold text-emerald-300', headingText + ' (' + items.length + ')'));
+
+  if (items.length === 0) {
+    listCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', emptyText));
+    return listCard;
+  }
+
+  const ul = el('ul', 'space-y-3 list-none p-0 m-0');
+  items.forEach((item) => {
+    const li = el('li', 'subcard stock-item-card space-y-2');
+    li.setAttribute('data-stock-item', item.id);
+
+    const top = el('div', 'flex-wrap-row justify-between');
+    const titleText = item.brand ? (item.name + ' \u2014 ' + item.brand) : item.name;
+    top.appendChild(el('span', 'text-sm font-bold text-slate-100 wrap-anywhere', titleText));
+    const badgeWrap = el('div', 'flex-wrap-row');
+    badgeWrap.appendChild(el('span', 'badge radar-flyer', item.aisle || 'Pantry/Canned'));
+    if (item.barcode) {
+      badgeWrap.appendChild(el('span', 'badge radar-regular', 'UPC ' + item.barcode));
+    }
+    badgeWrap.appendChild(createHealthWarningBadges(item, el, { compact: false }));
+    top.appendChild(badgeWrap);
+    li.appendChild(top);
+
+    const per = item.per100g || { calories: 0, protein: 0, fat: 0, carbs: 0 };
+    const mult = (Number(item.gramsOnHand) || 0) / 100;
+    li.appendChild(el(
+      'div',
+      'text-xs text-slate-300 wrap-anywhere',
+      'Per 100g: ' + Math.round(per.calories || 0) + ' kcal \u00B7 ' + (per.protein || 0) + 'g P \u00B7 ' + (per.carbs || 0) + 'g C \u00B7 ' + (per.fat || 0) + 'g F' +
+      '  |  On Hand Total: ' + Math.round((per.calories || 0) * mult) + ' kcal \u00B7 ' + (Math.round((per.protein || 0) * mult * 10) / 10) + 'g P'
+    ));
+
+    const qtyEditRow = el('div', 'flex-wrap-row justify-between');
+    const gramsCtrl = el('div', 'flex-wrap-row');
+    const gLbl = el('label', 'text-xs font-semibold text-slate-200', 'Grams');
+    const gInpId = 'stock-grams-' + item.id;
+    gLbl.setAttribute('for', gInpId);
+
+    const dec50Btn = el('button', 'btn-secondary text-xs', '-50g');
+    dec50Btn.type = 'button';
+    dec50Btn.setAttribute('aria-label', 'Decrease ' + item.name + ' by 50 grams');
+
+    const gInp = el('input', 'w-24 text-right');
+    gInp.id = gInpId;
+    gInp.type = 'number';
+    gInp.min = '0';
+    gInp.max = '50000';
+    gInp.step = '1';
+    gInp.value = String(item.gramsOnHand);
+
+    const inc50Btn = el('button', 'btn-secondary text-xs', '+50g');
+    inc50Btn.type = 'button';
+    inc50Btn.setAttribute('aria-label', 'Increase ' + item.name + ' by 50 grams');
+
+    dec50Btn.addEventListener('click', () => {
+      const nextVal = Math.max(0, (Number(item.gramsOnHand) || 0) - 50);
+      updatePantryStockGrams(item.id, nextVal);
+      notifyStockChanged();
+    });
+    inc50Btn.addEventListener('click', () => {
+      const nextVal = Math.min(50000, (Number(item.gramsOnHand) || 0) + 50);
+      updatePantryStockGrams(item.id, nextVal);
+      notifyStockChanged();
+    });
+    gInp.addEventListener('change', () => {
+      const parsed = clampInt(gInp.value, 0, 50000, item.gramsOnHand);
+      updatePantryStockGrams(item.id, parsed);
+      notifyStockChanged();
+    });
+
+    gramsCtrl.appendChild(gLbl);
+    gramsCtrl.appendChild(dec50Btn);
+    gramsCtrl.appendChild(gInp);
+    gramsCtrl.appendChild(inc50Btn);
+    qtyEditRow.appendChild(gramsCtrl);
+
+    const actionCtrl = el('div', 'flex-wrap-row');
+    const moveBtn = el('button', 'btn-secondary text-xs', moveLabel);
+    moveBtn.type = 'button';
+    moveBtn.addEventListener('click', () => {
+      setPantryStockCategory(item.id, targetMoveCategory);
+      uiStatus.stockStatusText = 'Moved ' + item.name + ' to ' + (targetMoveCategory === 'perishable' ? 'Perishables.' : 'Pantry.');
+      announcePolite(uiStatus.stockStatusText);
+      notifyStockChanged();
+    });
+
+    const editBtn = el('button', 'btn-secondary text-xs', 'Edit Macros');
+    editBtn.type = 'button';
+    editBtn.addEventListener('click', () => {
+      openStockModal({ mode: 'edit', item: item, onSaved: notifyStockChanged });
+    });
+
+    const removeBtn = el('button', 'btn-secondary text-xs', 'Used Up');
+    removeBtn.type = 'button';
+    removeBtn.setAttribute('aria-label', 'Remove ' + item.name + ' from stock');
+    removeBtn.addEventListener('click', () => {
+      removePantryStockItem(item.id);
+      uiStatus.stockStatusText = 'Removed ' + item.name + ' from stock.';
+      announcePolite(uiStatus.stockStatusText);
+      notifyStockChanged();
+    });
+
+    actionCtrl.appendChild(moveBtn);
+    actionCtrl.appendChild(editBtn);
+    actionCtrl.appendChild(removeBtn);
+    qtyEditRow.appendChild(actionCtrl);
+
+    li.appendChild(qtyEditRow);
+    ul.appendChild(li);
+  });
+  listCard.appendChild(ul);
+  return listCard;
+}
+
+function getDbBuiltInIds(appData, targetCategory) {
+  const engine = getEngine();
+  const dbSource = (appData && appData.nutritionDb && Object.keys(appData.nutritionDb).length > 0)
+    ? appData.nutritionDb
+    : ((engine && engine.DEFAULT_NUTRITION_DB) || {});
+  const ids = Object.keys(dbSource)
+    .filter((kid) => {
+      if (kid === 'aromatics_zero' || kid.indexOf('stock_') === 0 || !dbSource[kid] || !dbSource[kid].name) return false;
+      return inferStockCategory(dbSource[kid].aisle) === targetCategory;
+    })
+    .sort((a, b) => {
+      const aisleCmp = String(dbSource[a].aisle || '').localeCompare(String(dbSource[b].aisle || ''), 'en');
+      if (aisleCmp !== 0) return aisleCmp;
+      return String(dbSource[a].name || '').localeCompare(String(dbSource[b].name || ''), 'en');
+    });
+  return { dbSource, ids };
+}
+
+function renderPerishablesSubtab(frag, perishableItems, appData) {
   const heroCard = el('div', 'card space-stack');
   const heroTop = el('div', 'flex-wrap-row justify-between');
-  heroTop.appendChild(el('h2', 'text-base font-bold text-emerald-300', 'My Stock at Home (Use First)'));
-  heroTop.appendChild(el('span', 'badge radar-flyer', stockList.length + (stockList.length === 1 ? ' item' : ' items')));
+  heroTop.appendChild(el('h2', 'text-base font-bold text-emerald-300', 'Perishables at Home (Use First)'));
+  heroTop.appendChild(el('span', 'badge radar-flyer', perishableItems.length + (perishableItems.length === 1 ? ' item' : ' items')));
   heroCard.appendChild(heroTop);
-  heroCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Scan barcodes or add ingredients already in your kitchen. Gemini uses these items first so you empty your stock before buying more.'));
+  heroCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Scan barcodes or add fridge/fresh food that needs to be used before it spoils. Gemini prioritizes these first in new recipes.'));
 
   const addRow = el('div', 'flex-wrap-row');
   const scanBtn = el('button', 'btn-primary flex-1', 'Scan Barcode');
   scanBtn.type = 'button';
   scanBtn.id = 'open-barcode-scanner-btn';
   scanBtn.addEventListener('click', () => {
-    openStockModal({ mode: 'scan', onSaved: notifyStockChanged });
+    openStockModal({ mode: 'scan', defaultCategory: 'perishable', onSaved: notifyStockChanged });
   });
 
   const manualBtn = el('button', 'btn-secondary flex-1', '+ Add Manually');
   manualBtn.type = 'button';
   manualBtn.id = 'open-manual-stock-btn';
   manualBtn.addEventListener('click', () => {
-    openStockModal({ mode: 'manual', onSaved: notifyStockChanged });
+    openStockModal({ mode: 'manual', defaultCategory: 'perishable', onSaved: notifyStockChanged });
   });
 
   addRow.appendChild(scanBtn);
   addRow.appendChild(manualBtn);
   heroCard.appendChild(addRow);
 
-  const geminiRow = el('div', 'flex-wrap-row pt-1');
   const openChefBtn = el('button', 'btn-primary w-full', 'Open AI Chef (Use My Stock)');
   openChefBtn.type = 'button';
   openChefBtn.id = 'stock-open-chef-btn';
@@ -117,8 +351,7 @@ function renderStockSubtab(frag, appState, appData) {
       activeCallbacks.onOpenSettingsJson();
     }
   });
-  geminiRow.appendChild(openChefBtn);
-  heroCard.appendChild(geminiRow);
+  heroCard.appendChild(openChefBtn);
 
   const promptStatus = el('p', 'text-xs text-emerald-300 wrap-anywhere', uiStatus.stockStatusText || '');
   promptStatus.id = 'stock-prompt-status';
@@ -127,193 +360,210 @@ function renderStockSubtab(frag, appState, appData) {
   heroCard.appendChild(promptStatus);
   frag.appendChild(heroCard);
 
-  // Card 2: Quick Add Built-In Staple
-  const engine = getEngine();
-  const dbSource = (appData && appData.nutritionDb && Object.keys(appData.nutritionDb).length > 0)
-    ? appData.nutritionDb
-    : ((engine && engine.DEFAULT_NUTRITION_DB) || {});
-  const builtInIds = Object.keys(dbSource)
-    .filter((kid) => kid !== 'aromatics_zero' && kid.indexOf('stock_') !== 0 && dbSource[kid] && dbSource[kid].name)
-    .sort((a, b) => {
-      const aisleCmp = String(dbSource[a].aisle || '').localeCompare(String(dbSource[b].aisle || ''), 'en');
-      if (aisleCmp !== 0) return aisleCmp;
-      return String(dbSource[a].name || '').localeCompare(String(dbSource[b].name || ''), 'en');
+  const { dbSource, ids } = getDbBuiltInIds(appData, 'perishable');
+  const quickCard = buildQuickAddBuiltInCard({
+    cardTitle: 'Quick Add Built-In Perishable',
+    selectLabel: 'Choose Perishable Staple',
+    selectId: 'stock-builtin-select',
+    gramsId: 'stock-builtin-grams',
+    addBtnId: 'stock-builtin-add-btn',
+    dbSource: dbSource,
+    builtInIds: ids,
+    targetCategory: 'perishable'
+  });
+  if (quickCard) frag.appendChild(quickCard);
+
+  frag.appendChild(buildStockItemsListCard({
+    headingText: 'Current Perishables',
+    ariaLabel: 'Current perishable stock items',
+    emptyText: 'No perishable ingredients saved yet. Tap "Scan Barcode" or "+ Add Manually" above for meat, dairy, or produce you want to use up first.',
+    items: perishableItems,
+    moveLabel: 'Move to Pantry',
+    targetMoveCategory: 'non_perishable'
+  }));
+}
+
+function renderPantrySubtab(frag, nonPerishableItems, appState, appData) {
+  const staplesList = Array.isArray(appState.pantryStaples) ? appState.pantryStaples : [];
+  const activeLowerSet = new Set(staplesList.map((s) => String(s).toLowerCase()));
+  const defaultLowerSet = new Set();
+
+  // Card 1: Spices, Oils & Condiments Toggle Chips
+  const staplesCard = el('div', 'card space-stack');
+  const stTop = el('div', 'flex-wrap-row justify-between');
+  stTop.appendChild(el('h2', 'text-base font-bold text-emerald-300', 'Spices, Oils & Condiments'));
+  const stCtrl = el('div', 'flex-wrap-row');
+  stCtrl.appendChild(el('span', 'badge radar-flyer', staplesList.length + ' saved'));
+  const basicsBtn = el('button', 'btn-secondary text-xs', 'Select Basics');
+  basicsBtn.type = 'button';
+  basicsBtn.id = 'pantry-select-basics-btn';
+  basicsBtn.addEventListener('click', () => {
+    selectBasicPantryStaples();
+    uiStatus.stockStatusText = 'Selected essential cooking spices, olive oil & soy sauce.';
+    announcePolite(uiStatus.stockStatusText);
+    notifyStockChanged();
+  });
+  stCtrl.appendChild(basicsBtn);
+  if (staplesList.length > 0) {
+    const clearBtn = el('button', 'btn-secondary text-xs', 'Clear');
+    clearBtn.type = 'button';
+    clearBtn.id = 'pantry-clear-staples-btn';
+    clearBtn.addEventListener('click', () => {
+      clearPantryStaples();
+      uiStatus.stockStatusText = 'Cleared spices & condiments list.';
+      announcePolite(uiStatus.stockStatusText);
+      notifyStockChanged();
     });
+    stCtrl.appendChild(clearBtn);
+  }
+  stTop.appendChild(stCtrl);
+  staplesCard.appendChild(stTop);
+  staplesCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Tap what you already keep in your cupboard. Gemini can use these freely for cooking & seasoning without buying them.'));
 
-  if (builtInIds.length > 0) {
-    const quickCard = el('div', 'card space-y-2');
-    quickCard.appendChild(el('h3', 'text-sm font-bold text-slate-100', 'Quick Add Built-In Staple'));
-
-    const selectLbl = el('label', 'block text-xs font-semibold text-slate-200', 'Choose Staple Ingredient');
-    selectLbl.setAttribute('for', 'stock-builtin-select');
-    const stapleSel = el('select', 'w-full text-sm');
-    stapleSel.id = 'stock-builtin-select';
-    builtInIds.forEach((kid) => {
-      const entry = dbSource[kid];
-      const opt = document.createElement('option');
-      opt.value = kid;
-      opt.textContent = entry.name + ' (' + (entry.aisle || 'Pantry/Canned') + ')';
-      stapleSel.appendChild(opt);
-    });
-    quickCard.appendChild(selectLbl);
-    quickCard.appendChild(stapleSel);
-
-    const qtyRow = el('div', 'flex-wrap-row');
-    const gramsLbl = el('label', 'text-xs font-semibold text-slate-200', 'Grams on Hand');
-    gramsLbl.setAttribute('for', 'stock-builtin-grams');
-    const gramsInp = el('input', 'w-24 text-right');
-    gramsInp.id = 'stock-builtin-grams';
-    gramsInp.type = 'number';
-    gramsInp.min = '1';
-    gramsInp.max = '50000';
-    gramsInp.step = '1';
-    const initialPkg = clampInt(dbSource[builtInIds[0]] && dbSource[builtInIds[0]].packageGrams, 1, 20000, 500);
-    gramsInp.value = String(initialPkg);
-
-    stapleSel.addEventListener('change', () => {
-      const picked = dbSource[stapleSel.value];
-      gramsInp.value = String(clampInt(picked && picked.packageGrams, 1, 20000, 500));
-    });
-
-    const addBuiltInBtn = el('button', 'btn-secondary flex-1', 'Add to Stock');
-    addBuiltInBtn.type = 'button';
-    addBuiltInBtn.id = 'stock-builtin-add-btn';
-    addBuiltInBtn.addEventListener('click', () => {
-      const pickedId = stapleSel.value;
-      const entry = dbSource[pickedId];
-      if (!entry) return;
-      const pkgG = clampInt(entry.packageGrams, 1, 20000, 500);
-      const gramsVal = clampInt(gramsInp.value, 1, 50000, pkgG);
-      const saved = upsertPantryStockItem({
-        id: pickedId,
-        name: entry.name,
-        brand: '',
-        aisle: entry.aisle || 'Pantry/Canned',
-        gramsOnHand: gramsVal,
-        packageGrams: pkgG,
-        cookedYield: entry.cookedYield || 1.0,
-        per100g: entry.per100g || { calories: 0, protein: 0, fat: 0, carbs: 0 },
-        source: 'builtin'
-      });
-      if (saved) {
-        uiStatus.stockStatusText = 'Added ' + saved.name + ' (' + saved.gramsOnHand + 'g) to My Stock.';
-        announcePolite(uiStatus.stockStatusText);
+  DEFAULT_SPICE_CONDIMENT_GROUPS.forEach((grp) => {
+    const fs = el('fieldset', 'staple-fieldset space-y-1.5');
+    fs.appendChild(el('legend', 'text-xs font-bold text-slate-200', grp.label));
+    const chipRow = el('div', 'flex-wrap-row');
+    grp.items.forEach((itemName) => {
+      defaultLowerSet.add(itemName.toLowerCase());
+      const isSelected = activeLowerSet.has(itemName.toLowerCase());
+      const chip = el('button', 'pill-btn text-xs chip-toggle', (isSelected ? '\u2713 ' : '') + itemName);
+      chip.type = 'button';
+      chip.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+      chip.addEventListener('click', () => {
+        togglePantryStaple(itemName);
         notifyStockChanged();
-      }
+      });
+      chipRow.appendChild(chip);
     });
+    fs.appendChild(chipRow);
+    staplesCard.appendChild(fs);
+  });
 
-    qtyRow.appendChild(gramsLbl);
-    qtyRow.appendChild(gramsInp);
-    qtyRow.appendChild(addBuiltInBtn);
-    quickCard.appendChild(qtyRow);
-    frag.appendChild(quickCard);
+  const customStaples = staplesList.filter((s) => !defaultLowerSet.has(String(s).toLowerCase()));
+  if (customStaples.length > 0) {
+    const customFs = el('fieldset', 'staple-fieldset space-y-1.5');
+    customFs.appendChild(el('legend', 'text-xs font-bold text-slate-200', 'Your Custom Spices & Sauces'));
+    const customRow = el('div', 'flex-wrap-row');
+    customStaples.forEach((cname) => {
+      const chip = el('button', 'pill-btn text-xs chip-toggle', '\u2713 ' + cname + ' \u00D7');
+      chip.type = 'button';
+      chip.setAttribute('aria-pressed', 'true');
+      chip.setAttribute('aria-label', 'Remove ' + cname);
+      chip.addEventListener('click', () => {
+        removePantryStaple(cname);
+        notifyStockChanged();
+      });
+      customRow.appendChild(chip);
+    });
+    customFs.appendChild(customRow);
+    staplesCard.appendChild(customFs);
   }
 
-  // Card 3: Current Stock Items List
-  const listCard = el('section', 'card space-stack');
-  listCard.setAttribute('aria-label', 'Current stock items');
-  listCard.appendChild(el('h3', 'text-base font-bold text-emerald-300', 'Current Stock Items (' + stockList.length + ')'));
+  const customForm = document.createElement('form');
+  customForm.id = 'custom-staple-form';
+  customForm.className = 'space-y-1 pt-1';
+  const customLbl = el('label', 'block text-xs font-semibold text-slate-200', 'Add Custom Spice, Oil or Condiment');
+  customLbl.setAttribute('for', 'custom-staple-input');
+  const customInputRow = el('div', 'flex-wrap-row');
+  const customInput = el('input', 'flex-1 text-sm');
+  customInput.id = 'custom-staple-input';
+  customInput.name = 'customStaple';
+  customInput.type = 'text';
+  customInput.maxLength = 50;
+  customInput.setAttribute('enterkeyhint', 'done');
+  customInput.placeholder = 'e.g. Za\'atar, Chipotle Powder, Hoisin';
+  customInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.isComposing) e.preventDefault();
+  });
+  const addCustomBtn = el('button', 'btn-primary text-xs', 'Add');
+  addCustomBtn.type = 'submit';
+  addCustomBtn.id = 'add-custom-staple-btn';
+  customInputRow.appendChild(customInput);
+  customInputRow.appendChild(addCustomBtn);
+  customForm.appendChild(customLbl);
+  customForm.appendChild(customInputRow);
 
-  if (stockList.length === 0) {
-    listCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'No ingredients in stock yet. Tap "Scan Barcode" or "+ Add Manually" above to add what is already in your fridge, freezer, or pantry.'));
-  } else {
-    const ul = el('ul', 'space-y-3 list-none p-0 m-0');
-    stockList.forEach((item) => {
-      const li = el('li', 'subcard stock-item-card space-y-2');
-      li.setAttribute('data-stock-item', item.id);
+  const stapleStatus = el('p', 'text-xs text-emerald-300 wrap-anywhere', uiStatus.stockStatusText || '');
+  stapleStatus.id = 'stock-prompt-status';
+  stapleStatus.setAttribute('role', 'status');
+  stapleStatus.setAttribute('aria-live', 'polite');
 
-      const top = el('div', 'flex-wrap-row justify-between');
-      const titleText = item.brand ? (item.name + ' — ' + item.brand) : item.name;
-      top.appendChild(el('span', 'text-sm font-bold text-slate-100 wrap-anywhere', titleText));
-      const badgeWrap = el('div', 'flex-wrap-row');
-      badgeWrap.appendChild(el('span', 'badge radar-flyer', item.aisle || 'Pantry/Canned'));
-      if (item.barcode) {
-        badgeWrap.appendChild(el('span', 'badge radar-regular', 'UPC ' + item.barcode));
-      }
-      badgeWrap.appendChild(createHealthWarningBadges(item, el, { compact: false }));
-      top.appendChild(badgeWrap);
-      li.appendChild(top);
+  customForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const val = customInput.value.trim();
+    if (!val) {
+      customInput.focus();
+      return;
+    }
+    addCustomPantryStaple(val);
+    customInput.value = '';
+    uiStatus.stockStatusText = 'Added "' + val + '" to Pantry & Spices.';
+    announcePolite(uiStatus.stockStatusText);
+    notifyStockChanged();
+  });
 
-      const per = item.per100g || { calories: 0, protein: 0, fat: 0, carbs: 0 };
-      const mult = (Number(item.gramsOnHand) || 0) / 100;
-      li.appendChild(el(
-        'div',
-        'text-xs text-slate-300 wrap-anywhere',
-        'Per 100g: ' + Math.round(per.calories || 0) + ' kcal · ' + (per.protein || 0) + 'g P · ' + (per.carbs || 0) + 'g C · ' + (per.fat || 0) + 'g F' +
-        '  |  On Hand Total: ' + Math.round((per.calories || 0) * mult) + ' kcal · ' + (Math.round((per.protein || 0) * mult * 10) / 10) + 'g P'
-      ));
+  staplesCard.appendChild(customForm);
+  staplesCard.appendChild(stapleStatus);
+  frag.appendChild(staplesCard);
 
-      const qtyEditRow = el('div', 'flex-wrap-row justify-between');
-      const gramsCtrl = el('div', 'flex-wrap-row');
-      const gLbl = el('label', 'text-xs font-semibold text-slate-200', 'Grams');
-      const gInpId = 'stock-grams-' + item.id;
-      gLbl.setAttribute('for', gInpId);
+  // Card 2: Non-Perishable Food at Home (Optional for Gemini)
+  const nonPerishHero = el('div', 'card space-stack');
+  const npTop = el('div', 'flex-wrap-row justify-between');
+  npTop.appendChild(el('h2', 'text-base font-bold text-slate-100', 'Non-Perishable Food (Optional)'));
+  npTop.appendChild(el('span', 'badge', nonPerishableItems.length + (nonPerishableItems.length === 1 ? ' item' : ' items')));
+  nonPerishHero.appendChild(npTop);
+  nonPerishHero.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Canned goods, rice, oats, whey, and frozen items you have on hand. Gemini treats these as optional ($0 if used, but not forced every week).'));
 
-      const dec50Btn = el('button', 'btn-secondary text-xs', '-50g');
-      dec50Btn.type = 'button';
-      dec50Btn.setAttribute('aria-label', 'Decrease ' + item.name + ' by 50 grams');
+  const npAddRow = el('div', 'flex-wrap-row');
+  const npScanBtn = el('button', 'btn-primary flex-1', 'Scan Barcode');
+  npScanBtn.type = 'button';
+  npScanBtn.id = 'pantry-scan-barcode-btn';
+  npScanBtn.addEventListener('click', () => {
+    openStockModal({ mode: 'scan', defaultCategory: 'non_perishable', onSaved: notifyStockChanged });
+  });
 
-      const gInp = el('input', 'w-24 text-right');
-      gInp.id = gInpId;
-      gInp.type = 'number';
-      gInp.min = '0';
-      gInp.max = '50000';
-      gInp.step = '1';
-      gInp.value = String(item.gramsOnHand);
+  const npManualBtn = el('button', 'btn-secondary flex-1', '+ Add Manually');
+  npManualBtn.type = 'button';
+  npManualBtn.id = 'pantry-manual-stock-btn';
+  npManualBtn.addEventListener('click', () => {
+    openStockModal({ mode: 'manual', defaultCategory: 'non_perishable', onSaved: notifyStockChanged });
+  });
+  npAddRow.appendChild(npScanBtn);
+  npAddRow.appendChild(npManualBtn);
+  nonPerishHero.appendChild(npAddRow);
 
-      const inc50Btn = el('button', 'btn-secondary text-xs', '+50g');
-      inc50Btn.type = 'button';
-      inc50Btn.setAttribute('aria-label', 'Increase ' + item.name + ' by 50 grams');
+  const npChefBtn = el('button', 'btn-secondary w-full', 'Open AI Chef');
+  npChefBtn.type = 'button';
+  npChefBtn.addEventListener('click', () => {
+    if (typeof activeCallbacks.onOpenChef === 'function') {
+      activeCallbacks.onOpenChef('new');
+    }
+  });
+  nonPerishHero.appendChild(npChefBtn);
+  frag.appendChild(nonPerishHero);
 
-      dec50Btn.addEventListener('click', () => {
-        const nextVal = Math.max(0, (Number(item.gramsOnHand) || 0) - 50);
-        updatePantryStockGrams(item.id, nextVal);
-        notifyStockChanged();
-      });
-      inc50Btn.addEventListener('click', () => {
-        const nextVal = Math.min(50000, (Number(item.gramsOnHand) || 0) + 50);
-        updatePantryStockGrams(item.id, nextVal);
-        notifyStockChanged();
-      });
-      gInp.addEventListener('change', () => {
-        const parsed = clampInt(gInp.value, 0, 50000, item.gramsOnHand);
-        updatePantryStockGrams(item.id, parsed);
-        notifyStockChanged();
-      });
+  const { dbSource, ids } = getDbBuiltInIds(appData, 'non_perishable');
+  const quickNpCard = buildQuickAddBuiltInCard({
+    cardTitle: 'Quick Add Built-In Non-Perishable',
+    selectLabel: 'Choose Non-Perishable Staple',
+    selectId: 'pantry-builtin-select',
+    gramsId: 'pantry-builtin-grams',
+    addBtnId: 'pantry-builtin-add-btn',
+    dbSource: dbSource,
+    builtInIds: ids,
+    targetCategory: 'non_perishable'
+  });
+  if (quickNpCard) frag.appendChild(quickNpCard);
 
-      gramsCtrl.appendChild(gLbl);
-      gramsCtrl.appendChild(dec50Btn);
-      gramsCtrl.appendChild(gInp);
-      gramsCtrl.appendChild(inc50Btn);
-      qtyEditRow.appendChild(gramsCtrl);
-
-      const actionCtrl = el('div', 'flex-wrap-row');
-      const editBtn = el('button', 'btn-secondary text-xs', 'Edit Macros');
-      editBtn.type = 'button';
-      editBtn.addEventListener('click', () => {
-        openStockModal({ mode: 'edit', item: item, onSaved: notifyStockChanged });
-      });
-
-      const removeBtn = el('button', 'btn-secondary text-xs', 'Used Up');
-      removeBtn.type = 'button';
-      removeBtn.setAttribute('aria-label', 'Remove ' + item.name + ' from stock');
-      removeBtn.addEventListener('click', () => {
-        removePantryStockItem(item.id);
-        uiStatus.stockStatusText = 'Removed ' + item.name + ' from My Stock.';
-        announcePolite(uiStatus.stockStatusText);
-        notifyStockChanged();
-      });
-
-      actionCtrl.appendChild(editBtn);
-      actionCtrl.appendChild(removeBtn);
-      qtyEditRow.appendChild(actionCtrl);
-
-      li.appendChild(qtyEditRow);
-      ul.appendChild(li);
-    });
-    listCard.appendChild(ul);
-  }
-  frag.appendChild(listCard);
+  frag.appendChild(buildStockItemsListCard({
+    headingText: 'Current Non-Perishable Food',
+    ariaLabel: 'Current non-perishable stock items',
+    emptyText: 'No non-perishable food added yet (optional shelf-stable rice, beans, oats, whey, or frozen items).',
+    items: nonPerishableItems,
+    moveLabel: 'Move to Perishables',
+    targetMoveCategory: 'perishable'
+  }));
 }
 
 export function renderGroceriesTab(callbacks) {
@@ -329,15 +579,22 @@ export function renderGroceriesTab(callbacks) {
   const currentHouseholdPlans = getCurrentHouseholdPlans();
 
   const frag = document.createDocumentFragment();
-  const stockCount = Array.isArray(appState.pantryStock) ? appState.pantryStock.length : 0;
-  const activeSubtab = appState.groceriesSubtab === 'stock' ? 'stock' : 'buy';
+  const stockList = Array.isArray(appState.pantryStock) ? appState.pantryStock : [];
+  const perishableItems = stockList.filter((it) => it && getStockItemCategory(it) === 'perishable');
+  const nonPerishableItems = stockList.filter((it) => it && getStockItemCategory(it) === 'non_perishable');
+  const staplesCount = Array.isArray(appState.pantryStaples) ? appState.pantryStaples.length : 0;
+  const pantryTotalCount = nonPerishableItems.length + staplesCount;
 
-  // Subtab Switcher Bar (2 subtabs: Need to Buy | My Stock)
-  const subtabBar = el('div', 'subtab-bar flex-wrap-row');
+  const activeSubtab = appState.groceriesSubtab === 'perishables' || appState.groceriesSubtab === 'stock'
+    ? 'perishables'
+    : (appState.groceriesSubtab === 'pantry' ? 'pantry' : 'buy');
+
+  // Subtab Switcher Bar (3 subtabs: Need to Buy | Perishables | Pantry & Spices)
+  const subtabBar = el('div', 'subtab-bar subtab-grid-3');
   subtabBar.setAttribute('role', 'group');
   subtabBar.setAttribute('aria-label', 'Groceries view');
 
-  const buySubtabBtn = el('button', 'pill-btn flex-1', 'Need to Buy');
+  const buySubtabBtn = el('button', 'pill-btn', 'Need to Buy');
   buySubtabBtn.type = 'button';
   buySubtabBtn.id = 'groceries-subtab-buy';
   buySubtabBtn.setAttribute('aria-pressed', activeSubtab === 'buy' ? 'true' : 'false');
@@ -349,24 +606,43 @@ export function renderGroceriesTab(callbacks) {
     }
   });
 
-  const stockSubtabBtn = el('button', 'pill-btn flex-1', 'My Stock (' + stockCount + ')');
-  stockSubtabBtn.type = 'button';
-  stockSubtabBtn.id = 'groceries-subtab-stock';
-  stockSubtabBtn.setAttribute('aria-pressed', activeSubtab === 'stock' ? 'true' : 'false');
-  stockSubtabBtn.addEventListener('click', () => {
-    if (appState.groceriesSubtab !== 'stock') {
-      appState.groceriesSubtab = 'stock';
+  const perishSubtabBtn = el('button', 'pill-btn', 'Perishables (' + perishableItems.length + ')');
+  perishSubtabBtn.type = 'button';
+  perishSubtabBtn.id = 'groceries-subtab-perishables';
+  perishSubtabBtn.setAttribute('aria-pressed', activeSubtab === 'perishables' ? 'true' : 'false');
+  perishSubtabBtn.addEventListener('click', () => {
+    if (appState.groceriesSubtab !== 'perishables') {
+      appState.groceriesSubtab = 'perishables';
+      saveState();
+      renderGroceriesTab();
+    }
+  });
+
+  const pantrySubtabBtn = el('button', 'pill-btn', 'Pantry & Spices (' + pantryTotalCount + ')');
+  pantrySubtabBtn.type = 'button';
+  pantrySubtabBtn.id = 'groceries-subtab-pantry';
+  pantrySubtabBtn.setAttribute('aria-pressed', activeSubtab === 'pantry' ? 'true' : 'false');
+  pantrySubtabBtn.addEventListener('click', () => {
+    if (appState.groceriesSubtab !== 'pantry') {
+      appState.groceriesSubtab = 'pantry';
       saveState();
       renderGroceriesTab();
     }
   });
 
   subtabBar.appendChild(buySubtabBtn);
-  subtabBar.appendChild(stockSubtabBtn);
+  subtabBar.appendChild(perishSubtabBtn);
+  subtabBar.appendChild(pantrySubtabBtn);
   frag.appendChild(subtabBar);
 
-  if (activeSubtab === 'stock') {
-    renderStockSubtab(frag, appState, appData);
+  if (activeSubtab === 'perishables') {
+    renderPerishablesSubtab(frag, perishableItems, appData);
+    root.replaceChildren(frag);
+    return;
+  }
+
+  if (activeSubtab === 'pantry') {
+    renderPantrySubtab(frag, nonPerishableItems, appState, appData);
     root.replaceChildren(frag);
     return;
   }
@@ -500,15 +776,25 @@ export function renderGroceriesTab(callbacks) {
     });
     aisleCtrlRow.appendChild(resetSwapsBtn);
   }
-  if (stockCount > 0) {
-    const viewStockBtn = el('button', 'btn-secondary text-xs', 'My Stock: ' + stockCount + (stockCount === 1 ? ' item at home' : ' items at home'));
-    viewStockBtn.type = 'button';
-    viewStockBtn.addEventListener('click', () => {
-      appState.groceriesSubtab = 'stock';
+  if (perishableItems.length > 0) {
+    const viewPerishBtn = el('button', 'btn-secondary text-xs', 'Perishables: ' + perishableItems.length);
+    viewPerishBtn.type = 'button';
+    viewPerishBtn.addEventListener('click', () => {
+      appState.groceriesSubtab = 'perishables';
       saveState();
       renderGroceriesTab();
     });
-    aisleCtrlRow.appendChild(viewStockBtn);
+    aisleCtrlRow.appendChild(viewPerishBtn);
+  }
+  if (pantryTotalCount > 0) {
+    const viewPantryBtn = el('button', 'btn-secondary text-xs', 'Pantry & Spices (' + pantryTotalCount + ')');
+    viewPantryBtn.type = 'button';
+    viewPantryBtn.addEventListener('click', () => {
+      appState.groceriesSubtab = 'pantry';
+      saveState();
+      renderGroceriesTab();
+    });
+    aisleCtrlRow.appendChild(viewPantryBtn);
   }
   summaryCard.appendChild(aisleCtrlRow);
   frag.appendChild(summaryCard);
@@ -797,6 +1083,7 @@ export function renderGroceriesTab(callbacks) {
         scanSwapBtn.addEventListener('click', () => {
           openStockModal({
             mode: 'swap',
+            defaultStore: appData.winningStore === 'Maxi' ? 'Maxi' : 'Super C',
             swapTarget: { id: origIdForSwap, name: item.name },
             onSaved: (payload) => {
               const saved = applyInStoreSwap(origIdForSwap, payload);

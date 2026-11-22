@@ -96,14 +96,18 @@ test('Health Warnings, AI Chef Prompts, Store Barcode Swap, Preview & Undo', asy
     assert.ok(offWarn.some((w) => w.code === 'high_sugar'));
   });
 
-  await t.test('buildGeminiMealPrompt starts from a blank slate, restricts to Maxi & Super C only, and migrates legacy modes', () => {
+  await t.test('buildGeminiMealPrompt supports single-store Auto/Maxi/Super C, flexible reuse of Liked Meals, pantry staples, and cooking oils', () => {
     const appState = stateMod.getAppState();
-    const migrated = stateMod.validateState({ geminiPromptMode: 'browser_hunt' });
+    const migrated = stateMod.validateState({ geminiPromptMode: 'browser_hunt', groceriesSubtab: 'stock' });
     assert.equal(migrated.geminiPromptMode, 'full_store');
+    assert.equal(migrated.groceriesSubtab, 'perishables');
     const migratedOld = stateMod.validateState({ geminiPromptMode: 'flyer_locked' });
     assert.equal(migratedOld.geminiPromptMode, 'flyer_deals');
 
     appState.pantryStock = [];
+    appState.pantryStaples = [];
+    appState.likedMeals = [];
+    appState.dislikedMeals = [];
     appState.chefNote = 'High spice Caribbean style';
     const baseData = stateMod.mergeWithFallbackData(null);
     baseData.weeklyFlyerCatalog = {
@@ -112,13 +116,17 @@ test('Health Warnings, AI Chef Prompts, Store Barcode Swap, Preview & Undo', asy
     };
     stateMod.setAppData(baseData);
 
+    // 1. Auto (1 Cheapest): includes single-store rule & both flyer lists across both modes
+    appState.chefStoreChoice = 'auto';
     for (const mode of ['flyer_deals', 'full_store']) {
       appState.geminiPromptMode = mode;
       const p = promptsMod.buildGeminiMealPrompt();
-      assert.match(p, /BLANK SLATE/i);
-      assert.match(p, /MAXI.*SUPER C ONLY/i);
+      assert.match(p, /PICK ONLY ONE/i);
+      assert.match(p, /FLEXIBLE MENU/i);
+      assert.match(p, /"winningStore":/);
       assert.match(p, /High spice Caribbean style/);
-      assert.doesNotMatch(p, /MUST use ONLY/i);
+      assert.doesNotMatch(p, /BLANK SLATE/i);
+      assert.doesNotMatch(p, /ZERO ADDED OIL/i);
       assert.doesNotMatch(p, /walmart/i);
       if (mode === 'flyer_deals') {
         assert.match(p, /POITRINE DE DINDON/);
@@ -128,6 +136,61 @@ test('Health Warnings, AI Chef Prompts, Store Barcode Swap, Preview & Undo', asy
         assert.match(p, /superc\.ca/i);
       }
     }
+
+    // 2. Locked Maxi Only: excludes Super C items
+    appState.chefStoreChoice = 'Maxi';
+    appState.geminiPromptMode = 'flyer_deals';
+    const pMaxi = promptsMod.buildGeminiMealPrompt();
+    assert.match(pMaxi, /SINGLE STORE LOCKED: Shop strictly at MAXI/i);
+    assert.match(pMaxi, /POITRINE DE DINDON/);
+    assert.doesNotMatch(pMaxi, /BROCOLI/);
+
+    // 3. Locked Super C Only: excludes Maxi items
+    appState.chefStoreChoice = 'Super C';
+    appState.geminiPromptMode = 'full_store';
+    const pSuperC = promptsMod.buildGeminiMealPrompt();
+    assert.match(pSuperC, /SINGLE STORE LOCKED: Shop strictly at SUPER C/i);
+    assert.match(pSuperC, /superc\.ca/i);
+    assert.doesNotMatch(pSuperC, /maxi\.ca/i);
+
+    // 4. Liked / Disliked Meals & Pantry Staples persistence
+    stateMod.recordMealFeedbackSnapshot(
+      {
+        id: 'lunch',
+        slot: 'Lunch',
+        title: 'Smoky Cajun Chicken Bowl',
+        seasoningTwist: 'Smoked paprika & garlic',
+        ingredients: [{ id: 'chicken_breast', name: 'Chicken Breast' }, { id: 'rice_dry', name: 'Jasmine Rice' }]
+      },
+      'up',
+      'Super tender with olive oil'
+    );
+    stateMod.recordMealFeedbackSnapshot(
+      { id: 'dinner', slot: 'Dinner', title: 'Sardine Skillet', seasoningTwist: 'Lemon', ingredients: [] },
+      'down',
+      'Too fishy'
+    );
+    assert.equal(appState.likedMeals.length, 1);
+    assert.equal(appState.dislikedMeals.length, 1);
+
+    stateMod.selectBasicPantryStaples();
+    stateMod.togglePantryStaple('Cumin'); // toggle off
+    assert.equal(appState.pantryStaples.includes('Cumin'), false);
+    stateMod.addCustomPantryStaple('Za\'atar');
+    assert.equal(appState.pantryStaples.includes('Za\'atar'), true);
+
+    const pWithMemory = promptsMod.buildGeminiMealPrompt();
+    assert.match(pWithMemory, /MY LIKED MEALS/);
+    assert.match(pWithMemory, /Smoky Cajun Chicken Bowl/);
+    assert.match(pWithMemory, /MEALS \/ FLAVORS TO AVOID/);
+    assert.match(pWithMemory, /Sardine Skillet/);
+    assert.match(pWithMemory, /SPICES, COOKING OILS & CONDIMENTS ALREADY AT HOME/);
+    assert.match(pWithMemory, /Za'atar/);
+
+    assert.equal(stateMod.removeLikedMeal(appState.likedMeals[0].key), true);
+    assert.equal(appState.likedMeals.length, 0);
+    stateMod.clearPantryStaples();
+    assert.equal(appState.pantryStaples.length, 0);
   });
 
   await t.test('buildGeminiAdjustPrompt includes current meals, nil stock flags, scanned items, and active swaps (Maxi & Super C only)', () => {
@@ -264,13 +327,14 @@ test('Health Warnings, AI Chef Prompts, Store Barcode Swap, Preview & Undo', asy
     const gWarn = healthMod.evaluateIngredientHealth(newItem);
     assert.ok(gWarn.some((w) => w.code === 'high_sodium'));
 
-    // Preview & Undo history checks
+    // Preview, single-store resolution, oil support & Undo history checks
     appState.planHistory = [];
     stateMod.pushCurrentPlanToHistory();
     assert.equal(appState.planHistory.length, 1);
 
-    const preview = stateMod.previewCustomMealJson(JSON.stringify({
+    const mixedAndOilJson = JSON.stringify({
       weeklyTheme: 'Previewed Week 2',
+      winningStore: 'Maxi',
       targetCalories: 1900,
       customIngredients: {
         sweet_sauce: {
@@ -281,18 +345,37 @@ test('Health Warnings, AI Chef Prompts, Store Barcode Swap, Preview & Undo', asy
           health: { sugars: 32, sodiumMg: 1800, saturatedFat: 0 },
           packageGrams: 350,
           cadPerPackage: 3.49
+        },
+        olive_oil_sc: {
+          name: 'Extra Virgin Olive Oil',
+          store: 'Super C',
+          aisle: 'Pantry/Canned',
+          per100g: { calories: 884, protein: 0, fat: 100, carbs: 0 },
+          packageGrams: 750,
+          cadPerPackage: 9.99
         }
       },
       meals: [
         { id: 'breakfast', title: 'Oats & Eggs', cookingMethod: 'Cook', seasoningTwist: 'Cinnamon', ingredients: [{ id: 'whole_egg', grams: 150 }] },
-        { id: 'lunch', title: 'Glazed Chicken', cookingMethod: 'Sear', seasoningTwist: 'Ginger', ingredients: [{ id: 'chicken_breast', grams: 200 }, { id: 'sweet_sauce', grams: 40 }] },
+        { id: 'lunch', title: 'Glazed Chicken', cookingMethod: 'Pan-sear in 1 tsp olive oil', seasoningTwist: 'Ginger', ingredients: [{ id: 'chicken_breast', grams: 200 }, { id: 'sweet_sauce', grams: 40 }, { id: 'olive_oil_sc', grams: 5 }] },
         { id: 'dinner', title: 'Pork Rice', cookingMethod: 'Roast', seasoningTwist: 'Herbs', ingredients: [{ id: 'pork_loin_lean', grams: 200 }, { id: 'rice_dry', grams: 100 }] },
         { id: 'snack', title: 'Skyr', cookingMethod: 'Cold', seasoningTwist: 'Vanilla', ingredients: [{ id: 'skyr_0', grams: 200 }] }
       ]
-    }));
+    });
+
+    const preview = stateMod.previewCustomMealJson(mixedAndOilJson);
     assert.equal(preview.ok, true);
     assert.equal(preview.weeklyTheme, 'Previewed Week 2');
+    assert.equal(preview.chosenStore, 'Maxi');
+    assert.equal(preview.mixedStoresWarning, true);
     assert.ok(preview.healthWarnings.some((hw) => hw.id === 'sweet_sauce'));
+
+    const overlayTarget = stateMod.mergeWithFallbackData(null);
+    assert.equal(stateMod.applyCustomMealJsonOverlay(overlayTarget, mixedAndOilJson), true);
+    assert.equal(overlayTarget.winningStore, 'Maxi');
+    const oilSolved = globalThis.MacroEngine.solveDailyPortions(overlayTarget, { preset: 'cut' });
+    assert.ok(oilSolved.ingredientGrams.olive_oil_sc > 0);
+    assert.match(oilSolved.meals.find((m) => m.id === 'lunch').cookingMethod, /olive oil/i);
 
     // Restore from history
     assert.equal(stateMod.restorePlanFromHistory(0), true);
