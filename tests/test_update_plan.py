@@ -1010,6 +1010,7 @@ class TestEndToEndPipelineOutput(unittest.TestCase):
             "proteinSwaps",
             "mealTemplates",
             "prepTimeline",
+            "weeklyFlyerCatalog",
         }
         self.assertEqual(set(data.keys()), expected_top)
         self.assertEqual(data["schemaVersion"], "1.0.0")
@@ -1233,6 +1234,59 @@ class TestEndToEndPipelineOutput(unittest.TestCase):
                 (Path(tmp_dir) / "data.json").read_bytes(),
                 (Path(tmp_dir) / "public" / "data.json").read_bytes(),
             )
+
+    def test_weekly_flyer_catalog_maxi_superc_only_and_zero_oil(self) -> None:
+        now = dt.datetime(2026, 11, 17, 13, 0, 0, tzinfo=dt.timezone.utc)
+
+        def catalog_http_get(url: str, params: dict | None = None, timeout: int = 12) -> dict:
+            q = (params or {}).get("q", "")
+            if q == "boeuf":
+                return {
+                    "items": [
+                        _make_flipp_item(901, "BOEUF HACHE EXTRA MAIGRE", "Maxi", 5.99, post_price_text="/lb"),
+                        _make_flipp_item(902, "BOEUF WALMART STEAK", "Walmart", 3.99, post_price_text="/lb"),
+                        _make_flipp_item(903, "SAUCISSES DE BOEUF", "Maxi", 4.49),
+                    ]
+                }
+            if q == "brocoli":
+                return {
+                    "items": [
+                        _make_flipp_item(904, "COURONNES DE BROCOLI", "Super C", 1.49),
+                        _make_flipp_item(905, "BROCOLI SAUCE AU BEURRE", "Super C", 2.99),
+                    ]
+                }
+            if q in ("porc", "pork"):
+                return {
+                    "items": [
+                        _make_flipp_item(906, "LONGE DE PORC", "Super C", 2.99, post_price_text="/lb"),
+                    ]
+                }
+            return {"items": []}
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            data = update_plan.run_pipeline(
+                output_dir=tmp_dir,
+                now=now,
+                api_key="",
+                http_get=catalog_http_get,
+            )
+            self._assert_valid_schema(data)
+            self.assertEqual(set(data["nutritionDb"].keys()), EXPECTED_NUTRITION_KEYS)
+            self.assertIn("weeklyFlyerCatalog", data)
+            catalog = data["weeklyFlyerCatalog"]
+            self.assertEqual(set(catalog.keys()), {"Maxi", "Super C"})
+
+            maxi_names = [it["name"] for it in catalog["Maxi"]]
+            sc_names = [it["name"] for it in catalog["Super C"]]
+            self.assertIn("BOEUF HACHE EXTRA MAIGRE", maxi_names)
+            self.assertNotIn("SAUCISSES DE BOEUF", maxi_names)
+            self.assertIn("COURONNES DE BROCOLI", sc_names)
+            self.assertIn("LONGE DE PORC", sc_names)
+            self.assertNotIn("BROCOLI SAUCE AU BEURRE", sc_names)
+
+            catalog_str = json.dumps(catalog).lower()
+            self.assertNotIn("walmart", catalog_str)
+            self.assertEqual(update_plan.validate_zero_added_oil(catalog), [])
 
 
 class TestSharedSchemaParity(unittest.TestCase):

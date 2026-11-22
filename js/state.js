@@ -1,7 +1,9 @@
+import { evaluateIngredientHealth, normalizeHealthMeta } from './healthWarnings.js';
+
 export const STORAGE_DATA_KEY = 'mealPlanData';
 export const STORAGE_STATE_KEY = 'mealPlanState';
 export const MEAL_SLOTS = ['breakfast', 'lunch', 'dinner', 'snack'];
-export const TAB_IDS = ['meals', 'prep', 'groceries', 'settings'];
+export const TAB_IDS = ['meals', 'prep', 'groceries', 'chef', 'settings'];
 export const DEFAULT_AISLE_ORDER = ['Produce', 'Meat', 'Dairy/Eggs', 'Pantry/Canned', 'Frozen'];
 export const DEFAULT_GOAL_PRESETS = {
   cut: { id: 'cut', label: 'Aggressive Cut', calories: 1900, protein: 200, fat: 50, carbs: 160 },
@@ -191,8 +193,23 @@ export function sanitizePantryStockItem(entry) {
   const aisle = DEFAULT_AISLE_ORDER.indexOf(rawAisle) !== -1 ? rawAisle : 'Pantry/Canned';
   const rawSource = typeof entry.source === 'string' ? entry.source.trim() : '';
   const source = (rawSource === 'openfoodfacts' || rawSource === 'builtin' || rawSource === 'manual') ? rawSource : 'manual';
+  const rawStore = typeof entry.store === 'string' ? entry.store.trim() : '';
+  const store = (rawStore === 'Maxi' || rawStore === 'Super C') ? rawStore : '';
+  const rawCadPkg = (entry.cadPerPackage !== undefined && entry.cadPerPackage !== null && entry.cadPerPackage !== '')
+    ? Number(entry.cadPerPackage)
+    : null;
+  const cadPerPackage = (rawCadPkg !== null && Number.isFinite(rawCadPkg) && rawCadPkg >= 0)
+    ? Math.round(clampNum(rawCadPkg, 0, 250, 0) * 100) / 100
+    : null;
+  const per100g = {
+    calories: Math.round(clampNum(per.calories, 0, 900, 0)),
+    protein: Math.round(clampNum(per.protein, 0, 100, 0) * 10) / 10,
+    fat: Math.round(clampNum(per.fat, 0, 100, 0) * 10) / 10,
+    carbs: Math.round(clampNum(per.carbs, 0, 100, 0) * 10) / 10
+  };
+  const health = normalizeHealthMeta(entry.health, per);
 
-  return {
+  const out = {
     id: rawId,
     barcode: barcode,
     name: safeName,
@@ -201,14 +218,13 @@ export function sanitizePantryStockItem(entry) {
     gramsOnHand: clampInt(entry.gramsOnHand, 0, 50000, 0),
     packageGrams: clampInt(entry.packageGrams, 1, 20000, 500),
     cookedYield: clampNum(entry.cookedYield, 0.2, 4.0, 1.0),
-    per100g: {
-      calories: Math.round(clampNum(per.calories, 0, 900, 0)),
-      protein: Math.round(clampNum(per.protein, 0, 100, 0) * 10) / 10,
-      fat: Math.round(clampNum(per.fat, 0, 100, 0) * 10) / 10,
-      carbs: Math.round(clampNum(per.carbs, 0, 100, 0) * 10) / 10
-    },
+    per100g: per100g,
     source: source
   };
+  if (store) out.store = store;
+  if (cadPerPackage !== null) out.cadPerPackage = cadPerPackage;
+  if (health) out.health = health;
+  return out;
 }
 
 export function makeStockItemId(barcode, name) {
@@ -282,7 +298,8 @@ export function buildDefaultData() {
     nutritionDb: hasEngineDb ? engine.DEFAULT_NUTRITION_DB : {},
     proteinSwaps: JSON.parse(JSON.stringify(FALLBACK_META.proteinSwaps)),
     mealTemplates: JSON.parse(JSON.stringify(FALLBACK_META.mealTemplates)),
-    prepTimeline: JSON.parse(JSON.stringify(FALLBACK_META.prepTimeline))
+    prepTimeline: JSON.parse(JSON.stringify(FALLBACK_META.prepTimeline)),
+    weeklyFlyerCatalog: { Maxi: [], 'Super C': [] }
   };
 }
 
@@ -301,6 +318,9 @@ export function isValidDataPayload(obj) {
 export function mergeWithFallbackData(raw) {
   const base = buildDefaultData();
   if (!isValidDataPayload(raw)) return base;
+  const rawCatalog = (raw.weeklyFlyerCatalog && typeof raw.weeklyFlyerCatalog === 'object' && !Array.isArray(raw.weeklyFlyerCatalog))
+    ? raw.weeklyFlyerCatalog
+    : {};
   return {
     schemaVersion: typeof raw.schemaVersion === 'string' ? raw.schemaVersion : base.schemaVersion,
     generatedAt: typeof raw.generatedAt === 'string' ? raw.generatedAt : base.generatedAt,
@@ -317,7 +337,11 @@ export function mergeWithFallbackData(raw) {
       ? raw.proteinSwaps
       : base.proteinSwaps,
     mealTemplates: raw.mealTemplates,
-    prepTimeline: Array.isArray(raw.prepTimeline) && raw.prepTimeline.length > 0 ? raw.prepTimeline : base.prepTimeline
+    prepTimeline: Array.isArray(raw.prepTimeline) && raw.prepTimeline.length > 0 ? raw.prepTimeline : base.prepTimeline,
+    weeklyFlyerCatalog: {
+      Maxi: Array.isArray(rawCatalog.Maxi) ? rawCatalog.Maxi : [],
+      'Super C': Array.isArray(rawCatalog['Super C']) ? rawCatalog['Super C'] : []
+    }
   };
 }
 
@@ -360,7 +384,13 @@ export function buildDefaultState() {
       }
     ],
     activeMemberId: 'p1',
-    geminiPromptMode: 'browser_hunt',
+    geminiPromptMode: 'flyer_deals',
+    chefViewMode: 'new',
+    chefNote: '',
+    chefAdjustNote: '',
+    planHistory: [],
+    customSwapItems: {},
+    pendingAdjustments: { nilStockIds: [], scannedAdditions: [] },
     grocerySwaps: {},
     customMealJsonRaw: '',
     timers: {},
@@ -554,9 +584,71 @@ export function validateState(raw) {
       });
     })(),
     activeMemberId: typeof raw.activeMemberId === 'string' && raw.activeMemberId.trim() ? raw.activeMemberId.trim() : 'p1',
-    geminiPromptMode: (raw.geminiPromptMode === 'allow_custom' || raw.geminiPromptMode === 'flyer_locked' || raw.geminiPromptMode === 'browser_hunt')
-      ? raw.geminiPromptMode
-      : 'browser_hunt',
+    geminiPromptMode: (raw.geminiPromptMode === 'full_store' || raw.geminiPromptMode === 'browser_hunt')
+      ? 'full_store'
+      : 'flyer_deals',
+    chefViewMode: raw.chefViewMode === 'adjust' ? 'adjust' : 'new',
+    chefNote: typeof raw.chefNote === 'string' ? raw.chefNote.trim().slice(0, 300) : '',
+    chefAdjustNote: typeof raw.chefAdjustNote === 'string' ? raw.chefAdjustNote.trim().slice(0, 300) : '',
+    planHistory: (() => {
+      if (!Array.isArray(raw.planHistory)) return [];
+      const out = [];
+      for (let i = 0; i < raw.planHistory.length && out.length < 3; i++) {
+        const ph = raw.planHistory[i];
+        if (!ph || typeof ph !== 'object') continue;
+        out.push({
+          savedAt: typeof ph.savedAt === 'string' ? ph.savedAt : '',
+          weeklyTheme: typeof ph.weeklyTheme === 'string' ? ph.weeklyTheme.trim().slice(0, 140) : 'Saved Plan',
+          customMealJsonRaw: typeof ph.customMealJsonRaw === 'string' ? ph.customMealJsonRaw : ''
+        });
+      }
+      return out;
+    })(),
+    customSwapItems: (() => {
+      const csi = {};
+      if (raw.customSwapItems && typeof raw.customSwapItems === 'object' && !Array.isArray(raw.customSwapItems)) {
+        const keys = Object.keys(raw.customSwapItems);
+        let count = 0;
+        for (let i = 0; i < keys.length && count < 50; i++) {
+          const k = keys[i];
+          if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+          const clean = sanitizePantryStockItem(Object.assign({}, raw.customSwapItems[k], { id: k }));
+          if (clean) {
+            csi[k] = clean;
+            count++;
+          }
+        }
+      }
+      return csi;
+    })(),
+    pendingAdjustments: (() => {
+      const pa = (raw.pendingAdjustments && typeof raw.pendingAdjustments === 'object' && !Array.isArray(raw.pendingAdjustments))
+        ? raw.pendingAdjustments
+        : {};
+      const nilStockIds = [];
+      const seenNil = Object.create(null);
+      if (Array.isArray(pa.nilStockIds)) {
+        for (let i = 0; i < pa.nilStockIds.length && nilStockIds.length < 30; i++) {
+          const id = typeof pa.nilStockIds[i] === 'string' ? pa.nilStockIds[i].trim() : '';
+          if (id && id !== '__proto__' && id !== 'constructor' && id !== 'prototype' && !seenNil[id]) {
+            seenNil[id] = true;
+            nilStockIds.push(id);
+          }
+        }
+      }
+      const scannedAdditions = [];
+      const seenAdd = Object.create(null);
+      if (Array.isArray(pa.scannedAdditions)) {
+        for (let i = 0; i < pa.scannedAdditions.length && scannedAdditions.length < 30; i++) {
+          const clean = sanitizePantryStockItem(pa.scannedAdditions[i]);
+          if (clean && !seenAdd[clean.id]) {
+            seenAdd[clean.id] = true;
+            scannedAdditions.push(clean);
+          }
+        }
+      }
+      return { nilStockIds, scannedAdditions };
+    })(),
     grocerySwaps: (() => {
       const gs = {};
       if (raw.grocerySwaps && typeof raw.grocerySwaps === 'object' && !Array.isArray(raw.grocerySwaps)) {
@@ -614,6 +706,7 @@ export const uiStatus = {
   shareStatusText: '',
   lastTimerStatusText: '',
   stockStatusText: '',
+  chefStatusText: '',
   settingsBuilt: false
 };
 
@@ -853,7 +946,8 @@ export function applyCustomMealJsonOverlay(targetData, rawJsonStr) {
       const cadPkg = clampNum(ci.cadPerPackage !== undefined ? ci.cadPerPackage : (ci.price && ci.price.cadPerPackage), 0, 250, 4.99);
       const cad100 = clampNum(ci.cadPer100g !== undefined ? ci.cadPer100g : (ci.price && ci.price.cadPer100g), 0, 50, Math.round((cadPkg / (pkgG / 100)) * 100) / 100);
       const storeName = typeof ci.store === 'string' && ci.store.trim() ? ci.store.trim() : '';
-      targetData.nutritionDb[cid] = {
+      const healthMeta = normalizeHealthMeta(ci.health || ci, per);
+      const entry = {
         name: typeof ci.name === 'string' && ci.name.trim() ? ci.name.trim() : cid,
         aisle: typeof ci.aisle === 'string' ? ci.aisle : 'Produce',
         per100g: {
@@ -874,10 +968,12 @@ export function applyCustomMealJsonOverlay(targetData, rawJsonStr) {
           historicalLowCadPer100g: cad100,
           savingsPct: 0,
           radarTag: storeName ? storeName.toUpperCase().slice(0, 14) : 'CUSTOM',
-          flyerItemName: storeName ? (storeName + ' — Full-Store Hunt') : 'Custom Recipe Ingredient',
+          flyerItemName: storeName ? (storeName + ' — Store Item') : 'Custom Recipe Ingredient',
           onFlyer: false
         }
       };
+      if (healthMeta) entry.health = healthMeta;
+      targetData.nutritionDb[cid] = entry;
     }
 
     if (parsed.customIngredients && typeof parsed.customIngredients === 'object') {
@@ -1152,24 +1248,220 @@ export function removePantryStockItem(id) {
   return true;
 }
 
-export function getEffectiveAppData() {
+function makePrefixedItemId(prefix, barcode, name) {
+  const digits = String(barcode || '').replace(/\D+/g, '');
+  if (digits.length >= 8 && digits.length <= 14) {
+    return prefix + digits;
+  }
+  const slug = String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 32);
+  const candidate = slug ? (prefix + slug) : (prefix + 'item_' + Date.now());
+  if (candidate === '__proto__' || candidate === 'constructor' || candidate === 'prototype') {
+    return prefix + 'item_' + Date.now();
+  }
+  return candidate;
+}
+
+export function registerCustomSwapItem(rawItem) {
+  if (!rawItem || typeof rawItem !== 'object') return null;
+  if (!appState.customSwapItems || typeof appState.customSwapItems !== 'object' || Array.isArray(appState.customSwapItems)) {
+    appState.customSwapItems = {};
+  }
+  const candidateDigits = String(rawItem.barcode || '').replace(/\D+/g, '');
+  const cleanBarcode = (candidateDigits.length >= 8 && candidateDigits.length <= 14) ? candidateDigits : '';
+
+  let resolvedId = '';
+  const requestedId = typeof rawItem.id === 'string' ? rawItem.id.trim() : '';
+  if (requestedId && requestedId !== '__proto__' && requestedId !== 'constructor' && requestedId !== 'prototype') {
+    resolvedId = requestedId;
+  } else {
+    const baseId = makePrefixedItemId('swap_', cleanBarcode, rawItem.name);
+    resolvedId = baseId;
+    if (!cleanBarcode) {
+      let suffix = 2;
+      while (Object.prototype.hasOwnProperty.call(appState.customSwapItems, resolvedId) && suffix < 100) {
+        resolvedId = baseId + '_' + suffix;
+        suffix++;
+      }
+    }
+  }
+
+  const sanitized = sanitizePantryStockItem(Object.assign({}, rawItem, {
+    id: resolvedId,
+    barcode: cleanBarcode,
+    gramsOnHand: rawItem.gramsOnHand || rawItem.packageGrams || 500
+  }));
+  if (!sanitized) return null;
+  if (sanitized.cadPerPackage === undefined || sanitized.cadPerPackage === null) {
+    sanitized.cadPerPackage = 4.99;
+  }
+
+  const keys = Object.keys(appState.customSwapItems);
+  if (keys.length >= 50 && !Object.prototype.hasOwnProperty.call(appState.customSwapItems, resolvedId)) {
+    delete appState.customSwapItems[keys[0]];
+  }
+  appState.customSwapItems[resolvedId] = sanitized;
+  saveState();
+  return sanitized;
+}
+
+export function applyInStoreSwap(origId, replacementItem) {
+  if (!origId || typeof origId !== 'string') return null;
+  const cleanOrig = origId.trim();
+  if (!cleanOrig || cleanOrig === '__proto__' || cleanOrig === 'constructor' || cleanOrig === 'prototype') return null;
+
+  let baseOrigId = cleanOrig;
   const swaps = appState.grocerySwaps || {};
-  const swapKeys = Object.keys(swaps);
-  const stockList = Array.isArray(appState.pantryStock) ? appState.pantryStock : [];
-  if (swapKeys.length === 0 && stockList.length === 0) return appData;
+  Object.keys(swaps).forEach((k) => {
+    if (swaps[k] === cleanOrig) baseOrigId = k;
+  });
 
-  const cloned = Object.assign({}, appData);
+  const saved = registerCustomSwapItem(replacementItem);
+  if (!saved) return null;
 
-  if (stockList.length > 0) {
-    const nextDb = (appData.nutritionDb && typeof appData.nutritionDb === 'object')
-      ? Object.assign({}, appData.nutritionDb)
-      : {};
+  if (!appState.grocerySwaps || typeof appState.grocerySwaps !== 'object') {
+    appState.grocerySwaps = {};
+  }
+  appState.grocerySwaps[baseOrigId] = saved.id;
+  saveState();
+  recomputePlan();
+  return saved;
+}
+
+export function toggleNilStockIngredient(id) {
+  if (!id || typeof id !== 'string') return false;
+  const cleanId = id.trim();
+  if (!cleanId || cleanId === '__proto__' || cleanId === 'constructor' || cleanId === 'prototype') return false;
+  if (!appState.pendingAdjustments || typeof appState.pendingAdjustments !== 'object') {
+    appState.pendingAdjustments = { nilStockIds: [], scannedAdditions: [] };
+  }
+  const list = Array.isArray(appState.pendingAdjustments.nilStockIds) ? appState.pendingAdjustments.nilStockIds : [];
+  const idx = list.indexOf(cleanId);
+  let flagged = false;
+  if (idx !== -1) {
+    list.splice(idx, 1);
+  } else if (list.length < 30) {
+    list.push(cleanId);
+    flagged = true;
+  }
+  appState.pendingAdjustments.nilStockIds = list;
+  saveState();
+  return flagged;
+}
+
+export function addAdjustScannedItem(rawItem) {
+  if (!rawItem || typeof rawItem !== 'object') return null;
+  if (!appState.pendingAdjustments || typeof appState.pendingAdjustments !== 'object') {
+    appState.pendingAdjustments = { nilStockIds: [], scannedAdditions: [] };
+  }
+  if (!Array.isArray(appState.pendingAdjustments.scannedAdditions)) {
+    appState.pendingAdjustments.scannedAdditions = [];
+  }
+  const list = appState.pendingAdjustments.scannedAdditions;
+
+  const candidateDigits = String(rawItem.barcode || '').replace(/\D+/g, '');
+  const cleanBarcode = (candidateDigits.length >= 8 && candidateDigits.length <= 14) ? candidateDigits : '';
+
+  let existingIdx = -1;
+  if (typeof rawItem.id === 'string' && rawItem.id.trim()) {
+    const targetId = rawItem.id.trim();
+    existingIdx = list.findIndex((it) => it && it.id === targetId);
+  }
+  if (existingIdx === -1 && cleanBarcode) {
+    existingIdx = list.findIndex((it) => it && it.barcode === cleanBarcode);
+  }
+
+  let resolvedId = existingIdx !== -1 ? list[existingIdx].id : '';
+  if (!resolvedId) {
+    const baseId = makePrefixedItemId('adj_', cleanBarcode, rawItem.name);
+    resolvedId = baseId;
+    if (!cleanBarcode) {
+      let suffix = 2;
+      while (list.some((it) => it && it.id === resolvedId) && suffix < 100) {
+        resolvedId = baseId + '_' + suffix;
+        suffix++;
+      }
+    }
+  }
+
+  const sanitized = sanitizePantryStockItem(Object.assign({}, rawItem, {
+    id: resolvedId,
+    barcode: cleanBarcode,
+    gramsOnHand: rawItem.gramsOnHand || rawItem.packageGrams || 500
+  }));
+  if (!sanitized) return null;
+
+  if (existingIdx !== -1) {
+    list[existingIdx] = sanitized;
+  } else if (list.length < 30) {
+    list.push(sanitized);
+  } else {
+    return null;
+  }
+  saveState();
+  return sanitized;
+}
+
+export function removeAdjustScannedItem(id) {
+  if (!appState.pendingAdjustments || !Array.isArray(appState.pendingAdjustments.scannedAdditions) || !id) return false;
+  const beforeLen = appState.pendingAdjustments.scannedAdditions.length;
+  appState.pendingAdjustments.scannedAdditions = appState.pendingAdjustments.scannedAdditions.filter((it) => it && it.id !== id);
+  if (appState.pendingAdjustments.scannedAdditions.length === beforeLen) return false;
+  saveState();
+  return true;
+}
+
+export function clearPendingAdjustments() {
+  appState.pendingAdjustments = { nilStockIds: [], scannedAdditions: [] };
+  appState.chefAdjustNote = '';
+  saveState();
+}
+
+export function pushCurrentPlanToHistory() {
+  if (!Array.isArray(appState.planHistory)) appState.planHistory = [];
+  const curRaw = appState.customMealJsonRaw || '';
+  if (appState.planHistory[0] && appState.planHistory[0].customMealJsonRaw === curRaw) {
+    return appState.planHistory;
+  }
+  const theme = (appData && appData.mealTemplates && appData.mealTemplates.weeklyTheme)
+    ? String(appData.mealTemplates.weeklyTheme).slice(0, 140)
+    : 'Default Weekly Plan';
+  appState.planHistory.unshift({
+    savedAt: new Date().toISOString(),
+    weeklyTheme: theme,
+    customMealJsonRaw: curRaw
+  });
+  appState.planHistory = appState.planHistory.slice(0, 3);
+  saveState();
+  return appState.planHistory;
+}
+
+export function restorePlanFromHistory(index) {
+  if (!Array.isArray(appState.planHistory) || index < 0 || index >= appState.planHistory.length) {
+    return false;
+  }
+  const entry = appState.planHistory[index];
+  if (!entry || typeof entry !== 'object') return false;
+  appState.customMealJsonRaw = typeof entry.customMealJsonRaw === 'string' ? entry.customMealJsonRaw : '';
+  saveState();
+  refreshAppDataFromStorage();
+  recomputePlan();
+  return true;
+}
+
+function buildInjectedNutritionDb(baseDb, stockList, swapItemsMap) {
+  const nextDb = (baseDb && typeof baseDb === 'object') ? Object.assign({}, baseDb) : {};
+
+  if (Array.isArray(stockList)) {
     stockList.forEach((item) => {
       if (!item || !item.id || item.id === '__proto__' || item.id === 'constructor' || item.id === 'prototype') return;
       const existsInDb = Boolean(nextDb[item.id]);
       if (!existsInDb || item.id.indexOf('stock_') === 0) {
         const pkgG = clampInt(item.packageGrams, 1, 20000, 500);
-        nextDb[item.id] = {
+        const rec = {
           name: item.brand ? (item.name + ' (' + item.brand + ')') : item.name,
           aisle: item.aisle || 'Pantry/Canned',
           per100g: {
@@ -1194,9 +1486,171 @@ export function getEffectiveAppData() {
             onFlyer: false
           }
         };
+        if (item.health) rec.health = item.health;
+        nextDb[item.id] = rec;
+      } else if (item.health && !nextDb[item.id].health) {
+        nextDb[item.id] = Object.assign({}, nextDb[item.id], { health: item.health });
       }
     });
-    cloned.nutritionDb = nextDb;
+  }
+
+  if (swapItemsMap && typeof swapItemsMap === 'object' && !Array.isArray(swapItemsMap)) {
+    Object.keys(swapItemsMap).forEach((sid) => {
+      if (sid === '__proto__' || sid === 'constructor' || sid === 'prototype') return;
+      const item = swapItemsMap[sid];
+      if (!item || typeof item !== 'object') return;
+      const pkgG = clampInt(item.packageGrams, 1, 20000, 500);
+      const cadPkg = clampNum(item.cadPerPackage, 0, 250, 4.99);
+      const cad100 = Math.round((cadPkg / (pkgG / 100)) * 100) / 100;
+      const rec = {
+        name: item.brand ? (item.name + ' (' + item.brand + ')') : item.name,
+        aisle: item.aisle || 'Pantry/Canned',
+        per100g: {
+          calories: Number(item.per100g && item.per100g.calories) || 0,
+          protein: Number(item.per100g && item.per100g.protein) || 0,
+          fat: Number(item.per100g && item.per100g.fat) || 0,
+          carbs: Number(item.per100g && item.per100g.carbs) || 0
+        },
+        cookedYield: clampNum(item.cookedYield, 0.2, 4.0, 1.0),
+        packageGrams: pkgG,
+        unitLabel: 'pack (' + pkgG + 'g)',
+        requiresThaw: item.aisle === 'Frozen',
+        pantryDefault: false,
+        price: {
+          cadPer100g: cad100,
+          cadPerPackage: cadPkg,
+          regularCadPer100g: cad100,
+          historicalLowCadPer100g: cad100,
+          savingsPct: 0,
+          radarTag: item.store ? item.store.toUpperCase().slice(0, 14) : 'SWAPPED',
+          flyerItemName: item.store ? (item.store + ' — In-Store Swap') : 'In-Store Barcode Swap',
+          onFlyer: false
+        }
+      };
+      if (item.health) rec.health = item.health;
+      nextDb[sid] = rec;
+    });
+  }
+
+  return nextDb;
+}
+
+export function previewCustomMealJson(rawStr) {
+  if (!rawStr || typeof rawStr !== 'string' || !rawStr.trim()) {
+    return { ok: false, error: 'Paste the JSON reply from Gemini first.' };
+  }
+  const base = mergeWithFallbackData(safeStorageGet(STORAGE_DATA_KEY));
+  const ok = applyCustomMealJsonOverlay(base, rawStr);
+  if (!ok) {
+    return {
+      ok: false,
+      error: 'Could not read valid JSON. Make sure you copied the full { ... } block from Gemini.'
+    };
+  }
+
+  const engine = getEngine();
+  if (!engine || !hasBaselineNutrition(base, engine)) {
+    return { ok: false, error: 'Nutrition engine is still loading.' };
+  }
+
+  const stockList = Array.isArray(appState.pantryStock) ? appState.pantryStock : [];
+  const activeStock = stockList.filter((it) => it && Number(it.gramsOnHand) > 0);
+  base.nutritionDb = buildInjectedNutritionDb(base.nutritionDb, stockList, appState.customSwapItems);
+
+  try {
+    const members = Array.isArray(appState.householdMembers) && appState.householdMembers.length > 0
+      ? appState.householdMembers
+      : [{ id: 'p1', name: 'Me', preset: appState.preset, targets: appState.targets }];
+    const hPlans = [];
+    let activeDaily = null;
+    members.forEach((m) => {
+      const mPlan = engine.solveDailyPortions(base, {
+        preset: m.preset === 'custom' ? 'cut' : m.preset,
+        targets: m.targets,
+        lunchSwap: appState.lunchSwap,
+        dinnerSwap: appState.dinnerSwap,
+        slotSplits: appState.slotSplits
+      });
+      hPlans.push({ member: m, primaryPlan: mPlan, altPlan: null });
+      if (m.id === appState.activeMemberId || !activeDaily) {
+        activeDaily = mPlan;
+      }
+    });
+
+    const scaled = engine.scaleToHorizon(activeDaily, base, {
+      days: appState.horizonDays,
+      householdPlans: hPlans.length > 1 ? hPlans : null,
+      haveAtHome: appState.haveAtHome,
+      stockGramsOnHand: buildStockGramsMap(stockList),
+      frozenMealsOnHand: Math.min(appState.horizonDays, appState.frozenMealsOnHand)
+    });
+
+    const stockUsedNames = [];
+    const dailyIngGrams = activeDaily.ingredientGrams || {};
+    activeStock.forEach((stItem) => {
+      if ((Number(dailyIngGrams[stItem.id]) || 0) > 0) {
+        stockUsedNames.push(stItem.name);
+      }
+    });
+
+    const healthWarnings = [];
+    const seenWarnIds = Object.create(null);
+    Object.keys(dailyIngGrams).forEach((iid) => {
+      if (seenWarnIds[iid] || !(dailyIngGrams[iid] > 0)) return;
+      const dbEntry = base.nutritionDb && base.nutritionDb[iid];
+      if (!dbEntry) return;
+      const wList = evaluateIngredientHealth(dbEntry);
+      if (wList.length > 0) {
+        seenWarnIds[iid] = true;
+        healthWarnings.push({
+          id: iid,
+          name: dbEntry.name,
+          warnings: wList
+        });
+      }
+    });
+
+    return {
+      ok: true,
+      error: '',
+      weeklyTheme: (base.mealTemplates && base.mealTemplates.weeklyTheme) || 'Custom Menu',
+      meals: activeDaily.meals.map((m) => ({
+        id: m.id,
+        slot: m.slot,
+        title: m.title,
+        calories: Math.round(m.totals.calories),
+        protein: Math.round(m.totals.protein),
+        fat: Math.round(m.totals.fat),
+        carbs: Math.round(m.totals.carbs)
+      })),
+      totals: activeDaily.totals,
+      targets: activeDaily.targets,
+      fatCeilingExceeded: Boolean(activeDaily.fatCeilingExceeded),
+      estimatedCostCad: scaled.summary.remainingCostCad,
+      stockUsedNames: stockUsedNames,
+      stockTotalCount: activeStock.length,
+      healthWarnings: healthWarnings
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: 'Plan preview failed: ' + (err && err.message ? err.message : 'invalid ingredient weights.')
+    };
+  }
+}
+
+export function getEffectiveAppData() {
+  const swaps = appState.grocerySwaps || {};
+  const swapKeys = Object.keys(swaps);
+  const stockList = Array.isArray(appState.pantryStock) ? appState.pantryStock : [];
+  const customSwapItems = (appState.customSwapItems && typeof appState.customSwapItems === 'object') ? appState.customSwapItems : {};
+  const customSwapCount = Object.keys(customSwapItems).length;
+  if (swapKeys.length === 0 && stockList.length === 0 && customSwapCount === 0) return appData;
+
+  const cloned = Object.assign({}, appData);
+
+  if (stockList.length > 0 || customSwapCount > 0) {
+    cloned.nutritionDb = buildInjectedNutritionDb(appData.nutritionDb, stockList, customSwapItems);
   }
 
   if (swapKeys.length === 0) return cloned;

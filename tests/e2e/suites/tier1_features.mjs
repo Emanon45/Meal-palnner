@@ -1378,7 +1378,7 @@ export const tier1Tests = [
       const iso = await createIsolatedContext(browser);
       try {
         await iso.page.goto(srv.baseUrl, { waitUntil: 'networkidle' });
-        for (const re of [/Meals/i, /Prep/i, /Groceries/i, /Settings|Targets/i]) {
+        for (const re of [/Meals/i, /Prep/i, /Groceries/i, /AI Chef/i, /Settings|Targets/i]) {
           await switchTab(iso.page, re);
           await assertMobileLayout(iso.page, 390);
         }

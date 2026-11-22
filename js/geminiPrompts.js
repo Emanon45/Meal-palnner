@@ -1,5 +1,5 @@
+import { evaluateIngredientHealth } from './healthWarnings.js';
 import {
-  MEAL_SLOTS,
   getAppData,
   getAppState,
   getCurrentDailyPlan,
@@ -7,6 +7,13 @@ import {
   getEngine,
   hasBaselineNutrition
 } from './state.js';
+
+function formatHealthSuffix(item) {
+  const warnings = evaluateIngredientHealth(item);
+  if (warnings.length === 0) return '';
+  const labels = warnings.map((w) => w.label.replace(/^\u26A0\s*/, ''));
+  return ' [Health Note: ' + labels.join(', ') + ']';
+}
 
 export function buildHomeStockPromptBlock(appState, appData, dbSource) {
   const stockLines = [];
@@ -25,7 +32,8 @@ export function buildHomeStockPromptBlock(appState, appData, dbSource) {
       '- `' + item.id + '`: ' + item.name + brandSuffix + barcodeSuffix +
       ' — ' + item.gramsOnHand + 'g total at home (~' + dailyApprox + 'g/day across ' + horizonDays + 'd) | Macros per 100g: ' +
       (Number(per.calories) || 0) + ' kcal, ' + (Number(per.protein) || 0) + 'g P, ' +
-      (Number(per.fat) || 0) + 'g F, ' + (Number(per.carbs) || 0) + 'g C (Aisle: ' + (item.aisle || 'Pantry/Canned') + ')'
+      (Number(per.fat) || 0) + 'g F, ' + (Number(per.carbs) || 0) + 'g C (Aisle: ' + (item.aisle || 'Pantry/Canned') + ')' +
+      formatHealthSuffix(item)
     );
   });
 
@@ -39,7 +47,7 @@ export function buildHomeStockPromptBlock(appState, appData, dbSource) {
     const perText = entry.per100g
       ? (' | Macros per 100g: ' + (Number(per.calories) || 0) + ' kcal, ' + (Number(per.protein) || 0) + 'g P, ' + (Number(per.fat) || 0) + 'g F, ' + (Number(per.carbs) || 0) + 'g C')
       : '';
-    stockLines.push('- `' + id + '`: ' + entry.name + ' — already marked at home' + perText);
+    stockLines.push('- `' + id + '`: ' + entry.name + ' — already marked at home' + perText + formatHealthSuffix(entry));
   });
 
   if (stockLines.length === 0) return '';
@@ -50,8 +58,102 @@ export function buildHomeStockPromptBlock(appState, appData, dbSource) {
     stockLines.join('\n'),
     '',
     'STOCK-FIRST RULE:',
-    'You MUST prioritize using my PRIORITY HOME STOCK items above across Breakfast, Lunch, Dinner, or Snack so I empty my stock first before buying extra items! Use their exact IDs (`stock_...` or built-in IDs) in the meal ingredients list, include any `stock_*` items you use inside `customIngredients` with `"cadPerPackage": 0` (keeping their exact per100g macros above), and only buy store items for what is still needed to hit my daily macro targets.'
+    'Prioritize using my PRIORITY HOME STOCK items above across Breakfast, Lunch, Dinner, or Snack so I empty my kitchen stock first before buying extra items! Use their exact IDs (`stock_...` or built-in IDs) in the meal ingredients list, include any `stock_*` items you use inside `customIngredients` with `"cadPerPackage": 0` (keeping their exact per100g macros above), and only buy Maxi or Super C items for what is still needed to hit my daily macro targets.'
   ].join('\n');
+}
+
+function buildSharedJsonSchemaExample(targetCalories) {
+  return [
+    'Return ONLY a valid JSON object (no markdown commentary) with this exact structure:',
+    '{',
+    '  "weeklyTheme": "Short catchy weekly culinary theme",',
+    '  "targetCalories": ' + targetCalories + ',',
+    '  "customIngredients": {',
+    '    "example_item_id": {',
+    '      "name": "Display Name (e.g. Selection Lean Pork Loin or No Name Frozen Broccoli)",',
+    '      "store": "Super C",',
+    '      "aisle": "Meat",',
+    '      "per100g": { "calories": 135, "protein": 22.0, "fat": 4.5, "carbs": 0.0 },',
+    '      "health": { "sugars": 0.0, "saturatedFat": 1.5, "sodiumMg": 65 },',
+    '      "cookedYield": 0.75,',
+    '      "packageGrams": 500,',
+    '      "unitLabel": "pack (500g)",',
+    '      "cadPerPackage": 5.99',
+    '    }',
+    '  },',
+    '  "meals": [',
+    '    { "id": "breakfast", "title": "Breakfast Name", "cookingMethod": "Quick 5-min fresh morning prep (no hardcoded weights)", "seasoningTwist": "Dry spices & herbs", "ingredients": [{ "id": "example_item_id", "grams": 150 }] },',
+    '    { "id": "lunch", "title": "Lunch Name", "cookingMethod": "Batch-cook method (no hardcoded weights)", "seasoningTwist": "Dry spices & herbs", "ingredients": [{ "id": "example_item_id", "grams": 180 }] },',
+    '    { "id": "dinner", "title": "Dinner Name", "cookingMethod": "Batch-cook method (no hardcoded weights)", "seasoningTwist": "Dry spices & herbs", "ingredients": [{ "id": "example_item_id", "grams": 180 }] },',
+    '    { "id": "snack", "title": "Snack Name", "cookingMethod": "2-min fresh assembly (no hardcoded weights)", "seasoningTwist": "Cinnamon, vanilla, or citrus zest", "ingredients": [{ "id": "example_item_id", "grams": 200 }] }',
+    '  ],',
+    '  "prepTimeline": [',
+    '    { "id": "step_1", "order": 1, "prepType": "batch", "title": "Batch: Grains + Dinner Simmer", "station": "Rice Cooker + Dutch Oven", "startMinute": 0, "durationMinutes": 30, "timerSeconds": 1800, "parallelNote": "Start grains and dinner braise together." },',
+    '    { "id": "step_2", "order": 2, "prepType": "batch", "title": "Batch: Cook Lunch Protein", "station": "Skillet / Air Fryer", "startMinute": 5, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Cook all lunch protein in one batch while dinner simmers." },',
+    '    { "id": "step_3", "order": 3, "prepType": "batch", "title": "Batch: Cool & Split Fridge (Days 1-4) + Freezer (Day 5+)", "station": "Counter", "startMinute": 30, "durationMinutes": 10, "timerSeconds": 600, "parallelNote": "Portion Lunch & Dinner containers; freeze Day 5+ portions." },',
+    '    { "id": "step_4", "order": 4, "prepType": "fresh", "title": "Daily Fresh (2-5 min): Breakfast, Snack & Cold Toppings", "station": "Skillet / Bowl", "startMinute": 0, "durationMinutes": 5, "timerSeconds": 300, "parallelNote": "Make breakfast, snack bowl, and raw crunchy toppings fresh so nothing gets soggy." }',
+    '  ]',
+    '}'
+  ].join('\n');
+}
+
+function buildFlyerDealsSummaryLines(appData) {
+  const lines = [];
+  const seenNames = Object.create(null);
+  const catalog = (appData && appData.weeklyFlyerCatalog && typeof appData.weeklyFlyerCatalog === 'object')
+    ? appData.weeklyFlyerCatalog
+    : {};
+
+  ['Maxi', 'Super C'].forEach((storeName) => {
+    const storeList = Array.isArray(catalog[storeName]) ? catalog[storeName] : [];
+    storeList.forEach((deal) => {
+      if (!deal || !deal.name) return;
+      const dedupKey = storeName + '|' + String(deal.name).toLowerCase();
+      if (seenNames[dedupKey]) return;
+      seenNames[dedupKey] = true;
+      const pricePart = deal.priceText
+        ? (' — ' + deal.priceText)
+        : (typeof deal.priceCad === 'number' ? (' — $' + deal.priceCad.toFixed(2)) : '');
+      const catPart = deal.category ? (' [' + deal.category + ']') : '';
+      lines.push('   * [' + storeName + '] ' + deal.name + pricePart + catPart);
+    });
+  });
+
+  const db = (appData && appData.nutritionDb && typeof appData.nutritionDb === 'object') ? appData.nutritionDb : {};
+  const winningStore = (appData && (appData.winningStore === 'Maxi' || appData.winningStore === 'Super C'))
+    ? appData.winningStore
+    : 'Super C';
+  Object.keys(db).forEach((k) => {
+    if (k === 'ground_chicken' || k.indexOf('stock_') === 0 || k === 'aromatics_zero') return;
+    const item = db[k];
+    if (!item || !item.name || !item.price || !item.price.onFlyer) return;
+    const flyerLabel = String(item.price.flyerItemName || item.name);
+    const dedupKey = winningStore + '|' + flyerLabel.toLowerCase();
+    if (seenNames[dedupKey]) return;
+    seenNames[dedupKey] = true;
+    const rate = typeof item.price.cadPer100g === 'number' ? (' ($' + item.price.cadPer100g.toFixed(2) + '/100g)') : '';
+    const tag = item.price.radarTag ? (' [' + item.price.radarTag + ']') : '';
+    lines.push('   * [' + winningStore + '] ' + item.name + ' (' + flyerLabel + ')' + rate + tag + ' -> id: `' + k + '`');
+  });
+
+  if (lines.length === 0) {
+    lines.push('   * No pre-loaded flyer items matched offline cache — use affordable Maxi & Super C staples and keep grocery cost low.');
+  }
+  return lines.join('\n');
+}
+
+function formatPromptIngredientName(ing) {
+  if (!ing) return '';
+  if (ing.id === 'ground_chicken') return 'Extra-Lean Ground Chicken';
+  return String(ing.name || ing.id || '').trim();
+}
+
+function buildHouseholdLine(appState) {
+  if (!Array.isArray(appState.householdMembers) || appState.householdMembers.length <= 1) return '';
+  const memberSummaries = appState.householdMembers.map((m) => {
+    return m.name + ' (' + m.targets.calories + ' kcal / ' + m.targets.protein + 'g P)';
+  });
+  return '\nHousehold Members eating these meals (portions scale automatically per person): ' + memberSummaries.join(', ') + '.';
 }
 
 export function buildGeminiMealPrompt() {
@@ -59,232 +161,179 @@ export function buildGeminiMealPrompt() {
   const appData = getEffectiveAppData ? getEffectiveAppData() : getAppData();
   const engine = getEngine();
 
-  const disliked = [];
-  const liked = [];
-  MEAL_SLOTS.forEach((slot) => {
-    const fb = appState.feedback && appState.feedback[slot];
-    if (!fb) return;
-    const label = slot.charAt(0).toUpperCase() + slot.slice(1);
-    if (fb.rating === 'down') disliked.push(label + (fb.note ? ' (' + fb.note + ')' : ''));
-    if (fb.rating === 'up') liked.push(label + (fb.note ? ' (' + fb.note + ')' : ''));
-    else if (fb.note && fb.rating !== 'down') liked.push(label + ' note: ' + fb.note);
-  });
-  let feedbackLine = '';
-  if (disliked.length > 0) feedbackLine += '\nMeals I want to change / replace: ' + disliked.join(', ') + '.';
-  if (liked.length > 0) feedbackLine += '\nMeals/notes I liked: ' + liked.join(', ') + '.';
+  const horizonDays = clampDaysForPrompt(appState.horizonDays);
+  const postalCode = appState.postalCode || 'H1W';
+  const householdLine = buildHouseholdLine(appState);
+  const noteText = typeof appState.chefNote === 'string' && appState.chefNote.trim()
+    ? ('\nMy Requests / Cravings This Week: ' + appState.chefNote.trim())
+    : '';
 
-  let householdLine = '';
-  if (Array.isArray(appState.householdMembers) && appState.householdMembers.length > 1) {
-    const memberSummaries = appState.householdMembers.map((m) => {
-      return m.name + ' (' + m.targets.calories + ' kcal / ' + m.targets.protein + 'g P)';
-    });
-    householdLine = '\nHousehold Members eating these meals (portions scale automatically per person): ' + memberSummaries.join(', ') + '.';
-  }
-
-  const mode = appState.geminiPromptMode || 'browser_hunt';
-  const isBrowserHunt = mode === 'browser_hunt';
-  const isCustomMode = mode === 'allow_custom' || isBrowserHunt;
-
-  let basePlanForPrompt = getCurrentDailyPlan();
-  if (!basePlanForPrompt && engine && hasBaselineNutrition(appData, engine)) {
-    try {
-      basePlanForPrompt = engine.solveDailyPortions(appData, {
-        preset: appState.preset === 'custom' ? 'cut' : appState.preset,
-        targets: appState.targets,
-        lunchSwap: appState.lunchSwap,
-        dinnerSwap: appState.dinnerSwap
-      });
-    } catch (_err) {
-      basePlanForPrompt = null;
-    }
-  }
-
-  const exactSlotLines = [];
-  if (basePlanForPrompt && Array.isArray(basePlanForPrompt.meals)) {
-    basePlanForPrompt.meals.forEach((m) => {
-      const names = (m.ingredients || []).map((ing) => {
-        return ing.name + ' [`' + ing.id + '`]';
-      });
-      exactSlotLines.push('   - ' + m.slot + ' (`' + m.id + '` MUST use ONLY these grocery items): ' + names.join(', '));
-    });
-  }
-
-  const allDbLines = [];
   const dataDb = (appData && appData.nutritionDb && typeof appData.nutritionDb === 'object') ? appData.nutritionDb : null;
   const dbSource = (dataDb && Object.keys(dataDb).length > 0)
     ? dataDb
     : ((engine && engine.DEFAULT_NUTRITION_DB) || {});
-  Object.keys(dbSource).forEach((k) => {
-    if (k.indexOf('stock_') === 0) return;
-    const item = dbSource[k];
-    if (!item || !item.name) return;
-    const tag = (item.price && item.price.onFlyer && item.price.radarTag && item.price.radarTag !== 'REGULAR')
-      ? (' [' + item.price.radarTag + ' at ' + (appData.winningStore || 'Store') + ']')
-      : '';
-    allDbLines.push('   * `' + k + '`: ' + item.name + tag);
-  });
 
   const homeStockBlock = buildHomeStockPromptBlock(appState, appData, dbSource);
+  const isFullStore = appState.geminiPromptMode === 'full_store' || appState.geminiPromptMode === 'browser_hunt';
+  const schemaExample = buildSharedJsonSchemaExample(appState.targets.calories);
 
-  if (!isCustomMode) {
+  const sharedHeader = [
+    isFullStore
+      ? ('Act as my Montreal (' + postalCode + ') Maxi & Super C Grocery & Macro Meal Planner using your browser.')
+      : ('Act as my Montreal (' + postalCode + ') Maxi & Super C Weekly Flyer Meal Planner.'),
+    'Store Scope: Strictly MAXI (maxi.ca) and SUPER C (superc.ca) ONLY — I only shop at Maxi and Super C (do NOT use any other stores).',
+    'Prep Horizon: ' + horizonDays + ' Days.',
+    'Active Daily Macro Targets: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.' +
+      householdLine + noteText + (homeStockBlock ? ('\n' + homeStockBlock) : '')
+  ].join('\n');
+
+  if (isFullStore) {
     return [
-      'Generate a fresh weekly meal prep menu & parallel cooking timeline for my Meal Plan app.',
-      'Active Macro Targets: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.',
-      'Winning Grocery Store: ' + (appData.winningStore || 'Super C') + ' (' + appState.postalCode + ').' + householdLine + feedbackLine + (homeStockBlock ? ('\n' + homeStockBlock) : ''),
+      sharedHeader,
       '',
-      'STRICT ANTI-HALLUCINATION RULES (FLYER-BASKET LOCKED MODE):',
-      '1. Every meal card in my app renders a locked list of grocery ingredients underneath your text. You MUST write each meal\'s "title", "cookingMethod", and "seasoningTwist" using ONLY the exact ingredients assigned to that meal slot below:',
-      exactSlotLines.join('\n'),
-      '2. Full 25-item Flyer Database available in my app (for reference):',
-      allDbLines.join('\n'),
-      '3. DO NOT hallucinate or mention ANY meat, fish, vegetable, bean, grain, dairy, or tortilla/bread that is not listed in that meal slot above! (For example: do NOT mention beef/sirloin, bell peppers, zucchini, black beans, avocado, cheese, or tortillas—only use the exact protein, veggies, and carbs listed for that slot, plus zero-calorie dry spices, herbs, citrus juice, vinegar, mustard, soy sauce, or hot sauce).',
-      '4. NEVER write hardcoded weights, ounces, or cup measurements (like "6 oz", "200g", or "1/2 cup") inside "cookingMethod" or "seasoningTwist"—the app dynamically calculates exact gram/cup portions per person underneath.',
-      '5. BATCH PREP vs. FRESH PREP RULES: I have 2-3 hours on prep day for thorough batch cooking (keep max 2-3 stations active at once for a relaxed workflow). Tag each prepTimeline step with "prepType": "batch" (only Lunch & Dinner meats/rice/stew for Fridge Days 1-4 & Freezer Day 5+) vs "prepType": "fresh" (Breakfast, Snack, and cold raw toppings made fresh in 2-5 min—never batch-scramble 7 days of eggs or freeze berries in yogurt).',
+      'FULL-STORE MAXI & SUPER C BROWSER SEARCH RULES:',
+      '1. BLANK SLATE: Create 4 brand-new recipes from scratch. Do NOT copy or force any old menu or previous week\'s fixed ingredients.',
+      '2. BROWSE MAXI & SUPER C ONLY: Check BOTH regular everyday shelf/value-pack prices AND weekly flyers on maxi.ca and superc.ca for ' + postalCode + '. Compare unit costs ($/100g of protein and $/100g) across Maxi and Super C and pick the best value.',
+      '3. HEALTHY & ZERO ADDED OIL: Design 4 delicious ZERO-ADDED-OIL recipes (breakfast, lunch, dinner, snack) with daily raw ingredient gram weights matching the Active Daily Macro Targets above. Prefer whole foods low in added sugar and sodium (avoid sugary sauces, deli meats, and ultra-processed items).',
+      '4. COMPLETE INGREDIENT DEFINITIONS: Define EVERY ingredient you use inside `"customIngredients"` with `"store": "Maxi"` or `"Super C"`, aisle (`"Produce"`, `"Meat"`, `"Dairy/Eggs"`, `"Pantry/Canned"`, or `"Frozen"`), exact `per100g`, `health: { sugars, saturatedFat, sodiumMg }`, `cookedYield`, `packageGrams`, `unitLabel`, and exact `cadPerPackage` you observed.',
+      '5. RAW WEIGHTS & NO HARDCODED TEXT WEIGHTS: Put raw/as-purchased gram weights inside each meal\'s `"ingredients"` array (`[{"id": "...", "grams": 150}]`). Never write gram/oz/cup amounts inside `"cookingMethod"` or `"seasoningTwist"` because my app scales portions dynamically.',
+      '6. BATCH PREP vs. FRESH PREP: I have 2-3 hours on prep day (max 2-3 active stations). Separate `"prepType": "batch"` (Lunch & Dinner meats/grains/stews for Fridge Days 1-4 & Freezer Day 5+) from `"prepType": "fresh"` (Breakfast, Snack, and crisp raw toppings prepped fresh in 2-5 min).',
       '',
-      'Return ONLY a valid JSON object (no markdown commentary) with this exact structure:',
-      '{',
-      '  "weeklyTheme": "Short catchy weekly culinary theme",',
-      '  "meals": [',
-      '    { "id": "breakfast", "title": "New Breakfast Name matching Breakfast ingredients", "cookingMethod": "Quick 5-min fresh morning prep using ONLY Breakfast ingredients", "seasoningTwist": "Dry spices, herbs & zero-cal aromatics" },',
-      '    { "id": "lunch", "title": "New Lunch Name matching Lunch ingredients", "cookingMethod": "Batch-cook method using ONLY Lunch ingredients", "seasoningTwist": "Dry spices, herbs & zero-cal aromatics" },',
-      '    { "id": "dinner", "title": "New Dinner Name matching Dinner ingredients", "cookingMethod": "Batch-cook method using ONLY Dinner ingredients", "seasoningTwist": "Dry spices, herbs & zero-cal aromatics" },',
-      '    { "id": "snack", "title": "New Snack Name matching Snack ingredients", "cookingMethod": "2-min fresh assembly using ONLY Snack ingredients", "seasoningTwist": "Cinnamon, vanilla, cocoa, espresso, or citrus zest" }',
-      '  ],',
-      '  "prepTimeline": [',
-      '    { "id": "step_1", "order": 1, "prepType": "batch", "title": "Batch: Rice Cooker + Dinner Braise", "station": "Dutch Oven / Rice Cooker", "startMinute": 0, "durationMinutes": 30, "timerSeconds": 1800, "parallelNote": "Start rice and dinner braise together" },',
-      '    { "id": "step_2", "order": 2, "prepType": "batch", "title": "Batch: Sear Lunch Protein", "station": "Skillet", "startMinute": 5, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Cook lunch protein in one batch while dinner simmers" },',
-      '    { "id": "step_3", "order": 3, "prepType": "batch", "title": "Batch: Portion Fridge (Days 1-4) & Freezer (Day 5+)", "station": "Counter", "startMinute": 30, "durationMinutes": 10, "timerSeconds": 600, "parallelNote": "Cool and pack Lunch & Dinner containers" },',
-      '    { "id": "step_4", "order": 4, "prepType": "fresh", "title": "Daily Fresh (2-5 min): Breakfast, Snack & Raw Toppings", "station": "Skillet / Prep Board", "startMinute": 0, "durationMinutes": 5, "timerSeconds": 300, "parallelNote": "Cook eggs/potatoes and mix skyr/berries/raw veggies fresh so nothing gets soggy" }',
-      '  ]',
-      '}'
+      schemaExample
     ].join('\n');
   }
 
-  if (isBrowserHunt) {
-    return [
-      'Act as my Montreal (' + appState.postalCode + ') Full-Store Grocery & Macro Meal Planner using your browser.',
-      'Target Store Scope: Browse Super C (superc.ca), Maxi (maxi.ca), and Walmart Canada (walmart.ca) for postal code ' + appState.postalCode + '.',
-      'Active Daily Macro Targets: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.' + householdLine + feedbackLine + (homeStockBlock ? ('\n' + homeStockBlock) : ''),
-      '',
-      'ZERO-INFLUENCE FULL-STORE BROWSER HUNT RULES:',
-      '1. Start from a completely BLANK SLATE—do NOT copy or assume any prior menu, preset dishes, or flyer-only list.',
-      '2. Check BOTH regular everyday shelf/value-pack prices AND weekly flyers on superc.ca, maxi.ca, and walmart.ca. Everyday staples (dry beans, rice, oats, frozen veg, value-pack meats, bananas, carrots) often beat featured flyer items—pick whichever is genuinely cheapest in $/100g of protein and $/100g.',
-      '3. Design 4 cohesive, delicious, ZERO-ADDED-OIL recipes (Breakfast, Lunch, Dinner, Snack) built strictly around the cheapest real items you found, with daily ingredient gram weights summing close to the Active Daily Macro Targets above.',
-      '4. Define EVERY ingredient you use inside "customIngredients" with its real store ("Super C", "Maxi", or "Walmart"), aisle ("Produce", "Meat", "Dairy/Eggs", "Pantry/Canned", or "Frozen"), exact per100g nutrition, cookedYield, packageGrams, unitLabel, and exact cadPerPackage you observed.',
-      '5. List each meal\'s exact ingredients inside its "ingredients" array ([{"id": "...", "grams": 150}]) using raw/as-purchased gram weights.',
-      '6. BATCH PREP vs. FRESH PREP RULES (I have 2-3 hours on prep day, and want zero-stress weekday meals):',
-      '   - Pace the batch cook comfortably across 2-3 stations at a time (no 4-way simultaneous pan chaos) so meats sear and braise properly.',
-      '   - Strictly separate "prepType": "batch" (Lunch & Dinner meats, rice, stews, beans that store in Fridge Days 1-4 and Freeze Day 5+) from "prepType": "fresh" (Breakfast, Snack, and raw crunchy toppings/sauces prepared fresh in 2-5 min on the day of eating—NEVER tell me to batch-scramble 7 days of eggs or freeze berries in yogurt!).',
-      '7. NEVER write hardcoded weights or volumes inside "cookingMethod" or "seasoningTwist"—my app scales exact gram/cup portions dynamically per person.',
-      '',
-      'Return ONLY a valid JSON object (no markdown commentary) with this exact structure:',
-      '{',
-      '  "weeklyTheme": "Short catchy weekly culinary theme",',
-      '  "targetCalories": ' + appState.targets.calories + ',',
-      '  "customIngredients": {',
-      '    "example_item_id": {',
-      '      "name": "Display Name (e.g. Selection Lean Pork Loin or Great Value Frozen Broccoli)",',
-      '      "store": "Super C",',
-      '      "aisle": "Meat",',
-      '      "per100g": { "calories": 135, "protein": 22.0, "fat": 4.5, "carbs": 0.0 },',
-      '      "cookedYield": 0.75,',
-      '      "packageGrams": 500,',
-      '      "unitLabel": "pack (500g)",',
-      '      "cadPerPackage": 5.99',
-      '    }',
-      '  },',
-      '  "meals": [',
-      '    { "id": "breakfast", "title": "Breakfast Name", "cookingMethod": "Quick 5-min fresh morning prep (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "ingredients": [{ "id": "example_item_id", "grams": 150 }] },',
-      '    { "id": "lunch", "title": "Lunch Name", "cookingMethod": "Batch-cook method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "ingredients": [{ "id": "example_item_id", "grams": 180 }] },',
-      '    { "id": "dinner", "title": "Dinner Name", "cookingMethod": "Batch-cook method (no hardcoded weights)", "seasoningTwist": "Spices & herbs", "ingredients": [{ "id": "example_item_id", "grams": 180 }] },',
-      '    { "id": "snack", "title": "Snack Name", "cookingMethod": "2-min fresh assembly (no hardcoded weights)", "seasoningTwist": "Cinnamon, vanilla, or citrus zest", "ingredients": [{ "id": "example_item_id", "grams": 200 }] }',
-      '  ],',
-      '  "prepTimeline": [',
-      '    { "id": "step_1", "order": 1, "prepType": "batch", "title": "Batch: Rice Cooker + Dinner Simmer", "station": "Rice Cooker + Dutch Oven", "startMinute": 0, "durationMinutes": 30, "timerSeconds": 1800, "parallelNote": "Start rice and dinner braise together; no babysitting needed." },',
-      '    { "id": "step_2", "order": 2, "prepType": "batch", "title": "Batch: Sear Lunch Protein", "station": "Skillet", "startMinute": 5, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Cook all lunch protein in one batch while dinner simmers." },',
-      '    { "id": "step_3", "order": 3, "prepType": "batch", "title": "Batch: Cool & Split Fridge (Days 1-4) + Freezer (Day 5+)", "station": "Counter", "startMinute": 30, "durationMinutes": 10, "timerSeconds": 600, "parallelNote": "Portion Lunch & Dinner containers; freeze Day 5+ portions." },',
-      '    { "id": "step_4", "order": 4, "prepType": "fresh", "title": "Daily Fresh (2-5 min): Breakfast, Snack & Cold Toppings", "station": "Skillet / Bowl", "startMinute": 0, "durationMinutes": 5, "timerSeconds": 300, "parallelNote": "Make breakfast, snack bowl, and raw crunchy toppings fresh so nothing gets soggy or rubbery." }',
-      '  ]',
-      '}'
-    ].join('\n');
-  }
+  const flyerLines = buildFlyerDealsSummaryLines(appData);
+  const flyerPeriod = (appData && appData.flyerPeriod)
+    ? (appData.flyerPeriod.validFrom + ' to ' + appData.flyerPeriod.validTo)
+    : 'Current Week';
 
   return [
-    'Generate a fresh weekly meal prep menu, custom grocery ingredients, & parallel cooking timeline for my Meal Plan app.',
-    'Active Macro Targets: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.',
-    'Winning Grocery Store: ' + (appData.winningStore || 'Super C') + ' (' + appState.postalCode + ').' + householdLine + feedbackLine + (homeStockBlock ? ('\n' + homeStockBlock) : ''),
+    sharedHeader,
     '',
-    'CURRENT DEFAULT SLOT INGREDIENTS IN MY APP:',
-    exactSlotLines.join('\n'),
+    'THIS WEEK\'S MAXI & SUPER C FLYER DEALS (' + flyerPeriod + '):',
+    flyerLines,
     '',
-    'BUILT-IN 25 INGREDIENT IDS ALREADY IN MY DATABASE:',
-    allDbLines.join('\n'),
+    'FLYER DEALS SEARCH RULES (MAXI & SUPER C ONLY):',
+    '1. BLANK SLATE: Create 4 brand-new recipes from scratch. Do NOT copy or repeat any previous week\'s fixed dishes.',
+    '2. PRIORITIZE HOME STOCK + FLYER DEALS: Empty my PRIORITY HOME STOCK first, then build meals primarily from the Maxi & Super C flyer specials above plus affordable everyday Maxi/Super C staples only where needed to round out the recipes and hit daily macro targets.',
+    '3. HEALTHY & ZERO ADDED OIL: All 4 meals (breakfast, lunch, dinner, snack) MUST use ZERO added cooking oils or butter. Prefer whole, low-sugar, low-sodium foods so items do not trigger sugar/sodium health warnings.',
+    '4. COMPLETE INGREDIENT DEFINITIONS: Define every ingredient inside `"customIngredients"` with `"store": "Maxi"` or `"Super C"`, aisle (`"Produce"`, `"Meat"`, `"Dairy/Eggs"`, `"Pantry/Canned"`, or `"Frozen"`), accurate `per100g` macros, `health: { sugars, saturatedFat, sodiumMg }`, `cookedYield`, `packageGrams`, `unitLabel`, and realistic `cadPerPackage`. (For `stock_*` items already at home, set `"cadPerPackage": 0`.)',
+    '5. RAW WEIGHTS & NO HARDCODED TEXT WEIGHTS: Put raw/as-purchased gram weights inside each meal\'s `"ingredients"` array. Never write gram/oz/cup amounts inside `"cookingMethod"` or `"seasoningTwist"`.',
+    '6. BATCH PREP vs. FRESH PREP: Pace batch cooking across 2-3 stations (2-3 hours total). Tag `"prepType": "batch"` for Lunch/Dinner cooked proteins & carbs (Fridge Days 1-4, Freezer Day 5+) and `"prepType": "fresh"` for Breakfast, Snack, and crisp raw toppings.',
     '',
-    'CRITICAL RULES FOR DYNAMIC GROCERY SYNC MODE:',
-    '1. NEVER write hardcoded weights or volumes (like "6 oz", "200g", or "1/2 cup") inside "cookingMethod" or "seasoningTwist"—the app dynamically calculates exact gram/cup portions per person.',
-    '2. Every single ingredient you mention in a meal\'s "title" or "cookingMethod" MUST either be one of the slot\'s existing ingredients above OR be explicitly swapped/added in the JSON so my Grocery List and Macro Engine stay 100% accurate:',
-    '   (a) If you introduce ANY new food item not in the 25 built-in IDs above (e.g. "sirloin_steak", "black_beans", "zucchini", "bell_peppers", "salsa_verde"), define it inside "customIngredients" with its aisle ("Produce", "Meat", "Dairy/Eggs", "Pantry/Canned", or "Frozen"), per100g macros, packageGrams, unitLabel, and estimated cadPerPackage.',
-    '   (b) To replace Lunch or Dinner\'s main meat, ALWAYS set "primaryProteinId" on that meal (e.g. "primaryProteinId": "chicken_breast" or "sirloin_steak")—never leave it null if the title names a specific meat.',
-    '   (c) To replace a default side/veggie/bean in a meal, map it in "ingredientSwaps" (e.g. {"white_beans_cnd": "black_beans", "cabbage": "zucchini"}).',
-    '   (d) To add extra veggies/toppings to a meal, list them in "customAddons" (e.g. [{"id": "bell_peppers", "grams": 100}, {"id": "salsa_verde", "grams": 45}]).',
-    '3. BATCH PREP vs. FRESH PREP RULES: I have 2-3 hours on prep day for thorough batch cooking (keep max 2-3 stations active at once for a relaxed workflow). Tag each prepTimeline step with "prepType": "batch" (only Lunch & Dinner meats/rice/stew for Fridge Days 1-4 & Freezer Day 5+) vs "prepType": "fresh" (Breakfast, Snack, and cold raw toppings made fresh in 2-5 min—never batch-scramble 7 days of eggs or freeze berries in yogurt).',
-    '',
-    'Return ONLY a valid JSON object (no markdown commentary) with this exact structure:',
-    '{',
-    '  "weeklyTheme": "Short catchy weekly culinary theme",',
-    '  "customIngredients": {',
-    '    "custom_id_example": {',
-    '      "name": "Display Name (e.g. Extra-Lean Sirloin or Bell Peppers)",',
-    '      "aisle": "Meat",',
-    '      "per100g": { "calories": 135, "protein": 22.0, "fat": 4.5, "carbs": 0.0 },',
-    '      "cookedYield": 0.75,',
-    '      "packageGrams": 500,',
-    '      "unitLabel": "pack (500g)",',
-    '      "cadPerPackage": 8.99',
-    '    }',
-    '  },',
-    '  "meals": [',
-    '    {',
-    '      "id": "breakfast",',
-    '      "title": "New Breakfast Name",',
-    '      "cookingMethod": "Step-by-step method (no hardcoded weights)",',
-    '      "seasoningTwist": "Spices, herbs & sauce",',
-    '      "ingredientSwaps": {},',
-    '      "customAddons": []',
-    '    },',
-    '    {',
-    '      "id": "lunch",',
-    '      "title": "New Lunch Bowl Name",',
-    '      "cookingMethod": "Step-by-step method (no hardcoded weights)",',
-    '      "seasoningTwist": "Spices, herbs & sauce",',
-    '      "primaryProteinId": null,',
-    '      "ingredientSwaps": {},',
-    '      "customAddons": []',
-    '    },',
-    '    {',
-    '      "id": "dinner",',
-    '      "title": "New Dinner Name",',
-    '      "cookingMethod": "Step-by-step method (no hardcoded weights)",',
-    '      "seasoningTwist": "Spices, herbs & sauce",',
-    '      "primaryProteinId": null,',
-    '      "ingredientSwaps": {},',
-    '      "customAddons": []',
-    '    },',
-    '    {',
-    '      "id": "snack",',
-    '      "title": "New Snack Name",',
-    '      "cookingMethod": "How to prep it",',
-    '      "seasoningTwist": "Flavorings & toppings",',
-    '      "ingredientSwaps": {},',
-    '      "customAddons": []',
-    '    }',
-    '  ],',
-    '  "prepTimeline": [',
-    '    { "id": "step_1", "order": 1, "prepType": "batch", "title": "Batch: Rice Cooker + Dinner Simmer", "station": "Dutch Oven / Rice Cooker", "startMinute": 0, "durationMinutes": 30, "timerSeconds": 1800, "parallelNote": "Start rice and dinner braise together" },',
-    '    { "id": "step_2", "order": 2, "prepType": "batch", "title": "Batch: Sear Lunch Protein", "station": "Skillet", "startMinute": 5, "durationMinutes": 15, "timerSeconds": 900, "parallelNote": "Cook lunch protein in one batch while dinner simmers" },',
-    '    { "id": "step_3", "order": 3, "prepType": "batch", "title": "Batch: Portion Fridge (Days 1-4) & Freezer (Day 5+)", "station": "Counter", "startMinute": 30, "durationMinutes": 10, "timerSeconds": 600, "parallelNote": "Cool and pack Lunch & Dinner containers" },',
-    '    { "id": "step_4", "order": 4, "prepType": "fresh", "title": "Daily Fresh (2-5 min): Breakfast, Snack & Raw Toppings", "station": "Skillet / Prep Board", "startMinute": 0, "durationMinutes": 5, "timerSeconds": 300, "parallelNote": "Cook eggs/potatoes and mix skyr/berries/raw veggies fresh so nothing gets soggy" }',
-    '  ]',
-    '}'
+    schemaExample
   ].join('\n');
+}
+
+export function buildGeminiAdjustPrompt() {
+  const appState = getAppState();
+  const appData = getEffectiveAppData ? getEffectiveAppData() : getAppData();
+  const engine = getEngine();
+
+  const horizonDays = clampDaysForPrompt(appState.horizonDays);
+  const postalCode = appState.postalCode || 'H1W';
+  const householdLine = buildHouseholdLine(appState);
+
+  let currentPlan = getCurrentDailyPlan();
+  if (!currentPlan && engine && hasBaselineNutrition(appData, engine)) {
+    try {
+      currentPlan = engine.solveDailyPortions(appData, {
+        preset: appState.preset === 'custom' ? 'cut' : appState.preset,
+        targets: appState.targets,
+        lunchSwap: appState.lunchSwap,
+        dinnerSwap: appState.dinnerSwap,
+        slotSplits: appState.slotSplits
+      });
+    } catch (_err) {
+      currentPlan = null;
+    }
+  }
+
+  const dataDb = (appData && appData.nutritionDb && typeof appData.nutritionDb === 'object') ? appData.nutritionDb : {};
+  const homeStockBlock = buildHomeStockPromptBlock(appState, appData, dataDb);
+
+  const mealLines = [];
+  if (currentPlan && Array.isArray(currentPlan.meals)) {
+    currentPlan.meals.forEach((m) => {
+      const ingDesc = (m.ingredients || []).map((ing) => formatPromptIngredientName(ing) + ' [`' + ing.id + '`: ' + ing.grams + 'g]').join(', ');
+      const titleDisplay = String(m.title || '').replace(/\bGreat Value\s+/gi, '');
+      mealLines.push('   - ' + m.slot + ' (`' + m.id + '` — "' + titleDisplay + '"): ' + ingDesc);
+      mealLines.push('     Method: ' + m.cookingMethod + ' | Seasoning: ' + m.seasoningTwist);
+    });
+  }
+
+  const pending = (appState && appState.pendingAdjustments && typeof appState.pendingAdjustments === 'object')
+    ? appState.pendingAdjustments
+    : { nilStockIds: [], scannedAdditions: [] };
+  const nilIds = Array.isArray(pending.nilStockIds) ? pending.nilStockIds : [];
+  const nilLines = nilIds.map((nid) => {
+    const entry = dataDb[nid];
+    const label = entry && entry.name ? (entry.name + ' (`' + nid + '`)') : ('`' + nid + '`');
+    return '   * ' + label + ' — OUT OF STOCK / REPLACE';
+  });
+
+  const scannedList = Array.isArray(pending.scannedAdditions) ? pending.scannedAdditions : [];
+  const scannedLines = scannedList.map((item) => {
+    const per = item.per100g || {};
+    const storeTag = item.store ? (' at ' + item.store) : '';
+    const priceTag = typeof item.cadPerPackage === 'number' ? (' — $' + item.cadPerPackage.toFixed(2) + '/' + (item.packageGrams || 500) + 'g') : '';
+    const barcodeTag = item.barcode ? (' [Barcode: ' + item.barcode + ']') : '';
+    const healthMeta = item.health || {};
+    const healthParts = [];
+    if (typeof healthMeta.sugars === 'number') healthParts.push(healthMeta.sugars + 'g sugar');
+    if (typeof healthMeta.sodiumMg === 'number') healthParts.push(healthMeta.sodiumMg + 'mg sodium');
+    if (typeof healthMeta.saturatedFat === 'number') healthParts.push(healthMeta.saturatedFat + 'g sat.fat');
+    const healthStr = healthParts.length > 0 ? (' | Health/100g: ' + healthParts.join(', ')) : '';
+    return '   * `' + item.id + '`: ' + item.name + (item.brand ? ' (' + item.brand + ')' : '') + barcodeTag + storeTag + priceTag +
+      ' | Macros/100g: ' + (Number(per.calories) || 0) + ' kcal, ' + (Number(per.protein) || 0) + 'g P, ' +
+      (Number(per.fat) || 0) + 'g F, ' + (Number(per.carbs) || 0) + 'g C (Aisle: ' + (item.aisle || 'Pantry/Canned') + ')' +
+      healthStr + formatHealthSuffix(item);
+  });
+
+  const swaps = (appState && appState.grocerySwaps && typeof appState.grocerySwaps === 'object') ? appState.grocerySwaps : {};
+  const swapLines = Object.keys(swaps).map((fromId) => {
+    const toId = swaps[fromId];
+    const fromName = (dataDb[fromId] && dataDb[fromId].name) || fromId;
+    const toName = (dataDb[toId] && dataDb[toId].name) || toId;
+    return '   * Replaced ' + fromName + ' (`' + fromId + '`) -> with ' + toName + ' (`' + toId + '`)';
+  });
+
+  const adjustNote = typeof appState.chefAdjustNote === 'string' && appState.chefAdjustNote.trim()
+    ? ('\nMy Adjustment Request: ' + appState.chefAdjustNote.trim())
+    : '';
+
+  const schemaExample = buildSharedJsonSchemaExample(appState.targets.calories);
+
+  return [
+    'Adjust ONLY the affected meals in my active Maxi / Super C meal plan (' + postalCode + ').',
+    'Store Scope: Strictly MAXI and SUPER C ONLY — do NOT add or browse any other stores.',
+    'Prep Horizon: ' + horizonDays + ' Days.',
+    'Active Daily Macro Targets: ' + appState.targets.calories + ' kcal, ' + appState.targets.protein + 'g Protein, ' + appState.targets.fat + 'g Fat ceiling, ' + appState.targets.carbs + 'g Carbs.' +
+      householdLine + adjustNote,
+    '',
+    'CURRENT ACTIVE MENU (KEEP UNCHANGED MEALS IDENTICAL):',
+    mealLines.join('\n') || '   - No active meals loaded yet.',
+    '',
+    'NIL STOCK / ITEMS TO REMOVE OR REPLACE:',
+    nilLines.length > 0 ? nilLines.join('\n') : '   * (None flagged — incorporate the new items or active swaps below)',
+    '',
+    'NEW ITEMS FOUND / SCANNED AT MAXI OR SUPER C:',
+    scannedLines.length > 0 ? scannedLines.join('\n') : '   * (No newly scanned replacements — pick the closest healthy Maxi or Super C alternative)',
+    swapLines.length > 0 ? ('\nALREADY SWAPPED IN-STORE (UPDATE TITLES/COOKING STEPS TO MATCH):\n' + swapLines.join('\n')) : '',
+    homeStockBlock ? ('\n' + homeStockBlock) : '',
+    '',
+    'ADJUSTMENT RULES:',
+    '1. KEEP UNCHANGED MEALS INTACT: Keep every meal slot NOT affected by the nil-stock/new items above identical in title, ingredients, and grams. ONLY rewrite the meal(s) and `prepTimeline` steps that need to change.',
+    '2. USE NEW SCANNED ITEMS CLEANLY: Incorporate the newly scanned Maxi/Super C items above with their exact IDs, macros, and prices inside `"customIngredients"` and the updated meal\'s `"ingredients"` array, balancing grams so daily totals stay close to Active Daily Macro Targets.',
+    '3. ZERO ADDED OIL & NO HARDCODED TEXT WEIGHTS: Zero added cooking oils or butter, and never put gram/oz/cup measurements inside `"cookingMethod"` or `"seasoningTwist"`.',
+    '',
+    schemaExample
+  ].filter((part) => part !== null && part !== undefined).join('\n');
+}
+
+function clampDaysForPrompt(val) {
+  const n = Number(val);
+  if (!Number.isFinite(n) || n < 1) return 7;
+  return Math.min(30, Math.round(n));
 }

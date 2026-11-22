@@ -1,5 +1,4 @@
 import {
-  STORAGE_DATA_KEY,
   MACRO_CONFIG,
   SLOT_SPLIT_CONFIG,
   SLOT_SPLIT_PRESETS,
@@ -7,26 +6,21 @@ import {
   uiStatus,
   getAppState,
   getAppData,
-  setAppData,
   el,
   clampInt,
   normalizePostalCode,
   getGoalPresets,
   getEffectiveSlotSplits,
   getNormalizedSlotSplitPercentages,
-  mergeWithFallbackData,
-  safeStorageGet,
   getActiveMember,
   syncActiveMemberFromTopState,
   switchActiveMember,
   encodeSharePayload,
-  applyCustomMealJsonOverlay,
   saveState,
   announcePolite,
   formatSyncTime,
   recomputePlan
 } from '../state.js';
-import { buildGeminiMealPrompt } from '../geminiPrompts.js';
 
 let activeCallbacks = {};
 
@@ -40,16 +34,6 @@ export function syncSliderVisual(slider) {
   const val = Number(slider.value) || 0;
   const pct = max > min ? Math.min(100, Math.max(0, ((val - min) / (max - min)) * 100)) : 0;
   slider.style.setProperty('--slider-pct', pct + '%');
-}
-
-function formatStockSummaryText(appState) {
-  const stockList = Array.isArray(appState.pantryStock) ? appState.pantryStock.filter((it) => it && Number(it.gramsOnHand) > 0) : [];
-  if (stockList.length === 0) {
-    return 'No home stock items added yet — scan or add items so Gemini empties your stock first.';
-  }
-  const names = stockList.slice(0, 3).map((it) => it.name + ' (' + it.gramsOnHand + 'g)').join(', ');
-  const extra = stockList.length > 3 ? (' + ' + (stockList.length - 3) + ' more') : '';
-  return 'Home Stock Included in Prompt (' + stockList.length + '): ' + names + extra;
 }
 
 export function updateSettingsControlsInPlace() {
@@ -149,17 +133,9 @@ export function updateSettingsControlsInPlace() {
   if (statusEl && uiStatus.syncMessageText) {
     statusEl.textContent = uiStatus.syncMessageText;
   }
-  const customStatusEl = document.getElementById('custom-json-status');
-  if (customStatusEl && uiStatus.customJsonStatusText) {
-    customStatusEl.textContent = uiStatus.customJsonStatusText;
-  }
   const shareStatusEl = document.getElementById('share-plan-status');
   if (shareStatusEl && uiStatus.shareStatusText) {
     shareStatusEl.textContent = uiStatus.shareStatusText;
-  }
-  const stockSummaryEl = document.getElementById('settings-stock-summary');
-  if (stockSummaryEl) {
-    stockSummaryEl.textContent = formatStockSummaryText(appState);
   }
 }
 
@@ -671,189 +647,19 @@ export function renderSettingsTab(callbacks) {
 
   frag.appendChild(syncCard);
 
-  // 6. 1-Tap Gemini JSON Paste Sync Card
+  // 6. AI Chef Pointer Card
   const aiCard = el('div', 'card space-stack');
-  aiCard.appendChild(el('h2', 'text-base font-bold text-slate-100', '1-Tap Gemini Meal Customizer (JSON Sync)'));
-  aiCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Use Full-Store Browser Hunt so a browser-capable Gemini checks everyday shelf prices AND flyers across Super C, Maxi & Walmart—or keep the local flyer fallback.'));
-
-  const modeRow = el('div', 'flex-wrap-row');
-  const huntModeBtn = el('button', 'pill-btn text-xs flex-1', 'Full-Store Browser Hunt (Best)');
-  huntModeBtn.type = 'button';
-  huntModeBtn.setAttribute('aria-pressed', (!appState.geminiPromptMode || appState.geminiPromptMode === 'browser_hunt') ? 'true' : 'false');
-
-  const lockedModeBtn = el('button', 'pill-btn text-xs flex-1', 'Use Flyer Basket Only (Fallback)');
-  lockedModeBtn.type = 'button';
-  lockedModeBtn.setAttribute('aria-pressed', appState.geminiPromptMode === 'flyer_locked' ? 'true' : 'false');
-
-  const customModeBtn = el('button', 'pill-btn text-xs flex-1', 'Allow New Ingredients');
-  customModeBtn.type = 'button';
-  customModeBtn.setAttribute('aria-pressed', appState.geminiPromptMode === 'allow_custom' ? 'true' : 'false');
-
-  function syncPromptModeButtons() {
-    huntModeBtn.setAttribute('aria-pressed', (!appState.geminiPromptMode || appState.geminiPromptMode === 'browser_hunt') ? 'true' : 'false');
-    lockedModeBtn.setAttribute('aria-pressed', appState.geminiPromptMode === 'flyer_locked' ? 'true' : 'false');
-    customModeBtn.setAttribute('aria-pressed', appState.geminiPromptMode === 'allow_custom' ? 'true' : 'false');
-  }
-
-  huntModeBtn.addEventListener('click', () => {
-    appState.geminiPromptMode = 'browser_hunt';
-    syncPromptModeButtons();
-    saveState();
-  });
-
-  lockedModeBtn.addEventListener('click', () => {
-    appState.geminiPromptMode = 'flyer_locked';
-    syncPromptModeButtons();
-    saveState();
-  });
-
-  customModeBtn.addEventListener('click', () => {
-    appState.geminiPromptMode = 'allow_custom';
-    syncPromptModeButtons();
-    saveState();
-  });
-
-  modeRow.appendChild(huntModeBtn);
-  modeRow.appendChild(lockedModeBtn);
-  modeRow.appendChild(customModeBtn);
-  aiCard.appendChild(modeRow);
-
-  const stockPromptBox = el('div', 'subcard space-y-2');
-  const stockSummaryEl = el('p', 'text-xs text-slate-200 wrap-anywhere', formatStockSummaryText(appState));
-  stockSummaryEl.id = 'settings-stock-summary';
-  stockPromptBox.appendChild(stockSummaryEl);
-
-  const stockActionRow = el('div', 'flex-wrap-row');
-  const scanStockBtn = el('button', 'btn-secondary text-xs flex-1', 'Scan Barcode to Stock');
-  scanStockBtn.type = 'button';
-  scanStockBtn.id = 'settings-scan-stock-btn';
-  scanStockBtn.addEventListener('click', () => {
-    if (typeof activeCallbacks.onOpenStockScanner === 'function') {
-      activeCallbacks.onOpenStockScanner();
+  aiCard.appendChild(el('h2', 'text-base font-bold text-slate-100', 'AI Chef — Recipe Generator'));
+  aiCard.appendChild(el('p', 'text-xs text-slate-300 wrap-anywhere', 'Create new Maxi & Super C meal preps, scan nil-stock replacements, and preview weekly plans in the AI Chef tab.'));
+  const openChefBtn = el('button', 'btn-primary w-full', 'Open AI Chef Tab');
+  openChefBtn.type = 'button';
+  openChefBtn.id = 'settings-open-chef-btn';
+  openChefBtn.addEventListener('click', () => {
+    if (typeof activeCallbacks.onOpenChef === 'function') {
+      activeCallbacks.onOpenChef();
     }
   });
-
-  const openStockBtn = el('button', 'btn-secondary text-xs flex-1', 'Manage My Stock');
-  openStockBtn.type = 'button';
-  openStockBtn.id = 'settings-open-stock-btn';
-  openStockBtn.addEventListener('click', () => {
-    if (typeof activeCallbacks.onOpenStockSubtab === 'function') {
-      activeCallbacks.onOpenStockSubtab();
-    }
-  });
-
-  stockActionRow.appendChild(scanStockBtn);
-  stockActionRow.appendChild(openStockBtn);
-  stockPromptBox.appendChild(stockActionRow);
-  aiCard.appendChild(stockPromptBox);
-
-  const promptBtnRow = el('div', 'flex-wrap-row');
-  const copyPromptBtn = el('button', 'btn-secondary flex-1', '1. Copy Gemini Prompt');
-  copyPromptBtn.type = 'button';
-  copyPromptBtn.id = 'copy-gemini-prompt-btn';
-  copyPromptBtn.addEventListener('click', () => {
-    const promptText = buildGeminiMealPrompt();
-    const modeLabel = appState.geminiPromptMode === 'allow_custom'
-      ? 'Dynamic Grocery Sync'
-      : (appState.geminiPromptMode === 'flyer_locked' ? 'Flyer-Locked Fallback' : 'Full-Store Browser Hunt');
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(promptText).then(() => {
-        uiStatus.customJsonStatusText = modeLabel + ' prompt copied! Paste it into Gemini, then paste the JSON output below.';
-        updateSettingsControlsInPlace();
-        announcePolite(uiStatus.customJsonStatusText);
-      }).catch(() => {
-        jsonArea.value = promptText;
-        jsonArea.select();
-        uiStatus.customJsonStatusText = modeLabel + ' prompt placed in box below — copy it and send to Gemini.';
-        updateSettingsControlsInPlace();
-      });
-    } else {
-      jsonArea.value = promptText;
-      jsonArea.select();
-      uiStatus.customJsonStatusText = modeLabel + ' prompt placed in box below — copy it and send to Gemini.';
-      updateSettingsControlsInPlace();
-    }
-  });
-  promptBtnRow.appendChild(copyPromptBtn);
-  aiCard.appendChild(promptBtnRow);
-
-  const jsonLbl = el('label', 'block text-sm font-semibold text-slate-200', '2. Paste Gemini JSON Reply');
-  jsonLbl.setAttribute('for', 'custom-meal-json-input');
-  aiCard.appendChild(jsonLbl);
-
-  const jsonArea = el('textarea', 'w-full text-xs font-mono');
-  jsonArea.id = 'custom-meal-json-input';
-  jsonArea.rows = 5;
-  jsonArea.placeholder = '{"weeklyTheme": "...", "customIngredients": {...}, "meals": [...]}';
-  jsonArea.value = appState.customMealJsonRaw || '';
-  aiCard.appendChild(jsonArea);
-
-  const applyRow = el('div', 'flex-wrap-row');
-  const pasteApplyBtn = el('button', 'btn-primary flex-1', 'Paste & Apply JSON');
-  pasteApplyBtn.type = 'button';
-  pasteApplyBtn.id = 'apply-custom-json-btn';
-
-  function applyRawJsonString(rawStr) {
-    const freshBase = mergeWithFallbackData(safeStorageGet(STORAGE_DATA_KEY));
-    const ok = applyCustomMealJsonOverlay(freshBase, rawStr);
-    if (ok) {
-      setAppData(freshBase);
-      appState.customMealJsonRaw = rawStr.trim();
-      saveState();
-      uiStatus.customJsonStatusText = 'Custom meals, grocery items & prep timeline applied!';
-      recomputePlan();
-      if (typeof activeCallbacks.onPlanTabsChanged === 'function') activeCallbacks.onPlanTabsChanged();
-      uiStatus.settingsBuilt = false;
-      renderSettingsTab();
-      announcePolite(uiStatus.customJsonStatusText);
-    } else {
-      uiStatus.customJsonStatusText = 'Invalid JSON format. Make sure you pasted the JSON object from Gemini.';
-      updateSettingsControlsInPlace();
-      announcePolite(uiStatus.customJsonStatusText);
-    }
-  }
-
-  pasteApplyBtn.addEventListener('click', () => {
-    if (jsonArea.value.trim()) {
-      applyRawJsonString(jsonArea.value);
-    } else if (navigator.clipboard && navigator.clipboard.readText) {
-      navigator.clipboard.readText().then((clipText) => {
-        if (clipText && clipText.trim()) {
-          jsonArea.value = clipText.trim();
-          applyRawJsonString(clipText);
-        } else {
-          uiStatus.customJsonStatusText = 'Paste the JSON reply into the text box first.';
-          updateSettingsControlsInPlace();
-        }
-      }).catch(() => {
-        uiStatus.customJsonStatusText = 'Paste the JSON reply into the text box first, then tap Apply.';
-        updateSettingsControlsInPlace();
-      });
-    } else {
-      uiStatus.customJsonStatusText = 'Paste the JSON reply into the text box first, then tap Apply.';
-      updateSettingsControlsInPlace();
-    }
-  });
-  applyRow.appendChild(pasteApplyBtn);
-
-  if (appState.customMealJsonRaw) {
-    const resetMealsBtn = el('button', 'btn-secondary text-xs', 'Reset to Default Meals');
-    resetMealsBtn.type = 'button';
-    resetMealsBtn.addEventListener('click', () => {
-      appState.customMealJsonRaw = '';
-      jsonArea.value = '';
-      saveState();
-      setAppData(mergeWithFallbackData(safeStorageGet(STORAGE_DATA_KEY)));
-      uiStatus.customJsonStatusText = 'Restored default weekly meal templates.';
-      if (typeof activeCallbacks.onRenderAllTabs === 'function') activeCallbacks.onRenderAllTabs();
-    });
-    applyRow.appendChild(resetMealsBtn);
-  }
-  aiCard.appendChild(applyRow);
-
-  const customStatus = el('p', 'text-xs text-emerald-300 wrap-anywhere', uiStatus.customJsonStatusText);
-  customStatus.id = 'custom-json-status';
-  aiCard.appendChild(customStatus);
+  aiCard.appendChild(openChefBtn);
 
   frag.appendChild(aiCard);
   root.replaceChildren(frag);

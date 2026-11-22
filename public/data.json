@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "generatedAt": "2026-11-19T21:03:54Z",
+  "generatedAt": "2026-11-22T08:27:13Z",
   "source": "fallback+flipp",
   "location": {
     "postalCodeDisplay": "H1W",
@@ -178,8 +178,8 @@
       "price": {
         "cadPer100g": 1.03,
         "cadPerPackage": 4.12,
-        "regularCadPer100g": 0.85,
-        "historicalLowCadPer100g": 0.55,
+        "regularCadPer100g": 1.03,
+        "historicalLowCadPer100g": 0.66,
         "savingsPct": 0,
         "radarTag": "REGULAR",
         "flyerItemName": "tomates cerises | tomatoes",
@@ -278,10 +278,10 @@
       "price": {
         "cadPer100g": 1.16,
         "cadPerPackage": 1.39,
-        "regularCadPer100g": 1.24,
-        "historicalLowCadPer100g": 0.83,
-        "savingsPct": 6,
-        "radarTag": "FLYER DEAL",
+        "regularCadPer100g": 7.21,
+        "historicalLowCadPer100g": 1.16,
+        "savingsPct": 84,
+        "radarTag": "HISTORIC LOW",
         "flyerItemName": "thon pâle entier Unico",
         "onFlyer": true
       }
@@ -378,8 +378,8 @@
       "price": {
         "cadPer100g": 2.19,
         "cadPerPackage": 21.9,
-        "regularCadPer100g": 1.43,
-        "historicalLowCadPer100g": 0.99,
+        "regularCadPer100g": 2.19,
+        "historicalLowCadPer100g": 1.43,
         "savingsPct": 0,
         "radarTag": "REGULAR",
         "flyerItemName": "poitrine de poulet marinée Irresistible | Irrésistible marinated chicken breast",
@@ -529,7 +529,7 @@
         "cadPer100g": 0.06,
         "cadPerPackage": 0.54,
         "regularCadPer100g": 0.28,
-        "historicalLowCadPer100g": 0.14,
+        "historicalLowCadPer100g": 0.06,
         "savingsPct": 79,
         "radarTag": "HISTORIC LOW",
         "flyerItemName": "carottes, oignons, betteraves ou rutabagas | carrots, onions, beets or rutabagas",
@@ -863,5 +863,431 @@
       "parallelNote": "Cool hot meals briefly before sealing Days 1-4 fridge tubs and Day 5+ freezer packs.",
       "zeroOilNote": "Store broth-rich braises cleanly with zero added fats for clean reheating."
     }
-  ]
+  ],
+  "weeklyFlyerCatalog": {
+    "Maxi": [
+      {
+        "name": "YOGOURT GREC LIBERTÉ, 650/750 G",
+        "category": "Dairy/Eggs",
+        "priceCad": 7.0,
+        "priceText": "$7.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "ÉPAULE DE PORC PICNIC ENTIÈRE FRAÎCHE, EMBALLAGE SOUS-VIDE",
+        "category": "Meat",
+        "priceCad": 1.99,
+        "priceText": "$1.99 lb",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "SURIMI 227 G OU CREVETTES CRUES 51-70/LB OU CUITES 61-90/LB 160 G SEAQUEST*, SAUMON FUMÉ STEELHEAD D",
+        "category": "Meat",
+        "priceCad": 3.79,
+        "priceText": "$3.79",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "BŒUF HACHÉ MAIGRE",
+        "category": "Meat",
+        "priceCad": 5.44,
+        "priceText": "$5.44 /lb",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "Thon Rio Mare",
+        "category": "Meat",
+        "priceCad": 5.77,
+        "priceText": "$5.77",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "POITRINES DE POULET",
+        "category": "Meat",
+        "priceCad": 6.49,
+        "priceText": "$6.49 /lb",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "TOFU UNISOYA | TOFU, 1,25 KG",
+        "category": "Meat",
+        "priceCad": 6.5,
+        "priceText": "$6.50",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "tartare 130 g, pastrami 100 g ou saumon fumé miel et poivre ou doublement fumé 140 g Jonathan Garnie",
+        "category": "Meat",
+        "priceCad": 9.0,
+        "priceText": "$9.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "JARRET DE PORC OSSO BUCO | OSSO BUCO PORK SHANK, 810 G",
+        "category": "Meat",
+        "priceCad": 11.0,
+        "priceText": "$11.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "BÂTONNETS DE FROMAGE MOZZARRELLA OU CÔTES DE DOS DE PORC ST-HUBERT, 510/680 G",
+        "category": "Meat",
+        "priceCad": 13.0,
+        "priceText": "$13.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "HAUTS DE CUISSE DE POULET MAPLE LEAF PRIME | CHICKEN THIGHS, JUSQU'À 843 G",
+        "category": "Meat",
+        "priceCad": 14.0,
+        "priceText": "$14.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "RIZ BISTRO EXPRESS BEN'S ORIGINAL, 240/250 G",
+        "category": "Pantry/Canned",
+        "priceCad": 2.5,
+        "priceText": "$2.50",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "FLOCONS D'AVOINE OU GRUAU RAPIDE SANS NOM®, 900 G/1 KG",
+        "category": "Pantry/Canned",
+        "priceCad": 3.0,
+        "priceText": "$3.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "RIZ BASMATI QUALITY, 3,63 KG",
+        "category": "Pantry/Canned",
+        "priceCad": 9.99,
+        "priceText": "$9.99",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "CHOU VERT",
+        "category": "Produce",
+        "priceCad": 0.75,
+        "priceText": "$0.75 /lb",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "CAROTTES OU OIGNONS JAUNES DÉLICES DU MARCHÉ, SAC DE 3 LB",
+        "category": "Produce",
+        "priceCad": 2.0,
+        "priceText": "$2.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "COURONNE DE BROCOLI | BROCCOLI CROWNS",
+        "category": "Produce",
+        "priceCad": 2.79,
+        "priceText": "$2.79",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "POIVRONS DOUX ROUGES, ORANGE OU JAUNES",
+        "category": "Produce",
+        "priceCad": 2.88,
+        "priceText": "$2.88 /lb",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "TOMATES SUR VIGNE | TOMATOES ON THE VINE",
+        "category": "Produce",
+        "priceCad": 2.99,
+        "priceText": "$2.99 /lb",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "MINI CONCOMBRES DÉLICES DU MARCHÉ, 6 UN.",
+        "category": "Produce",
+        "priceCad": 3.0,
+        "priceText": "$3.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "POMMES HONEYCRISP | HONEYCRISP APPLES",
+        "category": "Produce",
+        "priceCad": 3.0,
+        "priceText": "$3.00 /lb",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "TOMATES BEEFSTEAK SAVOURA",
+        "category": "Produce",
+        "priceCad": 3.49,
+        "priceText": "$3.49 lb",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "FÈVES, POIS OU LENTILLES MENU BLEU PC 900 G OU COUSCOUS ZINDA, 907 G",
+        "category": "Produce",
+        "priceCad": 3.79,
+        "priceText": "$3.79",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "CHOUX DE BRUXELLES | HARICOTS FRANÇAIS, 400 G",
+        "category": "Produce",
+        "priceCad": 3.99,
+        "priceText": "$3.99",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "TOMATES CERISES SUR VIGNE FLAVOR BOMBS, 341 G",
+        "category": "Produce",
+        "priceCad": 3.99,
+        "priceText": "$3.99",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "CHOU-FLEUR OU ÉCHALOTES, 750 G",
+        "category": "Produce",
+        "priceCad": 4.99,
+        "priceText": "$4.99",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "POMMES MCINTOSH, CORTLAND, EMPIRE OU SPARTAN DÉLICES DU MARCHÉ, SAC DE 4 LB",
+        "category": "Produce",
+        "priceCad": 5.0,
+        "priceText": "$5.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "TOMATES EN GRAPPES BALANCIA PC, 454 g",
+        "category": "Produce",
+        "priceCad": 5.0,
+        "priceText": "$5.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "SANDWICHS OU BOUCHÉES AUX ŒUFS À DÉJEUNER SCHNEIDERS, 204-288 G",
+        "category": "Produce",
+        "priceCad": 5.5,
+        "priceText": "$5.50",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "RONDELLES D'OIGNON OU QUARTIERS DE POMMES DE TERRE LES FERMES CAVENDISH, 1-2,25 KG",
+        "category": "Produce",
+        "priceCad": 8.0,
+        "priceText": "$8.00",
+        "validTo": "2026-11-25"
+      }
+    ],
+    "Super C": [
+      {
+        "name": "yogourt grec Oîkos Danone",
+        "category": "Dairy/Eggs",
+        "priceCad": 3.47,
+        "priceText": "$3.47",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "yogourt grec Olympic | Olympic greek yogurt",
+        "category": "Dairy/Eggs",
+        "priceCad": 4.96,
+        "priceText": "$4.96",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "thon pâle entier Unico",
+        "category": "Meat",
+        "priceCad": 2.29,
+        "priceText": "$2.29",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "rôti de longe de porc bout de côtes | pork loin roast, rib end",
+        "category": "Meat",
+        "priceCad": 2.95,
+        "priceText": "$2.95 /lb",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "filets de porc frais | fresh pork tenderloins",
+        "category": "Meat",
+        "priceCad": 3.72,
+        "priceText": "$3.72 lb",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "pilons de poulet frais halal, format écono | fresh halal chicken drumsticks, econo pack",
+        "category": "Meat",
+        "priceCad": 3.83,
+        "priceText": "$3.83 /lb - 8.44$/kg",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "ailles de poulet frais",
+        "category": "Meat",
+        "priceCad": 4.44,
+        "priceText": "$4.44 /lb",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "poitrine de poulet marinée Irresistible | Irrésistible marinated chicken breast",
+        "category": "Meat",
+        "priceCad": 4.92,
+        "priceText": "$4.92",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "dinde ou poulet haché Mieux-Être | Life Smart ground turkey or chicken",
+        "category": "Meat",
+        "priceCad": 4.98,
+        "priceText": "$4.98",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "ciabatta au boeuf | beef ciabatta",
+        "category": "Meat",
+        "priceCad": 6.99,
+        "priceText": "$6.99 +TX",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "tofu Unisoya | Unisoya tofu",
+        "category": "Meat",
+        "priceCad": 7.99,
+        "priceText": "$7.99",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "filet de saumon Atlantique ou Coho frais | Fresh Atlantic Salmon Filet",
+        "category": "Meat",
+        "priceCad": 8.88,
+        "priceText": "$8.88 /lb",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "boulettes de porc à l'italienne Marc Angelo | Marc Angelo italian style pork meatballs",
+        "category": "Meat",
+        "priceCad": 8.94,
+        "priceText": "$8.94",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "ailes de poulet Selection | Selection frozen chicken wings",
+        "category": "Meat",
+        "priceCad": 8.98,
+        "priceText": "$8.98",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "tofu extra ferme Sunrise | Sunrise extra firm tofu",
+        "category": "Meat",
+        "priceCad": 8.99,
+        "priceText": "$8.99",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "burger végé Gusta | Gusta veggie burger",
+        "category": "Meat",
+        "priceCad": 9.99,
+        "priceText": "$9.99",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "poke bol au saumon fumé | smoked salmon poké bowl",
+        "category": "Meat",
+        "priceCad": 9.99,
+        "priceText": "$9.99 +TX",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "salade césar au poulet | chicken caesar salad",
+        "category": "Meat",
+        "priceCad": 9.99,
+        "priceText": "$9.99",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "croquettes de poulet",
+        "category": "Meat",
+        "priceCad": 10.0,
+        "priceText": "$10.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "filets de poisson nature",
+        "category": "Meat",
+        "priceCad": 10.0,
+        "priceText": "$10.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "lanières de poulet",
+        "category": "Meat",
+        "priceCad": 10.0,
+        "priceText": "$10.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "tournedos de poulet Selection",
+        "category": "Meat",
+        "priceCad": 10.0,
+        "priceText": "$10.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "poulet général tao façon tempura Asian Inspirations",
+        "category": "Meat",
+        "priceCad": 12.0,
+        "priceText": "$12.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "saumon fumé",
+        "category": "Meat",
+        "priceCad": 13.0,
+        "priceText": "$13.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "lanières de poitrine de poulet grillée Marc Angelo",
+        "category": "Meat",
+        "priceCad": 15.0,
+        "priceText": "$15.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "ailes de poulet Selection",
+        "category": "Meat",
+        "priceCad": 20.0,
+        "priceText": "$20.00",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "riz Bistro Express Ben's Original | Ben's Original Bistro Express rice",
+        "category": "Pantry/Canned",
+        "priceCad": 2.49,
+        "priceText": "$2.49",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "soupe aux tomates Aylmer",
+        "category": "Produce",
+        "priceCad": 0.62,
+        "priceText": "$0.62",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "carottes, oignons, betteraves ou rutabagas | carrots, onions, beets or rutabagas",
+        "category": "Produce",
+        "priceCad": 1.44,
+        "priceText": "$1.44",
+        "validTo": "2026-11-25"
+      },
+      {
+        "name": "tomates en dés Selection",
+        "category": "Produce",
+        "priceCad": 1.75,
+        "priceText": "$1.75",
+        "validTo": "2026-11-25"
+      }
+    ]
+  }
 }

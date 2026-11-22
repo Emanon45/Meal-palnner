@@ -14,12 +14,18 @@ import {
   startCameraBarcodeScan,
   detectBarcodeFromImageFile
 } from '../barcodeScanner.js';
+import {
+  createHealthWarningBadges,
+  normalizeHealthMeta
+} from '../healthWarnings.js';
 
 let dialogEl = null;
 let activeScannerCtrl = null;
 let currentOnSaved = null;
 let currentEditingId = null;
 let currentSource = 'manual';
+let currentModalMode = 'scan';
+let currentHealthExtra = { novaGroup: null, nutriScore: '', nutrientLevels: null };
 
 let refs = null;
 
@@ -44,9 +50,58 @@ function setScanStatus(msg, isError) {
   refs.scanStatusEl.className = isError ? 'text-xs text-red-400 wrap-anywhere' : 'text-xs text-emerald-300 wrap-anywhere';
 }
 
+function readOptionalNonNegInput(inputEl, maxVal) {
+  if (!inputEl) return null;
+  const raw = String(inputEl.value || '').trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.min(maxVal, n);
+}
+
+function readFormHealthMeta() {
+  const sugars = readOptionalNonNegInput(refs.sugarsInput, 100);
+  const sodiumMg = readOptionalNonNegInput(refs.sodiumInput, 50000);
+  const saturatedFat = readOptionalNonNegInput(refs.satFatInput, 100);
+  return normalizeHealthMeta({
+    sugars,
+    sodiumMg: sodiumMg !== null ? Math.round(sodiumMg) : null,
+    saturatedFat,
+    novaGroup: currentHealthExtra.novaGroup,
+    nutriScore: currentHealthExtra.nutriScore,
+    nutrientLevels: currentHealthExtra.nutrientLevels
+  });
+}
+
+function updateHealthWarningsBanner() {
+  if (!refs || !refs.healthWarnBox || !refs.healthWarnBadgesEl) return;
+  const candidate = {
+    name: refs.nameInput.value.trim(),
+    aisle: refs.aisleSelect.value,
+    per100g: {
+      calories: Math.max(0, Number(refs.calInput.value) || 0),
+      protein: Math.max(0, Number(refs.protInput.value) || 0),
+      carbs: Math.max(0, Number(refs.carbsInput.value) || 0),
+      fat: Math.max(0, Number(refs.fatInput.value) || 0)
+    },
+    health: readFormHealthMeta()
+  };
+  const frag = createHealthWarningBadges(candidate, el, { compact: false });
+  if (frag.childNodes.length === 0) {
+    refs.healthWarnBadgesEl.replaceChildren();
+    refs.healthWarnBox.hidden = true;
+    return;
+  }
+  refs.healthWarnBadgesEl.replaceChildren(frag);
+  refs.healthWarnBox.hidden = false;
+}
+
 function updateMacroPreview() {
   if (!refs) return;
-  const gOnHand = Math.max(0, Number(refs.gramsInput.value) || 0);
+  const isStoreLookupMode = currentModalMode === 'swap' || currentModalMode === 'adjust_scan';
+  const gOnHand = isStoreLookupMode
+    ? Math.max(1, Number(refs.pkgInput.value) || 500)
+    : Math.max(0, Number(refs.gramsInput.value) || 0);
   const kcal100 = Math.max(0, Number(refs.calInput.value) || 0);
   const prot100 = Math.max(0, Number(refs.protInput.value) || 0);
   const carbs100 = Math.max(0, Number(refs.carbsInput.value) || 0);
@@ -59,7 +114,9 @@ function updateMacroPreview() {
   const totFat = Math.round(fat100 * mult * 10) / 10;
 
   refs.previewPer100El.textContent = 'Per 100g: ' + Math.round(kcal100) + ' kcal · ' + (Math.round(prot100 * 10) / 10) + 'g P · ' + (Math.round(carbs100 * 10) / 10) + 'g C · ' + (Math.round(fat100 * 10) / 10) + 'g F';
-  refs.previewTotalEl.textContent = 'Total for ' + Math.round(gOnHand) + 'g on hand: ' + totKcal + ' kcal · ' + totProt + 'g P · ' + totCarbs + 'g C · ' + totFat + 'g F';
+  const totalPrefix = isStoreLookupMode ? ('Total per package (' + Math.round(gOnHand) + 'g): ') : ('Total for ' + Math.round(gOnHand) + 'g on hand: ');
+  refs.previewTotalEl.textContent = totalPrefix + totKcal + ' kcal · ' + totProt + 'g P · ' + totCarbs + 'g C · ' + totFat + 'g F';
+  updateHealthWarningsBanner();
 }
 
 function populateFormFromProduct(product, { keepGrams = false } = {}) {
@@ -75,11 +132,28 @@ function populateFormFromProduct(product, { keepGrams = false } = {}) {
   if (!keepGrams) {
     refs.gramsInput.value = String(clampInt(product.gramsOnHand || pkgG, 1, 50000, pkgG));
   }
+  if (product.store && (product.store === 'Maxi' || product.store === 'Super C')) {
+    refs.storeSelect.value = product.store;
+  }
+  if (typeof product.cadPerPackage === 'number' && Number.isFinite(product.cadPerPackage)) {
+    refs.priceInput.value = product.cadPerPackage.toFixed(2);
+  }
   const per = product.per100g || {};
   refs.calInput.value = String(Math.round(clampNum(per.calories, 0, 900, 0)));
   refs.protInput.value = String(Math.round(clampNum(per.protein, 0, 100, 0) * 10) / 10);
   refs.carbsInput.value = String(Math.round(clampNum(per.carbs, 0, 100, 0) * 10) / 10);
   refs.fatInput.value = String(Math.round(clampNum(per.fat, 0, 100, 0) * 10) / 10);
+
+  const hm = normalizeHealthMeta(product.health, per) || {};
+  refs.sugarsInput.value = typeof hm.sugars === 'number' ? String(hm.sugars) : '';
+  refs.sodiumInput.value = typeof hm.sodiumMg === 'number' ? String(hm.sodiumMg) : '';
+  refs.satFatInput.value = typeof hm.saturatedFat === 'number' ? String(hm.saturatedFat) : '';
+  currentHealthExtra = {
+    novaGroup: hm.novaGroup || null,
+    nutriScore: hm.nutriScore || '',
+    nutrientLevels: hm.nutrientLevels || null
+  };
+
   if (product.source) currentSource = product.source;
   updateMacroPreview();
 }
@@ -100,7 +174,7 @@ async function handleBarcodeLookup(rawCode) {
     if (res && res.found && res.product) {
       populateFormFromProduct(res.product, { keepGrams: Boolean(currentEditingId) });
       const srcNote = res.fromCache ? ' (from device cache)' : ' (from Open Food Facts)';
-      setScanStatus('Loaded "' + res.product.name + '"' + srcNote + '. Check grams on hand and save.', false);
+      setScanStatus('Loaded "' + res.product.name + '"' + srcNote + '. Verify details and save.', false);
       announcePolite('Loaded macros for ' + res.product.name);
     } else if (res && res.reason === 'not_found') {
       currentSource = 'manual';
@@ -172,7 +246,7 @@ function ensureDialogBuilt() {
   const closeTopBtn = el('button', 'btn-secondary text-xs', 'Close');
   closeTopBtn.type = 'button';
   closeTopBtn.id = 'stock-dialog-close-btn';
-  closeTopBtn.setAttribute('aria-label', 'Close stock ingredient dialog');
+  closeTopBtn.setAttribute('aria-label', 'Close ingredient dialog');
   closeTopBtn.addEventListener('click', () => closeStockModal());
   header.appendChild(titleEl);
   header.appendChild(closeTopBtn);
@@ -268,6 +342,15 @@ function ensureDialogBuilt() {
   previewBox.appendChild(previewTotalEl);
   shell.appendChild(previewBox);
 
+  // Live Unhealthy Ingredient Warning Banner
+  const healthWarnBox = el('div', 'health-warn-banner space-y-1');
+  healthWarnBox.id = 'stock-health-warnings';
+  healthWarnBox.hidden = true;
+  healthWarnBox.appendChild(el('div', 'text-xs font-bold text-red-400', 'Ingredient Health Watch'));
+  const healthWarnBadgesEl = el('div', 'flex-wrap-row');
+  healthWarnBox.appendChild(healthWarnBadgesEl);
+  shell.appendChild(healthWarnBox);
+
   // Form
   const form = document.createElement('form');
   form.id = 'stock-item-form';
@@ -306,7 +389,9 @@ function ensureDialogBuilt() {
   gramsInput.step = '1';
   gramsInput.required = true;
   gramsInput.value = '500';
-  qtyGrid.appendChild(createField('stock-grams-input', 'Grams on Hand *', gramsInput));
+  const gramsWrap = createField('stock-grams-input', 'Grams on Hand *', gramsInput);
+  gramsWrap.id = 'stock-grams-wrap';
+  qtyGrid.appendChild(gramsWrap);
 
   const pkgInput = el('input', 'w-full');
   pkgInput.type = 'number';
@@ -316,6 +401,30 @@ function ensureDialogBuilt() {
   pkgInput.value = '500';
   qtyGrid.appendChild(createField('stock-package-input', 'Package Size (g)', pkgInput));
   form.appendChild(qtyGrid);
+
+  // Store & Price row (used in 'swap' and 'adjust_scan' modes)
+  const storeRow = el('div', 'stock-form-grid');
+  storeRow.id = 'stock-store-row';
+  storeRow.hidden = true;
+
+  const storeSelect = el('select', 'w-full');
+  ['Maxi', 'Super C'].forEach((sName) => {
+    const opt = document.createElement('option');
+    opt.value = sName;
+    opt.textContent = sName;
+    storeSelect.appendChild(opt);
+  });
+  storeRow.appendChild(createField('stock-store-select', 'Store (Maxi / Super C)', storeSelect));
+
+  const priceInput = el('input', 'w-full');
+  priceInput.type = 'number';
+  priceInput.min = '0';
+  priceInput.max = '250';
+  priceInput.step = '0.01';
+  priceInput.value = '4.99';
+  priceInput.placeholder = 'e.g. 4.99';
+  storeRow.appendChild(createField('stock-price-input', 'Shelf Price ($ CAD)', priceInput));
+  form.appendChild(storeRow);
 
   const macroFieldset = el('fieldset', 'subcard space-y-2');
   macroFieldset.appendChild(el('legend', 'text-xs font-bold text-slate-200', 'Macros per 100g'));
@@ -360,6 +469,42 @@ function ensureDialogBuilt() {
   macroFieldset.appendChild(macroGrid);
   form.appendChild(macroFieldset);
 
+  // Optional Health Check Nutrients (Auto-filled on Scan)
+  const healthDetails = document.createElement('details');
+  healthDetails.className = 'subcard prompt-preview-details';
+  const healthSummary = document.createElement('summary');
+  healthSummary.className = 'text-xs font-bold text-slate-200';
+  healthSummary.textContent = 'Health Check Nutrients (Auto-filled on Scan)';
+  healthDetails.appendChild(healthSummary);
+
+  const healthContent = el('div', 'pt-2 stock-form-grid');
+  const sugarsInput = el('input', 'w-full');
+  sugarsInput.type = 'number';
+  sugarsInput.min = '0';
+  sugarsInput.max = '100';
+  sugarsInput.step = '0.1';
+  sugarsInput.placeholder = 'e.g. 18';
+  healthContent.appendChild(createField('stock-sugars-input', 'Sugar (g / 100g)', sugarsInput));
+
+  const sodiumInput = el('input', 'w-full');
+  sodiumInput.type = 'number';
+  sodiumInput.min = '0';
+  sodiumInput.max = '50000';
+  sodiumInput.step = '1';
+  sodiumInput.placeholder = 'e.g. 650';
+  healthContent.appendChild(createField('stock-sodium-input', 'Sodium (mg / 100g)', sodiumInput));
+
+  const satFatInput = el('input', 'w-full');
+  satFatInput.type = 'number';
+  satFatInput.min = '0';
+  satFatInput.max = '100';
+  satFatInput.step = '0.1';
+  satFatInput.placeholder = 'e.g. 6';
+  healthContent.appendChild(createField('stock-satfat-input', 'Sat. Fat (g / 100g)', satFatInput));
+
+  healthDetails.appendChild(healthContent);
+  form.appendChild(healthDetails);
+
   const btnRow = el('div', 'flex-wrap-row pt-1');
   const saveBtn = el('button', 'btn-primary flex-1', 'Save to My Stock');
   saveBtn.type = 'submit';
@@ -391,16 +536,26 @@ function ensureDialogBuilt() {
     scanStatusEl,
     previewPer100El,
     previewTotalEl,
+    healthWarnBox,
+    healthWarnBadgesEl,
     form,
     nameInput,
     brandInput,
     aisleSelect,
+    gramsWrap,
     gramsInput,
     pkgInput,
+    storeRow,
+    storeSelect,
+    priceInput,
     calInput,
     protInput,
     carbsInput,
-    fatInput
+    fatInput,
+    sugarsInput,
+    sodiumInput,
+    satFatInput,
+    saveBtn
   };
 
   scannerToggleBtn.addEventListener('click', () => {
@@ -443,8 +598,21 @@ function ensureDialogBuilt() {
     }
   });
 
-  [gramsInput, calInput, protInput, carbsInput, fatInput].forEach((inp) => {
+  [
+    gramsInput,
+    pkgInput,
+    calInput,
+    protInput,
+    carbsInput,
+    fatInput,
+    sugarsInput,
+    sodiumInput,
+    satFatInput,
+    nameInput,
+    aisleSelect
+  ].forEach((inp) => {
     inp.addEventListener('input', updateMacroPreview);
+    inp.addEventListener('change', updateMacroPreview);
   });
 
   form.addEventListener('submit', (event) => {
@@ -456,13 +624,16 @@ function ensureDialogBuilt() {
     }
     const cleanBarcode = normalizeBarcode(barcodeInput.value);
     const pkgGrams = clampInt(pkgInput.value, 1, 20000, 500);
+    const isStoreLookupMode = currentModalMode === 'swap' || currentModalMode === 'adjust_scan';
+    const healthMeta = readFormHealthMeta();
+
     const payload = {
       id: currentEditingId || undefined,
       barcode: cleanBarcode,
       name: cleanName,
       brand: brandInput.value.trim(),
       aisle: aisleSelect.value,
-      gramsOnHand: clampInt(gramsInput.value, 1, 50000, pkgGrams),
+      gramsOnHand: isStoreLookupMode ? pkgGrams : clampInt(gramsInput.value, 1, 50000, pkgGrams),
       packageGrams: pkgGrams,
       per100g: {
         calories: Math.round(clampNum(calInput.value, 0, 900, 0)),
@@ -472,6 +643,29 @@ function ensureDialogBuilt() {
       },
       source: currentSource
     };
+    if (healthMeta) {
+      payload.health = healthMeta;
+    }
+    if (isStoreLookupMode) {
+      payload.store = storeSelect.value === 'Super C' ? 'Super C' : 'Maxi';
+      payload.cadPerPackage = Math.round(clampNum(priceInput.value, 0, 250, 4.99) * 100) / 100;
+    }
+
+    if (cleanBarcode) {
+      saveCachedBarcodeProduct(cleanBarcode, payload);
+    }
+
+    if (isStoreLookupMode) {
+      const cb = currentOnSaved;
+      closeStockModal();
+      announcePolite(
+        currentModalMode === 'swap'
+          ? ('Ready to swap ' + payload.name + ' into plan.')
+          : ('Added ' + payload.name + ' to plan adjustment.')
+      );
+      if (typeof cb === 'function') cb(payload);
+      return;
+    }
 
     const saved = upsertPantryStockItem(payload);
     if (saved) {
@@ -501,11 +695,13 @@ export function closeStockModal() {
   }
 }
 
-export function openStockModal({ mode = 'scan', item = null, onSaved = null } = {}) {
+export function openStockModal({ mode = 'scan', item = null, swapTarget = null, onSaved = null } = {}) {
   const dialog = ensureDialogBuilt();
   currentOnSaved = typeof onSaved === 'function' ? onSaved : null;
+  currentModalMode = mode;
   currentEditingId = item && item.id ? item.id : null;
   currentSource = (item && item.source) ? item.source : 'manual';
+  currentHealthExtra = { novaGroup: null, nutriScore: '', nutrientLevels: null };
 
   refs.form.reset();
   refs.barcodeInput.value = '';
@@ -514,13 +710,26 @@ export function openStockModal({ mode = 'scan', item = null, onSaved = null } = 
   refs.aisleSelect.value = 'Pantry/Canned';
   refs.gramsInput.value = '500';
   refs.pkgInput.value = '500';
+  refs.storeSelect.value = 'Maxi';
+  refs.priceInput.value = '4.99';
   refs.calInput.value = '0';
   refs.protInput.value = '0';
   refs.carbsInput.value = '0';
   refs.fatInput.value = '0';
+  refs.sugarsInput.value = '';
+  refs.sodiumInput.value = '';
+  refs.satFatInput.value = '';
+
+  const isStoreLookupMode = mode === 'swap' || mode === 'adjust_scan';
+  const showScannerByDefault = mode === 'scan' || mode === 'swap' || mode === 'adjust_scan';
+
+  refs.gramsWrap.hidden = isStoreLookupMode;
+  refs.gramsInput.required = !isStoreLookupMode;
+  refs.storeRow.hidden = !isStoreLookupMode;
 
   if (mode === 'edit' && item) {
     refs.titleEl.textContent = 'Edit Stock Ingredient';
+    refs.saveBtn.textContent = 'Save to My Stock';
     populateFormFromProduct(item, { keepGrams: false });
     refs.scannerPanel.hidden = true;
     refs.scannerToggleBtn.hidden = false;
@@ -528,12 +737,38 @@ export function openStockModal({ mode = 'scan', item = null, onSaved = null } = 
     setScanStatus('', false);
   } else if (mode === 'manual') {
     refs.titleEl.textContent = 'Add Ingredient to My Stock';
+    refs.saveBtn.textContent = 'Save to My Stock';
     refs.scannerPanel.hidden = true;
     refs.scannerToggleBtn.hidden = false;
     refs.scannerToggleBtn.textContent = 'Show Barcode Scanner';
     setScanStatus('', false);
+  } else if (mode === 'swap') {
+    refs.titleEl.textContent = swapTarget && swapTarget.name
+      ? ('Swap Out: ' + swapTarget.name)
+      : 'Scan In-Store Replacement';
+    refs.saveBtn.textContent = 'Swap Into Plan Now';
+    refs.scannerPanel.hidden = false;
+    refs.scannerToggleBtn.hidden = true;
+    setScanStatus(
+      isBarcodeDetectorSupported()
+        ? 'Scan replacement barcode at Maxi/Super C (or enter barcode / name below).'
+        : 'Type the replacement barcode digits below (or enter details) to check macros & health.',
+      false
+    );
+  } else if (mode === 'adjust_scan') {
+    refs.titleEl.textContent = 'Scan Item Found at Maxi / Super C';
+    refs.saveBtn.textContent = 'Add to Plan Adjustment';
+    refs.scannerPanel.hidden = false;
+    refs.scannerToggleBtn.hidden = true;
+    setScanStatus(
+      isBarcodeDetectorSupported()
+        ? 'Scan item barcode at Maxi/Super C (or enter barcode / name below).'
+        : 'Type the barcode digits below (or enter details) to add to your adjustment prompt.',
+      false
+    );
   } else {
     refs.titleEl.textContent = 'Scan Barcode & Add Stock';
+    refs.saveBtn.textContent = 'Save to My Stock';
     refs.scannerPanel.hidden = false;
     refs.scannerToggleBtn.hidden = true;
     if (isBarcodeDetectorSupported()) {
@@ -548,7 +783,7 @@ export function openStockModal({ mode = 'scan', item = null, onSaved = null } = 
     dialog.showModal();
   }
 
-  if (mode === 'scan') {
+  if (showScannerByDefault) {
     refs.barcodeInput.focus();
     if (isBarcodeDetectorSupported()) {
       startCameraScan();

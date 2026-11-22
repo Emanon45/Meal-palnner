@@ -936,6 +936,7 @@ export const tier3Tests = [
             { id: 'lunch', slot: 'Lunch', title: 'Citrus Chicken Bowl', cookingMethod: 'Broth sear, zero added oil', seasoningTwist: 'Lemon oregano' },
           ],
         });
+        await switchTab(iso.page, /AI Chef/i);
         const jsonArea = iso.page.locator('#custom-meal-json-input');
         await jsonArea.fill(customPayload);
         await iso.page.locator('#apply-custom-json-btn').click();

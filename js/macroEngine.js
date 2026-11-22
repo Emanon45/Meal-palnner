@@ -542,6 +542,7 @@
         name: resolvedName,
         aisle: aisle,
         per100g: per100g,
+        health: (ov && ov.health && typeof ov.health === 'object') ? ov.health : ((base && base.health) || null),
         cookedYield: cookedYield,
         packageGrams: packageGrams,
         unitLabel: unitLabel,
@@ -2744,6 +2745,15 @@
         id: gid,
         name: gItem.name,
         aisle: aisleKey,
+        per100g: gItem.per100g
+          ? {
+              calories: gItem.per100g.calories,
+              protein: gItem.per100g.protein,
+              fat: gItem.per100g.fat,
+              carbs: gItem.per100g.carbs
+            }
+          : null,
+        health: gItem.health || null,
         totalGramsNeeded: totalGramsNeeded,
         remainingGrams: remainingGrams,
         packagesNeeded: packagesNeeded,

@@ -4,6 +4,8 @@
  * with photo upload & manual UPC/EAN fallback, plus Open Food Facts API + localStorage cache.
  */
 
+import { normalizeHealthMeta } from './healthWarnings.js';
+
 export const BARCODE_CACHE_KEY = 'mealPlanBarcodeCache';
 const MAX_BARCODE_CACHE_ENTRIES = 200;
 const BARCODE_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39'];
@@ -174,6 +176,25 @@ export function parseOpenFoodFactsProduct(barcode, payload) {
   const packageGrams = parseQuantityToGrams(p.product_quantity, p.product_quantity_unit, p.quantity);
   const aisle = guessAisleFromProduct(p.categories_tags, name);
 
+  const rawSugars = readNonNegNum(n.sugars_100g);
+  const rawSatFat = readNonNegNum(n['saturated-fat_100g']);
+  const rawSodium = readNonNegNum(n.sodium_100g);
+  const rawSalt = readNonNegNum(n.salt_100g);
+  let sodiumMg = null;
+  if (rawSodium !== null) {
+    sodiumMg = Math.round(clampNum(rawSodium <= 20 ? rawSodium * 1000 : rawSodium, 0, 50000, 0));
+  } else if (rawSalt !== null) {
+    sodiumMg = Math.round(clampNum(rawSalt * 400, 0, 50000, 0));
+  }
+  const health = normalizeHealthMeta({
+    sugars: rawSugars !== null ? round1(clampNum(rawSugars, 0, 100, 0)) : null,
+    saturatedFat: rawSatFat !== null ? round1(clampNum(rawSatFat, 0, 100, 0)) : null,
+    sodiumMg,
+    nova_group: p.nova_group,
+    nutriscore_grade: p.nutriscore_grade,
+    nutrient_levels: p.nutrient_levels
+  });
+
   return {
     barcode: code,
     name: name,
@@ -187,6 +208,7 @@ export function parseOpenFoodFactsProduct(barcode, payload) {
       fat: fat,
       carbs: carbs
     },
+    health: health,
     source: 'openfoodfacts'
   };
 }
@@ -235,6 +257,7 @@ export function saveCachedBarcodeProduct(rawBarcode, product) {
         fat: round1(clampNum(product.per100g && product.per100g.fat, 0, 100, 0)),
         carbs: round1(clampNum(product.per100g && product.per100g.carbs, 0, 100, 0))
       },
+      health: normalizeHealthMeta(product.health, product.per100g),
       source: typeof product.source === 'string' ? product.source : 'manual',
       cachedAt: Date.now()
     };
@@ -278,7 +301,7 @@ export async function lookupBarcodeMacros(rawBarcode, options = {}) {
     return { found: false, barcode: code, reason: 'fetch_unavailable' };
   }
 
-  const url = 'https://world.openfoodfacts.org/api/v2/product/' + encodeURIComponent(code) + '.json?fields=code,product_name,product_name_en,product_name_fr,brands,quantity,product_quantity,product_quantity_unit,serving_size,nutriments,categories_tags';
+  const url = 'https://world.openfoodfacts.org/api/v2/product/' + encodeURIComponent(code) + '.json?fields=code,product_name,product_name_en,product_name_fr,brands,quantity,product_quantity,product_quantity_unit,serving_size,nutriments,categories_tags,nova_group,nutriscore_grade,nutrient_levels';
   const controller = typeof AbortController === 'function' ? new AbortController() : null;
   const timeoutMs = clampNum(options.timeoutMs, 500, 30000, 8000);
   const timerId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;

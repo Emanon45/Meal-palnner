@@ -576,8 +576,8 @@ input[type="number"] {
   max-inline-size: 430px;
   margin-inline: auto;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.25rem;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.2rem;
 }
 
 [role="tab"] {
@@ -593,7 +593,7 @@ input[type="number"] {
   border: 0;
   color: var(--text-muted);
   font-family: var(--font-sans);
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   cursor: pointer;
   padding: 0.25rem 0.125rem;
@@ -962,6 +962,96 @@ dialog.stock-dialog[open] {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.5rem;
+}
+
+/* Health Warning Badges & Banners (WCAG 1.4.1 non-color icon + border + label) */
+.health-warn-badge {
+  border-color: var(--deal);
+  color: var(--deal);
+  background: #FDF1EE;
+}
+
+.health-warn-banner {
+  border: 1px solid var(--deal);
+  border-left-width: 3px;
+  background: #FDF1EE;
+  color: var(--text-main);
+  border-radius: 2px;
+  padding: 0.625rem 0.75rem;
+}
+
+/* AI Chef Collapsible Prompt Accordion & Preview */
+.prompt-preview-details > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5ch;
+  cursor: pointer;
+  min-block-size: 36px;
+}
+
+.prompt-preview-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.prompt-preview-details > summary::before {
+  content: "";
+  inline-size: 0;
+  block-size: 0;
+  flex-shrink: 0;
+  border-inline: 5px solid transparent;
+  border-block-start: 6px solid currentColor;
+  rotate: -90deg;
+}
+
+.prompt-preview-details[open] > summary::before {
+  rotate: 0deg;
+}
+
+.prompt-preview-details::details-content {
+  interpolate-size: allow-keywords;
+  overflow: clip;
+  contain: layout;
+}
+
+.prompt-preview-details:not([open])::details-content {
+  block-size: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .prompt-preview-details > summary::before {
+    transition: rotate 0.2s;
+  }
+  .prompt-preview-details::details-content {
+    transition: block-size, content-visibility;
+    transition-duration: 0.25s;
+    transition-timing-function: ease-in-out;
+    transition-behavior: allow-discrete;
+  }
+}
+
+.prompt-preview-code {
+  margin: 0.5rem 0 0;
+  padding: 0.625rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-block-size: 16rem;
+  overflow-y: auto;
+  color: var(--text-main);
+}
+
+.chef-preview-card {
+  border-left: 3px solid var(--accent);
+}
+
+.chef-adjust-row {
+  border-color: var(--border-strong);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -412,6 +412,36 @@ CATEGORY_SPECS: dict[str, dict[str, Any]] = {
     },
 }
 
+CATALOG_QUERY_SPECS: tuple[tuple[str, str], ...] = (
+    ("Meat", "boeuf"),
+    ("Meat", "dinde"),
+    ("Meat", "saumon"),
+    ("Meat", "filet de poisson"),
+    ("Meat", "tofu"),
+    ("Dairy/Eggs", "yogourt grec"),
+    ("Dairy/Eggs", "fromage cottage"),
+    ("Pantry/Canned", "avoine"),
+    ("Pantry/Canned", "lentilles"),
+    ("Produce", "brocoli"),
+    ("Produce", "poivrons"),
+    ("Produce", "pommes"),
+)
+
+CATALOG_EXCLUDE_KEYWORDS: tuple[str, ...] = (
+    "saucisse", "saucisses", "sausage", "sausages", "bacon", "jambon", "jambons", "ham", "hams",
+    "salami", "salamis", "pepperoni", "bologna", "wiener", "wieners", "hot dog", "hot dogs",
+    "pane", "panes", "panee", "panees", "breaded", "nugget", "nuggets",
+    "poutine", "poutines", "pizza", "pizzas", "chips", "croustille", "croustilles",
+    "craquelin", "craquelins", "cracker", "crackers", "biscuit", "biscuits", "cookie", "cookies",
+    "cake", "cakes", "gateau", "gateaux", "muffin", "muffins", "donut", "donuts", "beigne", "beignes",
+    "candy", "candies", "bonbon", "bonbons", "chocolat", "chocolats", "chocolate", "chocolates",
+    "creme glacee", "ice cream", "soda", "sodas", "cola", "colas", "boisson gazeuse",
+    "sirop", "sirops", "syrup", "syrups", "jus", "juice", "juices", "sauce", "sauces",
+    "mayo", "mayonnaise", "margarine", "margarines", "beurre", "beurres", "butter", "butters",
+    "huile", "huiles", "oil", "oils", "canola", "shortening", "lard",
+    "cat food", "nourriture pour chat", "dog food", "litiere", "savon", "detergent", "shampoing",
+)
+
 USER_PROFILE: dict[str, Any] = {
     "description": "High-Protein Batch Prep • Zero Added Oil",
     "neighborhood": "Canada",
@@ -1239,6 +1269,132 @@ def fetch_flipp_items(
     return collected, any_success
 
 
+def _classify_catalog_category(name: str, default_cat: str) -> str:
+    folded = fold_accents(name)
+    if any(_keyword_matches(folded, kw) for kw in ("porc", "pork", "poulet", "chicken", "boeuf", "beef", "dinde", "turkey", "saumon", "salmon", "thon", "tuna", "sardine", "tofu", "poisson", "fish")):
+        return "Meat"
+    if any(_keyword_matches(folded, kw) for kw in ("oeuf", "egg", "yogourt", "yogurt", "cottage", "lait", "milk", "skyr")):
+        return "Dairy/Eggs"
+    if any(_keyword_matches(folded, kw) for kw in ("riz", "rice", "avoine", "oats", "lentille", "haricot", "bean", "pois chiche", "pate", "pasta", "quinoa", "conserve")):
+        return "Pantry/Canned"
+    if any(_keyword_matches(folded, kw) for kw in ("surgele", "frozen")):
+        return "Frozen"
+    return default_cat or "Produce"
+
+
+def fetch_flyer_catalog(
+    postal_query: str,
+    existing_items_by_store: dict[str, list[dict[str, Any]]] | None = None,
+    now: dt.datetime | None = None,
+    http_get: Callable[..., dict[str, Any]] | None = None,
+    max_per_store: int = 30,
+) -> dict[str, list[dict[str, Any]]]:
+    """Collect a compact, zero-oil catalog of healthy weekly Maxi & Super C flyer deals."""
+    fetcher = http_get or _http_get_json
+    now_utc = (now or dt.datetime.now(dt.timezone.utc)).astimezone(dt.timezone.utc)
+    tz = get_montreal_tz()
+
+    raw_by_store: dict[str, list[tuple[dict[str, Any], str]]] = {"Maxi": [], "Super C": []}
+    seen_item_keys: set[tuple[str, Any]] = set()
+
+    for store in ("Maxi", "Super C"):
+        for item in (existing_items_by_store or {}).get(store, []):
+            if match_target_store(item) != store:
+                continue
+            dedup_id = item.get("flyer_item_id") or item.get("id") or (item.get("name"), item.get("current_price"))
+            key = (store, dedup_id)
+            if key in seen_item_keys:
+                continue
+            seen_item_keys.add(key)
+            cat_guess = _classify_catalog_category(str(item.get("name") or ""), "Produce")
+            raw_by_store[store].append((item, cat_guess))
+
+    for cat_label, query_term in CATALOG_QUERY_SPECS:
+        try:
+            payload = fetcher(
+                FLIPP_SEARCH_URL,
+                params={"locale": "en-ca", "postal_code": postal_query, "q": query_term},
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            items = payload.get("items", []) if isinstance(payload, dict) else []
+        except Exception:
+            items = []
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            store = match_target_store(item)
+            if store is None:
+                continue
+            dedup_id = item.get("flyer_item_id") or item.get("id") or (item.get("name"), item.get("current_price"))
+            key = (store, dedup_id)
+            if key in seen_item_keys:
+                continue
+            seen_item_keys.add(key)
+            raw_by_store[store].append((item, cat_label))
+
+    catalog: dict[str, list[dict[str, Any]]] = {"Maxi": [], "Super C": []}
+    for store in ("Maxi", "Super C"):
+        entries_with_cat = raw_by_store[store]
+        if not entries_with_cat:
+            continue
+        active_items, _ = select_active_flyer_items(
+            [row[0] for row in entries_with_cat],
+            now=now_utc,
+            allow_upcoming=True,
+        )
+        cat_by_obj_id = {id(row[0]): row[1] for row in entries_with_cat}
+        seen_names: set[str] = set()
+        store_rows: list[dict[str, Any]] = []
+
+        for item in active_items:
+            raw_name = str(item.get("name") or "").replace("\xa0", " ").strip()
+            if not raw_name:
+                continue
+            if contains_added_oil(raw_name):
+                continue
+            folded_name = fold_accents(raw_name)
+            if "walmart" in folded_name:
+                continue
+            if any(_keyword_matches(folded_name, neg) for neg in CATALOG_EXCLUDE_KEYWORDS):
+                continue
+            if folded_name in seen_names:
+                continue
+
+            raw_price = item.get("current_price")
+            if raw_price is None or isinstance(raw_price, bool):
+                continue
+            try:
+                price_val = float(raw_price)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(price_val) or price_val <= 0:
+                continue
+
+            pre = _norm_unit_str(item.get("pre_price_text"))
+            post = _norm_unit_str(item.get("post_price_text"))
+            price_text = f"{pre} ${price_val:.2f} {post}".strip()
+            price_text = re.sub(r"\s+", " ", price_text)
+            if contains_added_oil(price_text):
+                continue
+
+            vt_dt = parse_iso_dt(item.get("valid_to"))
+            valid_to_str = vt_dt.astimezone(tz).date().isoformat() if vt_dt is not None else ""
+
+            seen_names.add(folded_name)
+            store_rows.append({
+                "name": raw_name[:100],
+                "category": cat_by_obj_id.get(id(item), _classify_catalog_category(raw_name, "Produce")),
+                "priceCad": round(price_val, 2),
+                "priceText": price_text[:40],
+                "validTo": valid_to_str,
+            })
+
+        store_rows.sort(key=lambda r: (r["category"], r["priceCad"], r["name"]))
+        catalog[store] = store_rows[:max_per_store]
+
+    return catalog
+
+
 def score_stores(
     items_by_store: dict[str, list[dict[str, Any]]],
     now: dt.datetime | None = None,
@@ -2003,6 +2159,12 @@ def run_pipeline(
         postal_query = normalize_postal_code(DEFAULT_POSTAL_CODE)
 
     items_by_store, flipp_online = fetch_flipp_items(postal_query, http_get=http_get)
+    flyer_catalog = fetch_flyer_catalog(
+        postal_query,
+        existing_items_by_store=items_by_store,
+        now=now_utc,
+        http_get=http_get,
+    )
     scoring = score_stores(
         items_by_store,
         now=now_utc,
@@ -2073,11 +2235,13 @@ def run_pipeline(
         "proteinSwaps": copy.deepcopy(PROTEIN_SWAPS),
         "mealTemplates": plan_sections["mealTemplates"],
         "prepTimeline": plan_sections["prepTimeline"],
+        "weeklyFlyerCatalog": flyer_catalog,
     }
 
     sanitize_zero_oil({
         "mealTemplates": data["mealTemplates"],
         "prepTimeline": data["prepTimeline"],
+        "weeklyFlyerCatalog": data["weeklyFlyerCatalog"],
     })
 
     payload_bytes = (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")

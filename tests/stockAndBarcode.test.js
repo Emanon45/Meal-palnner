@@ -70,7 +70,18 @@ test('Barcode Scanner & Stock-First Gemini Prompt integration', async (t) => {
           'energy-kcal_100g': 110,
           proteins_100g: 7.5,
           fat_100g: 0.5,
-          carbohydrates_100g: 20.0
+          carbohydrates_100g: 20.0,
+          sugars_100g: 1.2,
+          'saturated-fat_100g': 0.1,
+          sodium_100g: 0.24
+        },
+        nova_group: 3,
+        nutriscore_grade: 'a',
+        nutrient_levels: {
+          fat: 'low',
+          'saturated-fat': 'low',
+          sugars: 'low',
+          salt: 'moderate'
         }
       }
     });
@@ -80,6 +91,14 @@ test('Barcode Scanner & Stock-First Gemini Prompt integration', async (t) => {
     assert.equal(standard.aisle, 'Pantry/Canned');
     assert.equal(standard.packageGrams, 540);
     assert.deepEqual(standard.per100g, { calories: 110, protein: 7.5, fat: 0.5, carbs: 20 });
+    assert.deepEqual(standard.health, {
+      sugars: 1.2,
+      saturatedFat: 0.1,
+      sodiumMg: 240,
+      novaGroup: 3,
+      nutriScore: 'a',
+      nutrientLevels: { fat: 'low', saturatedFat: 'low', sugars: 'low', salt: 'moderate' }
+    });
 
     const kjOnly = barcodeMod.parseOpenFoodFactsProduct('12345678', {
       status: 1,
@@ -206,7 +225,7 @@ test('Barcode Scanner & Stock-First Gemini Prompt integration', async (t) => {
     assert.equal(effective.nutritionDb.stock_060383001483.price.cadPerPackage, 0);
     assert.equal(effective.nutritionDb.stock_060383001483.price.radarTag, 'AT HOME');
 
-    for (const mode of ['browser_hunt', 'allow_custom', 'flyer_locked']) {
+    for (const mode of ['flyer_deals', 'full_store']) {
       appState.geminiPromptMode = mode;
       const prompt = promptsMod.buildGeminiMealPrompt();
       assert.match(prompt, /PRIORITY HOME STOCK TO EMPTY FIRST/i);
@@ -214,6 +233,7 @@ test('Barcode Scanner & Stock-First Gemini Prompt integration', async (t) => {
       assert.match(prompt, /540g total at home/);
       assert.match(prompt, /110 kcal, 7\.5g P, 0\.5g F, 20g C/);
       assert.match(prompt, /rice_dry/);
+      assert.doesNotMatch(prompt, /walmart/i);
     }
 
     // Simulate pasting Gemini JSON that uses the scanned stock item and rice_dry

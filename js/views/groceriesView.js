@@ -6,17 +6,19 @@ import {
   getAppData,
   getCurrentScaledPlan,
   getCurrentHouseholdPlans,
+  getEffectiveAppData,
   el,
   clampInt,
   formatCad,
   saveState,
   announcePolite,
   recomputePlan,
+  applyInStoreSwap,
   upsertPantryStockItem,
   updatePantryStockGrams,
   removePantryStockItem
 } from '../state.js';
-import { buildGeminiMealPrompt } from '../geminiPrompts.js';
+import { createHealthWarningBadges } from '../healthWarnings.js';
 import { openStockModal } from './stockModal.js';
 
 let activeCallbacks = {};
@@ -105,40 +107,17 @@ function renderStockSubtab(frag, appState, appData) {
   heroCard.appendChild(addRow);
 
   const geminiRow = el('div', 'flex-wrap-row pt-1');
-  const copyPromptBtn = el('button', 'btn-primary flex-1', 'Copy Gemini Prompt (With My Stock)');
-  copyPromptBtn.type = 'button';
-  copyPromptBtn.id = 'stock-copy-gemini-prompt-btn';
-  copyPromptBtn.addEventListener('click', () => {
-    const promptText = buildGeminiMealPrompt();
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(promptText).then(() => {
-        uiStatus.stockStatusText = 'Gemini prompt copied with ' + stockList.length + ' stock item(s)! Paste it into Gemini, then tap "Paste Gemini Reply".';
-        const statusEl = document.getElementById('stock-prompt-status');
-        if (statusEl) statusEl.textContent = uiStatus.stockStatusText;
-        announcePolite(uiStatus.stockStatusText);
-      }).catch(() => {
-        uiStatus.stockStatusText = 'Go to Settings and tap "1. Copy Gemini Prompt" to copy from the text box.';
-        const statusEl = document.getElementById('stock-prompt-status');
-        if (statusEl) statusEl.textContent = uiStatus.stockStatusText;
-      });
-    } else {
-      uiStatus.stockStatusText = 'Open Settings to copy the Gemini prompt from the text box.';
-      const statusEl = document.getElementById('stock-prompt-status');
-      if (statusEl) statusEl.textContent = uiStatus.stockStatusText;
-    }
-  });
-
-  const pasteReplyBtn = el('button', 'btn-secondary', 'Paste Gemini Reply');
-  pasteReplyBtn.type = 'button';
-  pasteReplyBtn.id = 'stock-go-settings-json-btn';
-  pasteReplyBtn.addEventListener('click', () => {
-    if (typeof activeCallbacks.onOpenSettingsJson === 'function') {
+  const openChefBtn = el('button', 'btn-primary w-full', 'Open AI Chef (Use My Stock)');
+  openChefBtn.type = 'button';
+  openChefBtn.id = 'stock-open-chef-btn';
+  openChefBtn.addEventListener('click', () => {
+    if (typeof activeCallbacks.onOpenChef === 'function') {
+      activeCallbacks.onOpenChef('new');
+    } else if (typeof activeCallbacks.onOpenSettingsJson === 'function') {
       activeCallbacks.onOpenSettingsJson();
     }
   });
-
-  geminiRow.appendChild(copyPromptBtn);
-  geminiRow.appendChild(pasteReplyBtn);
+  geminiRow.appendChild(openChefBtn);
   heroCard.appendChild(geminiRow);
 
   const promptStatus = el('p', 'text-xs text-emerald-300 wrap-anywhere', uiStatus.stockStatusText || '');
@@ -251,6 +230,7 @@ function renderStockSubtab(frag, appState, appData) {
       if (item.barcode) {
         badgeWrap.appendChild(el('span', 'badge radar-regular', 'UPC ' + item.barcode));
       }
+      badgeWrap.appendChild(createHealthWarningBadges(item, el, { compact: false }));
       top.appendChild(badgeWrap);
       li.appendChild(top);
 
@@ -345,6 +325,7 @@ export function renderGroceriesTab(callbacks) {
 
   const appState = getAppState();
   const appData = getAppData();
+  const effectiveData = getEffectiveAppData();
   const currentHouseholdPlans = getCurrentHouseholdPlans();
 
   const frag = document.createDocumentFragment();
@@ -626,6 +607,13 @@ export function renderGroceriesTab(callbacks) {
       const isHomeChecked = Boolean(appState.haveAtHome[item.id]);
       const isCollapsed = Boolean(appState.compactAisleMode && (isCartChecked || isHomeChecked));
 
+      let origIdForSwap = item.id;
+      Object.keys(appState.grocerySwaps || {}).forEach((k) => {
+        if (appState.grocerySwaps[k] === item.id) origIdForSwap = k;
+      });
+      const wasSwapped = origIdForSwap !== item.id;
+      const fullHealthEntry = (effectiveData && effectiveData.nutritionDb && effectiveData.nutritionDb[item.id]) || item;
+
       const li = el('li', 'subcard grocery-row ' + (isCollapsed ? 'opacity-60 py-1.5 px-2.5' : 'space-y-1.5'));
       li.setAttribute('data-grocery-item', item.id);
       if (appState.hideInCart && isCartChecked) {
@@ -645,12 +633,16 @@ export function renderGroceriesTab(callbacks) {
         if (activeSwapMap[item.id]) {
           tagsRow.appendChild(el('span', 'badge', activeSwapMap[item.id]));
         }
+        if (wasSwapped) {
+          tagsRow.appendChild(el('span', 'badge radar-flyer', 'Swapped'));
+        }
         if (item.pantryDefault) {
           tagsRow.appendChild(el('span', 'badge', 'Pantry staple'));
         }
         if (item.stockDeductedGrams > 0 && !item.inStock) {
           tagsRow.appendChild(el('span', 'badge radar-flyer', 'At Home: -' + item.stockDeductedGrams + 'g'));
         }
+        tagsRow.appendChild(createHealthWarningBadges(fullHealthEntry, el, { compact: false }));
       }
       topRow.appendChild(tagsRow);
       li.appendChild(topRow);
@@ -726,79 +718,99 @@ export function renderGroceriesTab(callbacks) {
       checkRow.appendChild(homeLabel);
       checkRow.appendChild(cartLabel);
 
-      // 1-Tap Out-of-Stock Ingredient Swap
-      const dbKeys = Object.keys((appData && appData.nutritionDb) || {}).filter((kid) => {
+      // 1-Tap Out-of-Stock Ingredient Swap & Barcode Swap
+      const swapDb = (effectiveData && effectiveData.nutritionDb) || (appData && appData.nutritionDb) || {};
+      const dbKeys = Object.keys(swapDb).filter((kid) => {
         return kid !== item.id && kid !== 'aromatics_zero';
       });
-      if (dbKeys.length > 0 && !isCollapsed && item.id !== 'aromatics_zero') {
-        const swapSel = document.createElement('select');
-        swapSel.className = 'text-xs';
-        swapSel.setAttribute('aria-label', 'Swap ' + item.name + ' if out of stock');
-        let origIdForSwap = item.id;
-        Object.keys(appState.grocerySwaps || {}).forEach((k) => {
-          if (appState.grocerySwaps[k] === item.id) origIdForSwap = k;
-        });
-        const defaultOpt = document.createElement('option');
-        defaultOpt.value = '';
-        defaultOpt.textContent = origIdForSwap !== item.id ? 'Reset to Original' : 'Swap (No Stock)';
-        swapSel.appendChild(defaultOpt);
+      if (!isCollapsed && item.id !== 'aromatics_zero') {
+        if (dbKeys.length > 0) {
+          const swapSel = document.createElement('select');
+          swapSel.className = 'text-xs';
+          swapSel.setAttribute('aria-label', 'Swap ' + item.name + ' if out of stock');
+          const defaultOpt = document.createElement('option');
+          defaultOpt.value = '';
+          defaultOpt.textContent = origIdForSwap !== item.id ? 'Reset to Original' : 'Swap (No Stock)';
+          swapSel.appendChild(defaultOpt);
 
-        const sameAisleKeys = [];
-        const compatibleKeys = [];
-        const curItemDb = appData.nutritionDb[item.id] || {};
-        const curAisle = item.aisle || curItemDb.aisle || '';
-        const isCurCarbOrProduce = curAisle === 'Produce' || curAisle === 'Pantry/Canned' || curAisle === 'Frozen';
-        const isCurProteinOrDairy = curAisle === 'Meat' || curAisle === 'Dairy/Eggs';
+          const sameAisleKeys = [];
+          const compatibleKeys = [];
+          const curItemDb = swapDb[item.id] || {};
+          const curAisle = item.aisle || curItemDb.aisle || '';
+          const isCurCarbOrProduce = curAisle === 'Produce' || curAisle === 'Pantry/Canned' || curAisle === 'Frozen';
+          const isCurProteinOrDairy = curAisle === 'Meat' || curAisle === 'Dairy/Eggs';
 
-        dbKeys.forEach((kid) => {
-          const kEntry = appData.nutritionDb[kid];
-          if (!kEntry || !kEntry.name) return;
-          if (kEntry.aisle === curAisle) {
-            sameAisleKeys.push(kid);
-          } else if (
-            (isCurProteinOrDairy && (kEntry.aisle === 'Meat' || kEntry.aisle === 'Dairy/Eggs' || (kEntry.per100g && kEntry.per100g.protein >= 12))) ||
-            (isCurCarbOrProduce && (kEntry.aisle === 'Produce' || kEntry.aisle === 'Pantry/Canned' || kEntry.aisle === 'Frozen'))
-          ) {
-            compatibleKeys.push(kid);
+          dbKeys.forEach((kid) => {
+            const kEntry = swapDb[kid];
+            if (!kEntry || !kEntry.name) return;
+            if (kEntry.aisle === curAisle) {
+              sameAisleKeys.push(kid);
+            } else if (
+              (isCurProteinOrDairy && (kEntry.aisle === 'Meat' || kEntry.aisle === 'Dairy/Eggs' || (kEntry.per100g && kEntry.per100g.protein >= 12))) ||
+              (isCurCarbOrProduce && (kEntry.aisle === 'Produce' || kEntry.aisle === 'Pantry/Canned' || kEntry.aisle === 'Frozen'))
+            ) {
+              compatibleKeys.push(kid);
+            }
+          });
+
+          const appendSwapGroup = (label, keys) => {
+            if (keys.length === 0) return;
+            const grp = document.createElement('optgroup');
+            grp.label = label;
+            keys.forEach((kid) => {
+              const kEntry = swapDb[kid];
+              const opt = document.createElement('option');
+              opt.value = kid;
+              const kPrice = kEntry.price && Number.isFinite(kEntry.price.cadPerPackage) ? (' (' + formatCad(kEntry.price.cadPerPackage) + ')') : '';
+              opt.textContent = kEntry.name + kPrice;
+              grp.appendChild(opt);
+            });
+            swapSel.appendChild(grp);
+          };
+
+          appendSwapGroup('Same Aisle (' + curAisle + ')', sameAisleKeys);
+          appendSwapGroup('Compatible Substitutes', compatibleKeys);
+
+          if (sameAisleKeys.length + compatibleKeys.length > 0) {
+            swapSel.addEventListener('change', () => {
+              const nextId = swapSel.value;
+              if (!appState.grocerySwaps) appState.grocerySwaps = {};
+              if (!nextId) {
+                delete appState.grocerySwaps[origIdForSwap];
+              } else {
+                appState.grocerySwaps[origIdForSwap] = nextId;
+              }
+              saveState();
+              recomputePlan();
+              if (typeof activeCallbacks.onSwapsChanged === 'function') {
+                activeCallbacks.onSwapsChanged();
+              }
+              renderGroceriesTab();
+            });
+            checkRow.appendChild(swapSel);
           }
-        });
-
-        const appendSwapGroup = (label, keys) => {
-          if (keys.length === 0) return;
-          const grp = document.createElement('optgroup');
-          grp.label = label;
-          keys.forEach((kid) => {
-            const kEntry = appData.nutritionDb[kid];
-            const opt = document.createElement('option');
-            opt.value = kid;
-            const kPrice = kEntry.price && Number.isFinite(kEntry.price.cadPerPackage) ? (' (' + formatCad(kEntry.price.cadPerPackage) + ')') : '';
-            opt.textContent = kEntry.name + kPrice;
-            grp.appendChild(opt);
-          });
-          swapSel.appendChild(grp);
-        };
-
-        appendSwapGroup('Same Aisle (' + curAisle + ')', sameAisleKeys);
-        appendSwapGroup('Compatible Substitutes', compatibleKeys);
-
-        if (sameAisleKeys.length + compatibleKeys.length > 0) {
-          swapSel.addEventListener('change', () => {
-            const nextId = swapSel.value;
-            if (!appState.grocerySwaps) appState.grocerySwaps = {};
-            if (!nextId) {
-              delete appState.grocerySwaps[origIdForSwap];
-            } else {
-              appState.grocerySwaps[origIdForSwap] = nextId;
-            }
-            saveState();
-            recomputePlan();
-            if (typeof activeCallbacks.onSwapsChanged === 'function') {
-              activeCallbacks.onSwapsChanged();
-            }
-            renderGroceriesTab();
-          });
-          checkRow.appendChild(swapSel);
         }
+
+        const scanSwapBtn = el('button', 'btn-secondary text-xs', 'Scan Swap / Nil Stock');
+        scanSwapBtn.type = 'button';
+        scanSwapBtn.setAttribute('aria-label', 'Scan Swap / Nil Stock for ' + item.name);
+        scanSwapBtn.addEventListener('click', () => {
+          openStockModal({
+            mode: 'swap',
+            swapTarget: { id: origIdForSwap, name: item.name },
+            onSaved: (payload) => {
+              const saved = applyInStoreSwap(origIdForSwap, payload);
+              if (saved) {
+                announcePolite('Swapped ' + item.name + ' for ' + saved.name + '.');
+                if (typeof activeCallbacks.onSwapsChanged === 'function') {
+                  activeCallbacks.onSwapsChanged();
+                }
+                renderGroceriesTab();
+              }
+            }
+          });
+        });
+        checkRow.appendChild(scanSwapBtn);
       }
 
       li.appendChild(checkRow);

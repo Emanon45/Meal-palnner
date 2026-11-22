@@ -457,6 +457,20 @@ export function renderPrepTab() {
   }
   splitCard.appendChild(freezerBox);
 
+  if (Array.isArray(currentScaledPlan.thawAlerts) && currentScaledPlan.thawAlerts.length > 0) {
+    const thawBanner = el('div', 'thaw-banner space-y-1');
+    thawBanner.id = 'prep-thaw-alerts';
+    thawBanner.appendChild(el('h3', 'text-sm font-bold text-amber-300', '24h Thaw Reminder'));
+    const thawUl = el('ul', 'text-xs text-slate-200 space-y-1 pl-4 list-disc');
+    currentScaledPlan.thawAlerts.forEach((al) => {
+      if (!al) return;
+      const msg = al.detail ? (al.title + ' \u2014 ' + al.detail) : al.title;
+      if (msg) thawUl.appendChild(el('li', 'wrap-anywhere', msg));
+    });
+    thawBanner.appendChild(thawUl);
+    splitCard.appendChild(thawBanner);
+  }
+
   // Prepare Fresh / 2-5 Min Assembly (Do NOT Freeze)
   const COLD_FRESH_IDS = {
     cabbage: true, cucumber: true, carrots: true, pico: true,

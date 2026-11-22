@@ -54,6 +54,10 @@
         <section id="groceries-root" class="space-stack" aria-label="Grocery list"></section>
       </section>
 
+      <section role="tabpanel" id="panel-chef" aria-labelledby="tab-chef" hidden>
+        <div id="chef-root" class="space-stack"></div>
+      </section>
+
       <section role="tabpanel" id="panel-settings" aria-labelledby="tab-settings" hidden>
         <div id="settings-root" class="space-stack"></div>
       </section>
@@ -79,6 +83,12 @@
           <circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>
         </svg>
         <span>Groceries</span>
+      </button>
+      <button type="button" role="tab" id="tab-chef" aria-selected="false" tabindex="-1">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3Z"/>
+        </svg>
+        <span>AI Chef</span>
       </button>
       <button type="button" role="tab" id="tab-settings" aria-selected="false" tabindex="-1">
         <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">

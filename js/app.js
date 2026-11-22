@@ -22,6 +22,7 @@ import {
 import { renderMealsTab } from './views/mealsView.js';
 import { tickTimers, syncWakeLock, renderPrepTab } from './views/prepView.js';
 import { renderGroceriesTab } from './views/groceriesView.js';
+import { renderChefTab } from './views/chefView.js';
 import { invalidateSettings, updateSettingsControlsInPlace, renderSettingsTab } from './views/settingsView.js';
 import { openStockModal } from './views/stockModal.js';
 
@@ -78,15 +79,25 @@ const groceriesCallbacks = {
   onSwapsChanged: () => {
     renderMealsTab(mealsCallbacks);
     renderPrepTab();
+    renderChefTab(chefCallbacks);
   },
   onStockChanged: () => {
     renderMealsTab(mealsCallbacks);
     renderPrepTab();
     renderGroceriesTab(groceriesCallbacks);
+    renderChefTab(chefCallbacks);
     updateSettingsControlsInPlace();
   },
+  onOpenChef: (mode) => {
+    const appState = getAppState();
+    if (mode === 'adjust' || mode === 'new') {
+      appState.chefViewMode = mode;
+      saveState();
+    }
+    selectTab('chef', false);
+  },
   onOpenSettingsJson: () => {
-    selectTab('settings', false);
+    selectTab('chef', false);
     const jsonBox = document.getElementById('custom-meal-json-input');
     if (jsonBox) {
       if (jsonBox.scrollIntoView) jsonBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -108,6 +119,24 @@ const mealsCallbacks = {
     renderMealsTab(mealsCallbacks);
     renderPrepTab();
     renderGroceriesTab(groceriesCallbacks);
+    renderChefTab(chefCallbacks);
+  }
+};
+
+const chefCallbacks = {
+  onPlanApplied: () => {
+    renderMealsTab(mealsCallbacks);
+    renderPrepTab();
+    renderGroceriesTab(groceriesCallbacks);
+    renderChefTab(chefCallbacks);
+    updateSettingsControlsInPlace();
+  },
+  onOpenStockSubtab: () => {
+    const appState = getAppState();
+    appState.groceriesSubtab = 'stock';
+    saveState();
+    selectTab('groceries', false);
+    renderGroceriesTab(groceriesCallbacks);
   }
 };
 
@@ -118,9 +147,14 @@ const settingsCallbacks = {
     renderMealsTab(mealsCallbacks);
     renderPrepTab();
     renderGroceriesTab(groceriesCallbacks);
+    renderChefTab(chefCallbacks);
   },
   onPostalChanged: () => {
     renderGroceriesTab(groceriesCallbacks);
+    renderChefTab(chefCallbacks);
+  },
+  onOpenChef: () => {
+    selectTab('chef', false);
   },
   onOpenStockSubtab: () => {
     const appState = getAppState();
@@ -136,6 +170,7 @@ const settingsCallbacks = {
         renderMealsTab(mealsCallbacks);
         renderPrepTab();
         renderGroceriesTab(groceriesCallbacks);
+        renderChefTab(chefCallbacks);
         updateSettingsControlsInPlace();
       }
     });
@@ -149,6 +184,7 @@ function renderAllTabs() {
   renderMealsTab(mealsCallbacks);
   renderPrepTab();
   renderGroceriesTab(groceriesCallbacks);
+  renderChefTab(chefCallbacks);
   invalidateSettings();
   renderSettingsTab(settingsCallbacks);
 }
@@ -158,6 +194,10 @@ function selectTab(tabId, moveFocus) {
   const normalized = TAB_IDS.indexOf(tabId) !== -1 ? tabId : 'meals';
   appState.activeTab = normalized;
   saveState();
+
+  if (normalized === 'chef') {
+    renderChefTab(chefCallbacks);
+  }
 
   TAB_IDS.forEach((id) => {
     const tab = document.getElementById('tab-' + id);
