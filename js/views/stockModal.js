@@ -928,7 +928,8 @@ export function openStockModal({
   }
 
   if (showScannerByDefault) {
-    refs.barcodeInput.focus();
+    dialog.scrollTop = 0;
+    refs.camToggleBtn.focus({ preventScroll: true });
     if (isBarcodeDetectorSupported()) {
       startCameraScan();
     }
