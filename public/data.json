@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "generatedAt": "2026-11-22T09:53:26Z",
+  "generatedAt": "2026-11-26T21:59:56Z",
   "source": "fallback+flipp",
   "location": {
     "postalCodeDisplay": "H1W",
@@ -9,23 +9,23 @@
     "currency": "CAD",
     "groceryTaxRate": 0.0
   },
-  "winningStore": "Super C",
+  "winningStore": "Maxi",
   "flyerPeriod": {
-    "validFrom": "2026-11-19",
-    "validTo": "2026-11-25"
+    "validFrom": "2026-11-26",
+    "validTo": "2026-12-02"
   },
   "storeComparison": {
     "Maxi": {
-      "weightedScore": 1.5405,
-      "proteinScore": 1.9086,
-      "carbProduceScore": 0.8568,
-      "matchedDeals": 9
+      "weightedScore": 0.6004,
+      "proteinScore": 0.5369,
+      "carbProduceScore": 0.7184,
+      "matchedDeals": 10
     },
     "Super C": {
-      "weightedScore": 0.7123,
-      "proteinScore": 0.7068,
-      "carbProduceScore": 0.7224,
-      "matchedDeals": 6
+      "weightedScore": 0.6169,
+      "proteinScore": 0.5552,
+      "carbProduceScore": 0.7315,
+      "matchedDeals": 9
     }
   },
   "userProfile": {
@@ -107,8 +107,8 @@
         "historicalLowCadPer100g": 0.65,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": null,
-        "onFlyer": false
+        "flyerItemName": "BLANCS D'OEUFS PC MD MENU BLEU, 1 KG",
+        "onFlyer": true
       }
     },
     "potatoes_raw": {
@@ -129,10 +129,10 @@
         "cadPer100g": 0.09,
         "cadPerPackage": 1.22,
         "regularCadPer100g": 0.29,
-        "historicalLowCadPer100g": 0.15,
+        "historicalLowCadPer100g": 0.09,
         "savingsPct": 69,
         "radarTag": "HISTORIC LOW",
-        "flyerItemName": "pommes de terre Russet | Russet potatoes",
+        "flyerItemName": "POMMES DE TERRE ROUGES, JAUNE OU RUSSET DÉLICES DU MARCHÉ, SAC DE 10 LB",
         "onFlyer": true
       }
     },
@@ -176,13 +176,13 @@
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 1.03,
-        "cadPerPackage": 4.12,
-        "regularCadPer100g": 1.03,
-        "historicalLowCadPer100g": 0.66,
-        "savingsPct": 0,
-        "radarTag": "REGULAR",
-        "flyerItemName": "tomates cerises | tomatoes",
+        "cadPer100g": 0.76,
+        "cadPerPackage": 3.04,
+        "regularCadPer100g": 0.96,
+        "historicalLowCadPer100g": 0.41,
+        "savingsPct": 21,
+        "radarTag": "FLYER DEAL",
+        "flyerItemName": "tomates sur vigne produit du Canada, ou du Mexique, catégorie no 1",
         "onFlyer": true
       }
     },
@@ -276,13 +276,13 @@
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 1.16,
-        "cadPerPackage": 1.39,
-        "regularCadPer100g": 7.21,
-        "historicalLowCadPer100g": 1.16,
-        "savingsPct": 84,
+        "cadPer100g": 0.59,
+        "cadPerPackage": 0.71,
+        "regularCadPer100g": 5.7,
+        "historicalLowCadPer100g": 0.59,
+        "savingsPct": 90,
         "radarTag": "HISTORIC LOW",
-        "flyerItemName": "thon pâle entier Unico",
+        "flyerItemName": "THON AROMATISÉ OU ÉMIETTÉ CLOVER LEAF, 85/170 G",
         "onFlyer": true
       }
     },
@@ -326,13 +326,13 @@
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.65,
-        "cadPerPackage": 6.5,
+        "cadPer100g": 0.44,
+        "cadPerPackage": 4.4,
         "regularCadPer100g": 1.1,
-        "historicalLowCadPer100g": 0.66,
-        "savingsPct": 41,
-        "radarTag": "HISTORIC LOW",
-        "flyerItemName": "rôti de longe de porc bout de côtes | pork loin roast, rib end",
+        "historicalLowCadPer100g": 0.29,
+        "savingsPct": 60,
+        "radarTag": "HOT DEAL",
+        "flyerItemName": "demi-longe de porc",
         "onFlyer": true
       }
     },
@@ -382,8 +382,8 @@
         "historicalLowCadPer100g": 1.43,
         "savingsPct": 0,
         "radarTag": "REGULAR",
-        "flyerItemName": "poitrine de poulet marinée Irresistible | Irrésistible marinated chicken breast",
-        "onFlyer": true
+        "flyerItemName": null,
+        "onFlyer": false
       }
     },
     "white_beans_cnd": {
@@ -401,14 +401,14 @@
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.5,
-        "cadPerPackage": 1.7,
+        "cadPer100g": 0.33,
+        "cadPerPackage": 1.12,
         "regularCadPer100g": 0.5,
-        "historicalLowCadPer100g": 0.29,
-        "savingsPct": 0,
-        "radarTag": "REGULAR",
-        "flyerItemName": null,
-        "onFlyer": false
+        "historicalLowCadPer100g": 0.31,
+        "savingsPct": 34,
+        "radarTag": "HOT DEAL",
+        "flyerItemName": "FÈVES CLARK, 398 ML",
+        "onFlyer": true
       }
     },
     "diced_tomatoes": {
@@ -426,14 +426,14 @@
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.22,
-        "cadPerPackage": 1.75,
+        "cadPer100g": 0.25,
+        "cadPerPackage": 1.99,
         "regularCadPer100g": 0.25,
         "historicalLowCadPer100g": 0.16,
-        "savingsPct": 12,
-        "radarTag": "FLYER DEAL",
-        "flyerItemName": "tomates en dés Selection",
-        "onFlyer": true
+        "savingsPct": 0,
+        "radarTag": "REGULAR",
+        "flyerItemName": null,
+        "onFlyer": false
       }
     },
     "rice_dry": {
@@ -451,14 +451,14 @@
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.3,
-        "cadPerPackage": 6.0,
+        "cadPer100g": 0.15,
+        "cadPerPackage": 3.0,
         "regularCadPer100g": 0.3,
-        "historicalLowCadPer100g": 0.2,
-        "savingsPct": 0,
-        "radarTag": "REGULAR",
-        "flyerItemName": null,
-        "onFlyer": false
+        "historicalLowCadPer100g": 0.15,
+        "savingsPct": 50,
+        "radarTag": "HISTORIC LOW",
+        "flyerItemName": "RIZ AU JASMIN TASTIE | JASMINE RICE, 6,8 KG",
+        "onFlyer": true
       }
     },
     "cabbage": {
@@ -476,14 +476,14 @@
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.28,
-        "cadPerPackage": 2.52,
+        "cadPer100g": 0.17,
+        "cadPerPackage": 1.53,
         "regularCadPer100g": 0.28,
-        "historicalLowCadPer100g": 0.14,
-        "savingsPct": 0,
-        "radarTag": "REGULAR",
-        "flyerItemName": null,
-        "onFlyer": false
+        "historicalLowCadPer100g": 0.17,
+        "savingsPct": 39,
+        "radarTag": "HISTORIC LOW",
+        "flyerItemName": "CHOU VERT | GREEN CABBAGE",
+        "onFlyer": true
       }
     },
     "cucumber": {
@@ -501,14 +501,14 @@
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.57,
-        "cadPerPackage": 2.0,
+        "cadPer100g": 0.33,
+        "cadPerPackage": 1.16,
         "regularCadPer100g": 0.57,
         "historicalLowCadPer100g": 0.28,
-        "savingsPct": 0,
-        "radarTag": "REGULAR",
-        "flyerItemName": null,
-        "onFlyer": false
+        "savingsPct": 42,
+        "radarTag": "HOT DEAL",
+        "flyerItemName": "MINI CONCOMBRES DÉLICES DU MARCHÉ, 6 UN.",
+        "onFlyer": true
       }
     },
     "carrots": {
@@ -526,13 +526,13 @@
       "requiresThaw": false,
       "pantryDefault": false,
       "price": {
-        "cadPer100g": 0.06,
-        "cadPerPackage": 0.54,
+        "cadPer100g": 0.22,
+        "cadPerPackage": 2.0,
         "regularCadPer100g": 0.28,
         "historicalLowCadPer100g": 0.06,
-        "savingsPct": 79,
-        "radarTag": "HISTORIC LOW",
-        "flyerItemName": "carottes, oignons, betteraves ou rutabagas | carrots, onions, beets or rutabagas",
+        "savingsPct": 21,
+        "radarTag": "FLYER DEAL",
+        "flyerItemName": "CAROTTES OU OIGNONS JAUNES DÉLICES DU MARCHÉ, SAC DE 3 LB",
         "onFlyer": true
       }
     },
@@ -736,16 +736,16 @@
     ]
   },
   "mealTemplates": {
-    "weeklyTheme": "Boustan-Inspired Citrus & Herb Week — Malagasy Chili & Crispy Grelots (Super C flyer highlights: rôti de longe de porc bout de côtes | pork loin roast, rib end, croquettes de poulet, thon pâle entier Unico)",
-    "produceRotationNote": "Feature ribboned carrots, crisp cucumber coins, and tangy lime-scented pico.",
-    "fruitRotationNote": "Alternate frozen blueberries in breakfast bowls and sliced banana in skyr.",
+    "weeklyTheme": "St-Laurent Pantry Saver Week — Smoky Paprika & Fresh Tomato Zest (Maxi flyer highlights: demi-longe de porc, POULET ENTIER, FRAIS, THON AROMATISÉ OU ÉMIETTÉ CLOVER LEAF, 85/170 G)",
+    "produceRotationNote": "Balance crisp cabbage crunch with grated carrot and cool cucumber.",
+    "fruitRotationNote": "Keep frozen mixed berries ready for quick morning thawing and banana for energy.",
     "meals": [
       {
         "id": "breakfast",
         "slot": "Breakfast",
         "title": "Eggs & Crispy Grelot Potatoes",
         "cookingMethod": "Non-stick skillet scramble + air-fried crispy potatoes + berries",
-        "seasoningTwist": "Fresh chives, parsley, crushed red pepper, and black pepper",
+        "seasoningTwist": "Dill, sea salt, garlic granules, and charred green onion",
         "swappable": false,
         "baseIngredients": [
           "whole_egg",
@@ -761,7 +761,7 @@
         "slot": "Lunch",
         "title": "Seared Protein & Jasmine Rice Bowl",
         "cookingMethod": "Pan-seared or air-fried over steamed rice with crunchy slaw",
-        "seasoningTwist": "Lebanese 7-spice, lemon zest, dried mint, and roasted garlic powder",
+        "seasoningTwist": "Za'atar-inspired thyme, sesame-free sumac, coriander, and lime juice",
         "swappable": true,
         "baseIngredients": [
           "ground_chicken",
@@ -780,7 +780,7 @@
         "slot": "Dinner",
         "title": "Braised Protein & White Beans",
         "cookingMethod": "Trimmed meat braised slowly in diced tomatoes, ginger, garlic, onion, and broth, topped with 0% skyr dollop",
-        "seasoningTwist": "Malagasy ginger-scallion base, crushed tomatoes, bay leaf, and white pepper",
+        "seasoningTwist": "Roasted garlic, ginger, smoked paprika, and tangy diced tomato reduction",
         "swappable": true,
         "baseIngredients": [
           "pork_loin_lean",
@@ -796,7 +796,7 @@
         "slot": "Snack",
         "title": "0% Skyr & Whey Fruit Bowl",
         "cookingMethod": "Whipped cold 0% skyr with whey isolate and fresh/thawed fruit",
-        "seasoningTwist": "Ground cardamom and unsweetened cocoa powder",
+        "seasoningTwist": "Nutmeg, cinnamon, and lemon zest",
         "swappable": false,
         "baseIngredients": [
           "skyr_0",
@@ -816,7 +816,7 @@
       "startMinute": 0,
       "durationMinutes": 40,
       "timerSeconds": 2400,
-      "parallelNote": "Start rice cooker first; simmer pork with bay leaf, grated ginger, garlic, diced tomatoes, and white beans.",
+      "parallelNote": "Load rice cooker; dry-brown pork cubes and braise slowly in tomatoes, ginger, garlic, and beans.",
       "zeroOilNote": ""
     },
     {
@@ -827,7 +827,7 @@
       "startMinute": 5,
       "durationMinutes": 22,
       "timerSeconds": 1320,
-      "parallelNote": "Air-fry seasoned grelot potatoes at 200C in a single layer until golden and crisp.",
+      "parallelNote": "Season potatoes with smoked paprika and roast in the air fryer until fork-tender.",
       "zeroOilNote": ""
     },
     {
@@ -838,7 +838,7 @@
       "startMinute": 10,
       "durationMinutes": 12,
       "timerSeconds": 720,
-      "parallelNote": "Dry-sear lunch protein with Lebanese 7-spice and a splash of lemon-infused broth.",
+      "parallelNote": "Cook ground chicken in a hot non-stick skillet with coriander and broth splash.",
       "zeroOilNote": ""
     },
     {
@@ -849,7 +849,7 @@
       "startMinute": 18,
       "durationMinutes": 15,
       "timerSeconds": 900,
-      "parallelNote": "Julienne carrots, shred cabbage finely, and toss fresh tomato-onion lasary with lime juice.",
+      "parallelNote": "Prep raw crunch veggies, dice tomatoes/onion/lime for pico de gallo, and mix grated cucumber with 0% yogurt, garlic, and lemon for tzatziki.",
       "zeroOilNote": ""
     },
     {
@@ -860,433 +860,433 @@
       "startMinute": 35,
       "durationMinutes": 15,
       "timerSeconds": 900,
-      "parallelNote": "Cool hot meals briefly before sealing Days 1-4 fridge tubs and Day 5+ freezer packs.",
+      "parallelNote": "Label Days 1-4 for fridge and Day 5+ for freezer; stage Day 5 pack for 24h thaw.",
       "zeroOilNote": ""
     }
   ],
   "weeklyFlyerCatalog": {
     "Maxi": [
       {
-        "name": "YOGOURT GREC LIBERTÉ, 650/750 G",
+        "name": "YOGOURT ACTIVIA 12X100 G OU GREC OÎKOS, 650/750 G",
         "category": "Dairy/Eggs",
-        "priceCad": 7.0,
-        "priceText": "$7.00",
-        "validTo": "2026-11-25"
+        "priceCad": 6.55,
+        "priceText": "$6.55",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "ÉPAULE DE PORC PICNIC ENTIÈRE FRAÎCHE, EMBALLAGE SOUS-VIDE",
+        "name": "THON AROMATISÉ OU ÉMIETTÉ CLOVER LEAF, 85/170 G",
+        "category": "Meat",
+        "priceCad": 1.0,
+        "priceText": "$1.00",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "demi-longe de porc",
         "category": "Meat",
         "priceCad": 1.99,
-        "priceText": "$1.99 lb",
-        "validTo": "2026-11-25"
+        "priceText": "$1.99 /lb",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "SURIMI 227 G OU CREVETTES CRUES 51-70/LB OU CUITES 61-90/LB 160 G SEAQUEST*, SAUMON FUMÉ STEELHEAD D",
+        "name": "PORC HACHÉ MI-MAIGRE, FORMAT CLUB",
         "category": "Meat",
-        "priceCad": 3.79,
-        "priceText": "$3.79",
-        "validTo": "2026-11-25"
+        "priceCad": 2.44,
+        "priceText": "$2.44 lb",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "BŒUF HACHÉ MAIGRE",
+        "name": "POULET ENTIER, FRAIS",
         "category": "Meat",
-        "priceCad": 5.44,
-        "priceText": "$5.44 /lb",
-        "validTo": "2026-11-25"
+        "priceCad": 2.44,
+        "priceText": "$2.44 /lb",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "Thon Rio Mare",
+        "name": "BOUCHÉES NAAN PC, 200 G OU TOFU FONTAINE SANTÉ, 400 G",
         "category": "Meat",
-        "priceCad": 5.77,
-        "priceText": "$5.77",
-        "validTo": "2026-11-25"
+        "priceCad": 3.0,
+        "priceText": "$3.00",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "POITRINES DE POULET",
+        "name": "HAUTS DE CUISSE DE POULET FORMAT CLUB, FRAIS | CHICKEN THIGHS",
         "category": "Meat",
-        "priceCad": 6.49,
-        "priceText": "$6.49 /lb",
-        "validTo": "2026-11-25"
+        "priceCad": 3.49,
+        "priceText": "$3.49 /lb",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "TOFU UNISOYA | TOFU, 1,25 KG",
+        "name": "SALADE DE THON RIO MARE OU BOL DE SAUMON SAUVAGE GOLD SEAL, 160 G",
         "category": "Meat",
-        "priceCad": 6.5,
-        "priceText": "$6.50",
-        "validTo": "2026-11-25"
+        "priceCad": 4.0,
+        "priceText": "$4.00",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "tartare 130 g, pastrami 100 g ou saumon fumé miel et poivre ou doublement fumé 140 g Jonathan Garnie",
+        "name": "FILET DE POISSON SEAQUEST® CERTAINES VARIÉTÉS, 400 G, VIANDE DE CREVETTES SAUVAGES D'ARGENTINE MARIN",
+        "category": "Meat",
+        "priceCad": 6.88,
+        "priceText": "$6.88",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "FLANC DE PORC OLYMEL désossé, découenné | BONELESS SKINLESS PORK BELLY",
+        "category": "Meat",
+        "priceCad": 7.88,
+        "priceText": "$7.88 /lb",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "CÔTELETTES DE LONGE DE PORC MARINÉES MARCANGELO, 380 G | MARINATED PORK CHOPS",
+        "category": "Meat",
+        "priceCad": 8.99,
+        "priceText": "$8.99",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "SAUMON FUMÉ OU TARTARE DE SAUMON JONATHAN GARNIER | SMOKE SALMON OR TARTARE, 100-140 G",
         "category": "Meat",
         "priceCad": 9.0,
         "priceText": "$9.00",
-        "validTo": "2026-11-25"
+        "validTo": "2026-12-02"
       },
       {
-        "name": "JARRET DE PORC OSSO BUCO | OSSO BUCO PORK SHANK, 810 G",
-        "category": "Meat",
-        "priceCad": 11.0,
-        "priceText": "$11.00",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "BÂTONNETS DE FROMAGE MOZZARRELLA OU CÔTES DE DOS DE PORC ST-HUBERT, 510/680 G",
+        "name": "AILES DE POULET SANS NOM, 908 G",
         "category": "Meat",
         "priceCad": 13.0,
         "priceText": "$13.00",
-        "validTo": "2026-11-25"
+        "validTo": "2026-12-02"
       },
       {
-        "name": "HAUTS DE CUISSE DE POULET MAPLE LEAF PRIME | CHICKEN THIGHS, JUSQU'À 843 G",
+        "name": "rôtí de bas de palette de bœuf déossé",
         "category": "Meat",
-        "priceCad": 14.0,
-        "priceText": "$14.00",
-        "validTo": "2026-11-25"
+        "priceCad": 14.88,
+        "priceText": "$14.88 /lb",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "RIZ BISTRO EXPRESS BEN'S ORIGINAL, 240/250 G",
+        "name": "FILET DE SAUMON COHO DÉCONGELÉ | COHO SALMON FILLET, 445 G",
+        "category": "Meat",
+        "priceCad": 18.0,
+        "priceText": "$18.00",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "FÈVES GERMÉES | BEAN SPROUTS, 370 G",
         "category": "Pantry/Canned",
-        "priceCad": 2.5,
-        "priceText": "$2.50",
-        "validTo": "2026-11-25"
+        "priceCad": 2.88,
+        "priceText": "$2.88",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "FLOCONS D'AVOINE OU GRUAU RAPIDE SANS NOM®, 900 G/1 KG",
+        "name": "RIZ AU JASMIN TASTIE | JASMINE RICE, 6,8 KG",
         "category": "Pantry/Canned",
-        "priceCad": 3.0,
-        "priceText": "$3.00",
-        "validTo": "2026-11-25"
+        "priceCad": 10.0,
+        "priceText": "$10.00",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "RIZ BASMATI QUALITY, 3,63 KG",
+        "name": "RIZ BASMATI TILDA | BASMATI RICE, 4,54 KG",
         "category": "Pantry/Canned",
-        "priceCad": 9.99,
-        "priceText": "$9.99",
-        "validTo": "2026-11-25"
+        "priceCad": 12.99,
+        "priceText": "$12.99",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "CHOU VERT",
+        "name": "RIZ BASMATI TILDA, 4,54 KG",
+        "category": "Pantry/Canned",
+        "priceCad": 12.99,
+        "priceText": "$12.99",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "CHOU VERT | GREEN CABBAGE",
         "category": "Produce",
         "priceCad": 0.75,
         "priceText": "$0.75 /lb",
-        "validTo": "2026-11-25"
+        "validTo": "2026-12-02"
       },
       {
-        "name": "CAROTTES OU OIGNONS JAUNES DÉLICES DU MARCHÉ, SAC DE 3 LB",
+        "name": "FÈVES CLARK, 398 ML",
         "category": "Produce",
-        "priceCad": 2.0,
-        "priceText": "$2.00",
-        "validTo": "2026-11-25"
+        "priceCad": 1.33,
+        "priceText": "$1.33",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "COURONNE DE BROCOLI | BROCCOLI CROWNS",
+        "name": "SAUCE ST-HUBERT 398 ML OU LÉGUMINEUSES 540 ML OU TOMATES 796 ML UNICO",
         "category": "Produce",
-        "priceCad": 2.79,
-        "priceText": "$2.79",
-        "validTo": "2026-11-25"
+        "priceCad": 1.66,
+        "priceText": "$1.66",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "POIVRONS DOUX ROUGES, ORANGE OU JAUNES",
+        "name": "CONCOMBRES ANGLAIS",
         "category": "Produce",
-        "priceCad": 2.88,
-        "priceText": "$2.88 /lb",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "TOMATES SUR VIGNE | TOMATOES ON THE VINE",
-        "category": "Produce",
-        "priceCad": 2.99,
-        "priceText": "$2.99 /lb",
-        "validTo": "2026-11-25"
+        "priceCad": 1.99,
+        "priceText": "$1.99",
+        "validTo": "2026-12-02"
       },
       {
         "name": "MINI CONCOMBRES DÉLICES DU MARCHÉ, 6 UN.",
         "category": "Produce",
+        "priceCad": 1.99,
+        "priceText": "$1.99",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "COURONNE DE BROCOLI | BROCCOLI CROWNS",
+        "category": "Produce",
+        "priceCad": 2.49,
+        "priceText": "$2.49",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "POMMES DE TERRES JAUNES LA GABRIELLE OU ROUGES LA RAPHAËLLE",
+        "category": "Produce",
+        "priceCad": 2.99,
+        "priceText": "$2.99",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "CAROTTES OU OIGNONS JAUNES DÉLICES DU MARCHÉ, SAC DE 3 LB",
+        "category": "Produce",
         "priceCad": 3.0,
         "priceText": "$3.00",
-        "validTo": "2026-11-25"
+        "validTo": "2026-12-02"
       },
       {
-        "name": "POMMES HONEYCRISP | HONEYCRISP APPLES",
+        "name": "tomates sur vigne produit du Canada, ou du Mexique, catégorie no 1",
         "category": "Produce",
-        "priceCad": 3.0,
-        "priceText": "$3.00 /lb",
-        "validTo": "2026-11-25"
+        "priceCad": 3.44,
+        "priceText": "$3.44 /lb",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "TOMATES BEEFSTEAK SAVOURA",
+        "name": "FRITES, GALETTES DE POMMES DE TERRE OU RONDELLES D'OIGNON LES FERMES CAVENDISH, 400-750 G",
         "category": "Produce",
-        "priceCad": 3.49,
-        "priceText": "$3.49 lb",
-        "validTo": "2026-11-25"
+        "priceCad": 3.5,
+        "priceText": "$3.50",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "FÈVES, POIS OU LENTILLES MENU BLEU PC 900 G OU COUSCOUS ZINDA, 907 G",
+        "name": "POMMES DE TERRE ROUGES, JAUNE OU RUSSET DÉLICES DU MARCHÉ, SAC DE 10 LB",
         "category": "Produce",
-        "priceCad": 3.79,
-        "priceText": "$3.79",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "CHOUX DE BRUXELLES | HARICOTS FRANÇAIS, 400 G",
-        "category": "Produce",
-        "priceCad": 3.99,
-        "priceText": "$3.99",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "TOMATES CERISES SUR VIGNE FLAVOR BOMBS, 341 G",
-        "category": "Produce",
-        "priceCad": 3.99,
-        "priceText": "$3.99",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "CHOU-FLEUR OU ÉCHALOTES, 750 G",
-        "category": "Produce",
-        "priceCad": 4.99,
-        "priceText": "$4.99",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "POMMES MCINTOSH, CORTLAND, EMPIRE OU SPARTAN DÉLICES DU MARCHÉ, SAC DE 4 LB",
-        "category": "Produce",
-        "priceCad": 5.0,
-        "priceText": "$5.00",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "TOMATES EN GRAPPES BALANCIA PC, 454 g",
-        "category": "Produce",
-        "priceCad": 5.0,
-        "priceText": "$5.00",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "SANDWICHS OU BOUCHÉES AUX ŒUFS À DÉJEUNER SCHNEIDERS, 204-288 G",
-        "category": "Produce",
-        "priceCad": 5.5,
-        "priceText": "$5.50",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "RONDELLES D'OIGNON OU QUARTIERS DE POMMES DE TERRE LES FERMES CAVENDISH, 1-2,25 KG",
-        "category": "Produce",
-        "priceCad": 8.0,
-        "priceText": "$8.00",
-        "validTo": "2026-11-25"
+        "priceCad": 4.0,
+        "priceText": "$4.00",
+        "validTo": "2026-12-02"
       }
     ],
     "Super C": [
       {
-        "name": "yogourt grec Oîkos Danone",
+        "name": "fromage cottage Selection | Selection cottage cheese",
         "category": "Dairy/Eggs",
-        "priceCad": 3.47,
-        "priceText": "$3.47",
-        "validTo": "2026-11-25"
+        "priceCad": 3.97,
+        "priceText": "$3.97",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "yogourt grec Olympic | Olympic greek yogurt",
+        "name": "yogourt grec Liberté | Liberté greek yogurt",
         "category": "Dairy/Eggs",
-        "priceCad": 4.96,
-        "priceText": "$4.96",
-        "validTo": "2026-11-25"
+        "priceCad": 6.97,
+        "priceText": "$6.97",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "thon pâle entier Unico",
+        "name": "thon pâle listao Clover Leaf | Clover Leaf skipjack light tuna",
         "category": "Meat",
-        "priceCad": 2.29,
-        "priceText": "$2.29",
-        "validTo": "2026-11-25"
+        "priceCad": 1.69,
+        "priceText": "$1.69",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "rôti de longe de porc bout de côtes | pork loin roast, rib end",
+        "name": "tofu mou biologique Soyganic | Soyganic organic soft tofu",
         "category": "Meat",
-        "priceCad": 2.95,
-        "priceText": "$2.95 /lb",
-        "validTo": "2026-11-25"
+        "priceCad": 1.99,
+        "priceText": "$1.99",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "filets de porc frais | fresh pork tenderloins",
+        "name": "JARRETS DE PORC | FROZEN PORK HOCKS",
         "category": "Meat",
-        "priceCad": 3.72,
-        "priceText": "$3.72 lb",
-        "validTo": "2026-11-25"
+        "priceCad": 2.59,
+        "priceText": "$2.59 /lb",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "pilons de poulet frais halal, format écono | fresh halal chicken drumsticks, econo pack",
+        "name": "poulet entier Exceldor | Exceldor whole chicken",
         "category": "Meat",
-        "priceCad": 3.83,
-        "priceText": "$3.83 /lb - 8.44$/kg",
-        "validTo": "2026-11-25"
+        "priceCad": 2.85,
+        "priceText": "$2.85 /lb",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "ailles de poulet frais",
+        "name": "porc haché extra-maigre | extra lean ground pork",
         "category": "Meat",
-        "priceCad": 4.44,
-        "priceText": "$4.44 /lb",
-        "validTo": "2026-11-25"
+        "priceCad": 2.94,
+        "priceText": "$2.94",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "poitrine de poulet marinée Irresistible | Irrésistible marinated chicken breast",
+        "name": "tofu biologique Soykei biologique | Soykei organic tofu",
         "category": "Meat",
-        "priceCad": 4.92,
-        "priceText": "$4.92",
-        "validTo": "2026-11-25"
+        "priceCad": 3.49,
+        "priceText": "prix membre $3.49",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "dinde ou poulet haché Mieux-Être | Life Smart ground turkey or chicken",
+        "name": "tofu Fontaine Santé | Fontaine Santé tofu",
         "category": "Meat",
-        "priceCad": 4.98,
-        "priceText": "$4.98",
-        "validTo": "2026-11-25"
+        "priceCad": 3.69,
+        "priceText": "$3.69",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "ciabatta au boeuf | beef ciabatta",
+        "name": "demi-longe de porc frais désossée | fresh boneless half pork loin roast, rib end",
         "category": "Meat",
-        "priceCad": 6.99,
-        "priceText": "$6.99 +TX",
-        "validTo": "2026-11-25"
+        "priceCad": 3.99,
+        "priceText": "$3.99 lb",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "tofu Unisoya | Unisoya tofu",
+        "name": "tartinade de saumon fumé Irrésistible | Irrésistible smoked salmon spread",
         "category": "Meat",
-        "priceCad": 7.99,
-        "priceText": "$7.99",
-        "validTo": "2026-11-25"
+        "priceCad": 3.99,
+        "priceText": "$3.99",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "filet de saumon Atlantique ou Coho frais | Fresh Atlantic Salmon Filet",
+        "name": "tofu fumé Sunrise | Sunrise smoked tofu",
         "category": "Meat",
-        "priceCad": 8.88,
-        "priceText": "$8.88 /lb",
-        "validTo": "2026-11-25"
+        "priceCad": 4.49,
+        "priceText": "$4.49",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "boulettes de porc à l'italienne Marc Angelo | Marc Angelo italian style pork meatballs",
+        "name": "RÔTI DE POITRINE DE POULET TRANCHÉ ZABIHA HALAL | ZABIHA HALAL SLICED CHICKEN BREAST ROAST",
         "category": "Meat",
-        "priceCad": 8.94,
-        "priceText": "$8.94",
-        "validTo": "2026-11-25"
+        "priceCad": 4.99,
+        "priceText": "$4.99",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "ailes de poulet Selection | Selection frozen chicken wings",
+        "name": "thon pâle Unico | Unico light tuna",
         "category": "Meat",
-        "priceCad": 8.98,
-        "priceText": "$8.98",
-        "validTo": "2026-11-25"
+        "priceCad": 4.99,
+        "priceText": "$4.99",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "tofu extra ferme Sunrise | Sunrise extra firm tofu",
+        "name": "côtes de dos de porc frais | fresh pork back ribs, econo pack",
+        "category": "Meat",
+        "priceCad": 5.99,
+        "priceText": "$5.99 /lb",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "fondue de porc, de poulet ou de veau | pork, chicken or veal fondue",
+        "category": "Meat",
+        "priceCad": 5.99,
+        "priceText": "$5.99",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "porc, poulet ou veau pour fondue Selection | selection pork, chicken or veal for fondue",
+        "category": "Meat",
+        "priceCad": 5.99,
+        "priceText": "$5.99",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "POITRINES DE POULET FRAIS DÉSOSSÉES | FRESH BONELESS CHICKEN BREASTS, ECONO PACK",
+        "category": "Meat",
+        "priceCad": 7.49,
+        "priceText": "$7.49 /lb - 16.51$/kg",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "boeuf haché mi-maigre | medium ground beef, econo pack",
+        "category": "Meat",
+        "priceCad": 7.49,
+        "priceText": "$7.49 /lb",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "rôti de palette de boeuf halal désossé | boneless halal beef blade roast",
+        "category": "Meat",
+        "priceCad": 7.72,
+        "priceText": "$7.72 /lb",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "fondue de boeuf Selection | Selection beef fondue",
         "category": "Meat",
         "priceCad": 8.99,
         "priceText": "$8.99",
-        "validTo": "2026-11-25"
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "tofu Epik | Epik tofu",
+        "category": "Meat",
+        "priceCad": 8.99,
+        "priceText": "$8.99",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "saumon Atlantique fumé Irrésistible | Irrésistible frozen smoked Atlantic salmon",
+        "category": "Meat",
+        "priceCad": 9.99,
+        "priceText": "$9.99",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "saumon coho fumé Nanuk | Nanuk frozen smoked coho salmon",
+        "category": "Meat",
+        "priceCad": 9.99,
+        "priceText": "$9.99",
+        "validTo": "2026-12-02"
+      },
+      {
+        "name": "poulet cuit et chaud | hot cooked chicken",
+        "category": "Meat",
+        "priceCad": 10.99,
+        "priceText": "$10.99 +TX",
+        "validTo": "2026-12-02"
       },
       {
         "name": "burger végé Gusta | Gusta veggie burger",
         "category": "Meat",
-        "priceCad": 9.99,
-        "priceText": "$9.99",
-        "validTo": "2026-11-25"
+        "priceCad": 12.99,
+        "priceText": "$12.99",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "poke bol au saumon fumé | smoked salmon poké bowl",
+        "name": "SAUMON À POKÉ IRRÉSISTIBLE | IRRÉSISTIBLE FROZEN SALMON POKE",
         "category": "Meat",
-        "priceCad": 9.99,
-        "priceText": "$9.99 +TX",
-        "validTo": "2026-11-25"
+        "priceCad": 19.99,
+        "priceText": "$19.99",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "salade césar au poulet | chicken caesar salad",
+        "name": "bifteck ou rôti de filet mignon | beef tenderloin steak or roast",
         "category": "Meat",
-        "priceCad": 9.99,
-        "priceText": "$9.99",
-        "validTo": "2026-11-25"
+        "priceCad": 19.99,
+        "priceText": "$19.99 /lb",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "croquettes de poulet",
+        "name": "saumon coho fumé à froid Irrésistible | Irrsésistible frozen cold smoked coho salmon",
         "category": "Meat",
-        "priceCad": 10.0,
-        "priceText": "$10.00",
-        "validTo": "2026-11-25"
+        "priceCad": 19.99,
+        "priceText": "$19.99",
+        "validTo": "2026-12-02"
       },
       {
-        "name": "filets de poisson nature",
-        "category": "Meat",
-        "priceCad": 10.0,
-        "priceText": "$10.00",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "lanières de poulet",
-        "category": "Meat",
-        "priceCad": 10.0,
-        "priceText": "$10.00",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "tournedos de poulet Selection",
-        "category": "Meat",
-        "priceCad": 10.0,
-        "priceText": "$10.00",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "poulet général tao façon tempura Asian Inspirations",
-        "category": "Meat",
-        "priceCad": 12.0,
-        "priceText": "$12.00",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "saumon fumé",
-        "category": "Meat",
-        "priceCad": 13.0,
-        "priceText": "$13.00",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "lanières de poitrine de poulet grillée Marc Angelo",
-        "category": "Meat",
-        "priceCad": 15.0,
-        "priceText": "$15.00",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "ailes de poulet Selection",
-        "category": "Meat",
-        "priceCad": 20.0,
-        "priceText": "$20.00",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "riz Bistro Express Ben's Original | Ben's Original Bistro Express rice",
+        "name": "pâte de tomate Primo | Primo tomato paste",
         "category": "Pantry/Canned",
-        "priceCad": 2.49,
-        "priceText": "$2.49",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "soupe aux tomates Aylmer",
-        "category": "Produce",
-        "priceCad": 0.62,
-        "priceText": "$0.62",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "carottes, oignons, betteraves ou rutabagas | carrots, onions, beets or rutabagas",
-        "category": "Produce",
-        "priceCad": 1.44,
-        "priceText": "$1.44",
-        "validTo": "2026-11-25"
-      },
-      {
-        "name": "tomates en dés Selection",
-        "category": "Produce",
-        "priceCad": 1.75,
-        "priceText": "$1.75",
-        "validTo": "2026-11-25"
+        "priceCad": 1.29,
+        "priceText": "$1.29",
+        "validTo": "2026-12-02"
       }
     ]
   }

@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
   "windowWeeks": 52,
-  "updatedAt": "2026-11-22T09:53:26Z",
+  "updatedAt": "2026-11-26T21:59:56Z",
   "byPostalCode": {
     "H1W": {
       "pork_shoulder": [
@@ -48,6 +48,13 @@
           "cadPer100g": 2.1867,
           "itemName": "poitrine de poulet marinée Irresistible | Irrésistible marinated chicken breast",
           "subcategory": "chicken"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Super C",
+          "cadPer100g": 1.6513,
+          "itemName": "POITRINES DE POULET FRAIS DÉSOSSÉES | FRESH BONELESS CHICKEN BREASTS, ECONO PACK",
+          "subcategory": "chicken"
         }
       ],
       "tuna_water": [
@@ -78,6 +85,20 @@
           "cadPer100g": 1.1566,
           "itemName": "thon pâle entier Unico",
           "subcategory": "canned_fish"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Maxi",
+          "cadPer100g": 0.5882,
+          "itemName": "THON AROMATISÉ OU ÉMIETTÉ CLOVER LEAF, 85/170 G",
+          "subcategory": "canned_fish"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Super C",
+          "cadPer100g": 0.9941,
+          "itemName": "thon pâle listao Clover Leaf | Clover Leaf skipjack light tuna",
+          "subcategory": "canned_fish"
         }
       ],
       "rice_dry": [
@@ -93,6 +114,20 @@
           "store": "Maxi",
           "cadPer100g": 0.2752,
           "itemName": "RIZ BASMATI QUALITY, 3,63 KG",
+          "subcategory": "rice"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Maxi",
+          "cadPer100g": 0.1471,
+          "itemName": "RIZ AU JASMIN TASTIE | JASMINE RICE, 6,8 KG",
+          "subcategory": "rice"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Super C",
+          "cadPer100g": 0.1998,
+          "itemName": "riz jasmin Lucky Koi | Lucky Koi jasmine rice",
           "subcategory": "rice"
         }
       ],
@@ -110,6 +145,20 @@
           "cadPer100g": 0.1653,
           "itemName": "CHOU VERT",
           "subcategory": "cabbage"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Maxi",
+          "cadPer100g": 0.1653,
+          "itemName": "CHOU VERT | GREEN CABBAGE",
+          "subcategory": "cabbage"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Super C",
+          "cadPer100g": 0.2183,
+          "itemName": "chou vert moyen, plat, savoie ou rouge | cabbage or rutabagas",
+          "subcategory": "cabbage"
         }
       ],
       "cucumber": [
@@ -124,6 +173,13 @@
           "observedAt": "2026-11-22",
           "store": "Maxi",
           "cadPer100g": 0.5,
+          "itemName": "MINI CONCOMBRES DÉLICES DU MARCHÉ, 6 UN.",
+          "subcategory": "cucumbers"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Maxi",
+          "cadPer100g": 0.3317,
           "itemName": "MINI CONCOMBRES DÉLICES DU MARCHÉ, 6 UN.",
           "subcategory": "cucumbers"
         }
@@ -156,6 +212,20 @@
           "cadPer100g": 1.0274,
           "itemName": "tomates cerises | tomatoes",
           "subcategory": "tomatoes"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Maxi",
+          "cadPer100g": 0.7584,
+          "itemName": "tomates sur vigne produit du Canada, ou du Mexique, catégorie no 1",
+          "subcategory": "tomatoes"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Super C",
+          "cadPer100g": 0.4145,
+          "itemName": "TOMATES ROUGES DE SERRE | GREENHOUSE TOMATOES",
+          "subcategory": "tomatoes"
         }
       ],
       "carrots": [
@@ -186,6 +256,13 @@
           "cadPer100g": 0.0635,
           "itemName": "carottes, oignons, betteraves ou rutabagas | carrots, onions, beets or rutabagas",
           "subcategory": "carrots"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Maxi",
+          "cadPer100g": 0.2205,
+          "itemName": "CAROTTES OU OIGNONS JAUNES DÉLICES DU MARCHÉ, SAC DE 3 LB",
+          "subcategory": "carrots"
         }
       ],
       "white_beans_cnd": [
@@ -201,6 +278,20 @@
           "store": "Maxi",
           "cadPer100g": 0.4211,
           "itemName": "FÈVES, POIS OU LENTILLES MENU BLEU PC 900 G OU COUSCOUS ZINDA, 907 G",
+          "subcategory": "white_beans"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Maxi",
+          "cadPer100g": 0.3342,
+          "itemName": "FÈVES CLARK, 398 ML",
+          "subcategory": "white_beans"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Super C",
+          "cadPer100g": 0.3086,
+          "itemName": "LÉGUMINEUSES PRIMO | PRIMO LEGUMES",
           "subcategory": "white_beans"
         }
       ],
@@ -218,6 +309,20 @@
           "cadPer100g": 0.6504,
           "itemName": "rôti de longe de porc bout de côtes | pork loin roast, rib end",
           "subcategory": "pork"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Maxi",
+          "cadPer100g": 0.4387,
+          "itemName": "demi-longe de porc",
+          "subcategory": "pork"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Super C",
+          "cadPer100g": 0.294,
+          "itemName": "porc haché extra-maigre | extra lean ground pork",
+          "subcategory": "pork"
         }
       ],
       "potatoes_raw": [
@@ -230,6 +335,20 @@
         },
         {
           "observedAt": "2026-11-22",
+          "store": "Super C",
+          "cadPer100g": 0.088,
+          "itemName": "pommes de terre Russet | Russet potatoes",
+          "subcategory": "potatoes"
+        },
+        {
+          "observedAt": "2026-11-26",
+          "store": "Maxi",
+          "cadPer100g": 0.0882,
+          "itemName": "POMMES DE TERRE ROUGES, JAUNE OU RUSSET DÉLICES DU MARCHÉ, SAC DE 10 LB",
+          "subcategory": "potatoes"
+        },
+        {
+          "observedAt": "2026-11-26",
           "store": "Super C",
           "cadPer100g": 0.088,
           "itemName": "pommes de terre Russet | Russet potatoes",
@@ -250,6 +369,24 @@
           "cadPer100g": 0.2198,
           "itemName": "tomates en dés Selection",
           "subcategory": "tomatoes"
+        }
+      ],
+      "egg_whites": [
+        {
+          "observedAt": "2026-11-26",
+          "store": "Maxi",
+          "cadPer100g": 0.8,
+          "itemName": "BLANCS D'OEUFS PC MD MENU BLEU, 1 KG",
+          "subcategory": "eggs"
+        }
+      ],
+      "whole_egg": [
+        {
+          "observedAt": "2026-11-26",
+          "store": "Super C",
+          "cadPer100g": 0.5833,
+          "itemName": "oeufs blancs Selection | Selection white eggs",
+          "subcategory": "eggs"
         }
       ]
     }
